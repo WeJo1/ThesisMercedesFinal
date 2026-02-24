@@ -1,5 +1,4 @@
 import argparse
-import os
 from pathlib import Path
 
 import lpips
@@ -13,11 +12,10 @@ from skimage.metrics import hausdorff_distance, structural_similarity
 from tqdm import tqdm
 
 SUPPORTED_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff")
-LETTERBOX_PAD_COLOR = (127, 127, 127)  # Neutralgrau reduziert harte Kontraste im Randbereich.
+LETTERBOX_PAD_COLOR = (127, 127, 127)
 
 
 def load_image(path):
-    """Lade ein Bild robust als RGB-Array in float32 [0,1] und ignoriere DPI."""
     with Image.open(path) as img:
         rgb = img.convert("RGB")
         arr = np.asarray(rgb, dtype=np.float32) / 255.0
@@ -25,20 +23,11 @@ def load_image(path):
 
 
 def np_to_pil_uint8(img):
-    """Konvertiere ein Float-Bild [0,1] nach PIL-Image (uint8)."""
     clipped = np.clip(img, 0.0, 1.0)
     return Image.fromarray((clipped * 255.0).astype(np.uint8), mode="RGB")
 
 
 def normalize_pair(ref_img, gen_img, mode="letterbox", pad_color=LETTERBOX_PAD_COLOR):
-    """
-    Normalisiere ein Bildpaar auf identische Pixelgröße.
-
-    - ref_norm bleibt exakt in Referenzgröße.
-    - gen_norm erhält exakt Breite/Höhe der Referenz.
-    - mode='letterbox': Seitenverhältnis beibehalten + Padding.
-    - mode='stretch': Direktes Resize ohne Seitenverhältnis.
-    """
     if mode not in {"letterbox", "stretch"}:
         raise ValueError("mode muss 'letterbox' oder 'stretch' sein")
 
@@ -69,7 +58,6 @@ def normalize_pair(ref_img, gen_img, mode="letterbox", pad_color=LETTERBOX_PAD_C
 
 
 def save_normalized_pair(ref_norm, gen_norm, basename, out_dir):
-    """Speichere normalisierte Bilder mit eindeutigen Dateinamen."""
     out_dir_path = Path(out_dir)
     out_dir_path.mkdir(parents=True, exist_ok=True)
 
@@ -83,15 +71,14 @@ def save_normalized_pair(ref_norm, gen_norm, basename, out_dir):
 
 
 def compute_ssim(ref, gen):
-    """Berechne SSIM auf normalisierten RGB-Bildern."""
     try:
-        return float(structural_similarity(ref, gen, data_range=1.0, channel_axis=-1))
+        value = structural_similarity(ref, gen, data_range=1.0, channel_axis=-1)
     except TypeError:
-        return float(structural_similarity(ref, gen, data_range=1.0, multichannel=True))
+        value = structural_similarity(ref, gen, data_range=1.0, multichannel=True)
+    return float(value)
 
 
 def init_lpips_model(net="alex", use_gpu=False):
-    """Initialisiere LPIPS-Modell."""
     model = lpips.LPIPS(net=net)
     if use_gpu and torch.cuda.is_available():
         model = model.cuda()
@@ -100,7 +87,6 @@ def init_lpips_model(net="alex", use_gpu=False):
 
 
 def numpy_to_lpips_tensor(img):
-    """Konvertiere HWC [0,1] nach NCHW [-1,1] für LPIPS."""
     chw = img.transpose(2, 0, 1)
     tensor = torch.from_numpy(chw).float()
     tensor = tensor * 2.0 - 1.0
@@ -108,7 +94,6 @@ def numpy_to_lpips_tensor(img):
 
 
 def compute_lpips(ref, gen, lpips_model, use_gpu=False):
-    """Berechne LPIPS auf normalisierten Bildern."""
     ref_t = numpy_to_lpips_tensor(ref)
     gen_t = numpy_to_lpips_tensor(gen)
 
@@ -123,7 +108,6 @@ def compute_lpips(ref, gen, lpips_model, use_gpu=False):
 
 
 def compute_delta_e(ref, gen):
-    """Berechne mittlere Farbabweichung Delta E (CIEDE2000) auf normalisierten Bildern."""
     ref_lab = color.rgb2lab(ref)
     gen_lab = color.rgb2lab(gen)
     delta_map = color.deltaE_ciede2000(ref_lab, gen_lab)
@@ -131,7 +115,6 @@ def compute_delta_e(ref, gen):
 
 
 def create_foreground_mask(img, min_coverage=0.01):
-    """Erzeuge eine robuste Vordergrundmaske für geometrische Checks."""
     gray = color.rgb2gray(img)
     otsu = threshold_otsu(gray)
 
@@ -147,20 +130,24 @@ def create_foreground_mask(img, min_coverage=0.01):
 
     if coverage_dark <= coverage_light:
         return mask_dark.astype(bool)
+
     return mask_light.astype(bool)
 
 
 def safe_centroid(mask):
-    """Berechne den Schwerpunkt einer Bool-Maske robust."""
     ys, xs = np.where(mask)
     if len(xs) == 0:
         h, w = mask.shape
-        return np.array([h / 2.0, w / 2.0], dtype=np.float32)
-    return np.array([float(np.mean(ys)), float(np.mean(xs))], dtype=np.float32)
+        center_y = h / 2.0
+        center_x = w / 2.0
+        return np.array([center_y, center_x], dtype=np.float32)
+
+    mean_y = float(np.mean(ys))
+    mean_x = float(np.mean(xs))
+    return np.array([mean_y, mean_x], dtype=np.float32)
 
 
 def compute_geometric_metrics(ref, gen):
-    """Berechne geometrische Metriken auf normalisierten Bildern."""
     ref_mask = create_foreground_mask(ref)
     gen_mask = create_foreground_mask(gen)
 
@@ -169,22 +156,37 @@ def compute_geometric_metrics(ref, gen):
     intersection = int(np.sum(ref_mask & gen_mask))
     union = int(np.sum(ref_mask | gen_mask))
 
-    iou = float(intersection / union) if union > 0 else 0.0
-    dice = float((2 * intersection) / (ref_area + gen_area)) if (ref_area + gen_area) > 0 else 0.0
-    area_ratio = float(gen_area / ref_area) if ref_area > 0 else 0.0
+    if union > 0:
+        iou = float(intersection / union)
+    else:
+        iou = 0.0
+
+    if (ref_area + gen_area) > 0:
+        dice = float((2 * intersection) / (ref_area + gen_area))
+    else:
+        dice = 0.0
+
+    if ref_area > 0:
+        area_ratio = float(gen_area / ref_area)
+    else:
+        area_ratio = 0.0
 
     ref_center = safe_centroid(ref_mask)
     gen_center = safe_centroid(gen_mask)
 
     h, w = ref_mask.shape
-    diag = float(np.hypot(h, w)) if (h > 0 and w > 0) else 1.0
+    if h > 0 and w > 0:
+        diag = float(np.hypot(h, w))
+    else:
+        diag = 1.0
+
     centroid_distance_px = float(np.linalg.norm(ref_center - gen_center))
     centroid_distance_norm = float(centroid_distance_px / diag)
 
     hausdorff_px = float(hausdorff_distance(ref_mask, gen_mask))
     hausdorff_norm = float(hausdorff_px / diag)
 
-    return {
+    metrics = {
         "mask_iou": iou,
         "mask_dice": dice,
         "mask_area_ratio": area_ratio,
@@ -193,10 +195,10 @@ def compute_geometric_metrics(ref, gen):
         "hausdorff_px": hausdorff_px,
         "hausdorff_norm": hausdorff_norm,
     }
+    return metrics
 
 
 def evaluate_pair(ref_path, gen_path, lpips_model, mode="letterbox", out_dir="normalized", use_gpu=False):
-    """Evaluiere ein einzelnes Bildpaar inklusive Normalisierung und Export."""
     ref_img = load_image(ref_path)
     gen_img = load_image(gen_path)
 
@@ -225,7 +227,7 @@ def evaluate_pair(ref_path, gen_path, lpips_model, mode="letterbox", out_dir="no
     print(f"  Saved ref_norm     : {ref_norm_path}")
     print(f"  Saved gen_norm     : {gen_norm_path}")
 
-    return {
+    result = {
         "filename": Path(ref_path).name,
         "reference_width": ref_w,
         "reference_height": ref_h,
@@ -237,14 +239,14 @@ def evaluate_pair(ref_path, gen_path, lpips_model, mode="letterbox", out_dir="no
         "ssim": ssim_val,
         "lpips": lpips_val,
         "delta_e_ciede2000": delta_e_val,
-        **geometric,
         "ref_norm_path": ref_norm_path,
         "gen_norm_path": gen_norm_path,
     }
+    result.update(geometric)
+    return result
 
 
 def evaluate_folders(reference_dir, generated_dir, output_csv, lpips_model, mode="letterbox", out_dir="normalized", use_gpu=False):
-    """Evaluiere alle passenden Bildpaare zweier Ordner."""
     ref_dir = Path(reference_dir)
     gen_dir = Path(generated_dir)
 
@@ -253,7 +255,12 @@ def evaluate_folders(reference_dir, generated_dir, output_csv, lpips_model, mode
     if not gen_dir.is_dir():
         raise FileNotFoundError(f"Generated-Ordner existiert nicht: {gen_dir}")
 
-    ref_files = sorted([p for p in ref_dir.iterdir() if p.suffix.lower() in SUPPORTED_EXTENSIONS])
+    ref_files = []
+    for path in ref_dir.iterdir():
+        if path.suffix.lower() in SUPPORTED_EXTENSIONS:
+            ref_files.append(path)
+    ref_files.sort()
+
     if not ref_files:
         raise RuntimeError(f"Keine Bilder im Reference-Ordner gefunden: {ref_dir}")
 
