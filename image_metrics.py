@@ -340,6 +340,18 @@ def convert_metrics_to_percent(ssim_val, lpips_val, delta_e_val):
     }
 
 
+def convert_lpips_to_similarity_percent(lpips_val):
+    if lpips_val is None:
+        return None
+    return float(np.clip((1.0 - lpips_val) * 100.0, 0.0, 100.0))
+
+
+def format_percent(percent_value):
+    if percent_value is None:
+        return "None"
+    return f"{percent_value:.2f}%"
+
+
 def create_foreground_mask(img, min_coverage=0.01):
     gray = color.rgb2gray(img)
     otsu = threshold_otsu(gray)
@@ -477,6 +489,7 @@ def evaluate_pair(
         debug_dir=debug_dir,
         use_gpu=use_gpu,
     )
+    lpips_car_only_similarity_percent = convert_lpips_to_similarity_percent(car_metrics["lpips_car_only"])
 
     print("------------------------------------------------------------")
     print(f"Pair: {basename}")
@@ -492,6 +505,7 @@ def evaluate_pair(
         print(f"  Mask area (%)      : {car_metrics['debug']['mask_area_ratio'] * 100.0:.2f}%")
         print(f"  BBox (car)         : {car_metrics['debug']['bbox']}")
         print(f"  LPIPS car-only     : {car_metrics['lpips_car_only']}")
+        print(f"  LPIPS car-only (%) : {format_percent(lpips_car_only_similarity_percent)}")
     else:
         print("  Car-only           : deaktiviert (nutze Full-Image-Logik)")
     print(f"  Delta E (CIEDE2000): {delta_e_val:.6f}")
@@ -518,6 +532,7 @@ def evaluate_pair(
         "ref_norm_path": ref_norm_path,
         "gen_norm_path": gen_norm_path,
         "lpips_car_only": car_metrics["lpips_car_only"],
+        "lpips_car_only_similarity_percent": lpips_car_only_similarity_percent,
         "ssim_car_only": car_metrics["ssim_car_only"],
         "psnr_car_only": car_metrics["psnr_car_only"],
         "car_mask_area_ratio": car_metrics["debug"]["mask_area_ratio"],
@@ -608,6 +623,7 @@ def evaluate_folders(
                 "delta_e_ciede2000",
                 "delta_e_similarity_percent",
                 "lpips_car_only",
+                "lpips_car_only_similarity_percent",
                 "mask_iou",
                 "mask_dice",
             ]
