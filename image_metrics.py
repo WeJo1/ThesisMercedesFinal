@@ -627,6 +627,7 @@ def parse_args():
     parser.add_argument("--lpips-net", default="alex", choices=["alex", "vgg", "squeeze"], help="Backbone für LPIPS")
     parser.add_argument("--use-gpu", action="store_true", help="Nutze CUDA, falls verfügbar")
     parser.add_argument("--enable-car-only", action="store_true", help="Aktiviere Car-only Metriken (LPIPS/SSIM/PSNR)")
+    parser.add_argument("--car-only", action="store_true", help="Kurzform für --enable-car-only")
     parser.add_argument("--car-mode", default="neutralize_crop", choices=["neutralize_crop", "weighted_lpips"], help="Auto-fokussierte LPIPS-Berechnung")
     parser.add_argument("--mask-source", default="ref", choices=["ref", "gen", "union"], help="Quelle für die Auto-Maske")
     parser.add_argument("--pad-px", type=int, default=20, help="Padding für Car-Crop-BBox")
@@ -642,7 +643,24 @@ def parse_args():
     parser.add_argument("--reference-dir", default="reference", help="Ordner mit Referenzbildern")
     parser.add_argument("--generated-dir", default="generated", help="Ordner mit Generated-Bildern")
 
-    return parser.parse_args()
+    args = parser.parse_args()
+
+    use_car_specific_option = any(
+        [
+            args.car_mode != "neutralize_crop",
+            args.mask_source != "ref",
+            args.pad_px != 20,
+            args.neutral_value != 0.5,
+            args.min_mask_area != 0,
+            args.mask_downsample != "bilinear",
+            args.eps != 1e-8,
+            args.mask_score_threshold != 0.5,
+            args.debug_dir is not None,
+        ]
+    )
+
+    args.enable_car_only = args.enable_car_only or args.car_only or use_car_specific_option
+    return args
 
 
 def main():
@@ -659,6 +677,7 @@ def main():
     lpips_model = init_lpips_model(net=args.lpips_net, use_gpu=args.use_gpu)
     segmenter = None
     if args.enable_car_only:
+        print("[INFO] Car-only wird aktiviert. Einfacher Aufruf: python image_metrics.py --car-only")
         segmenter = build_vehicle_segmenter(use_gpu=args.use_gpu, score_threshold=args.mask_score_threshold)
 
     if args.ref or args.gen:
