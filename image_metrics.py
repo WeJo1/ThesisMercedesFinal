@@ -36,19 +36,14 @@ def np_to_pil_uint8(img):
 
 
 def normalize_pair(ref_img, gen_img, mode="letterbox", pad_color=LETTERBOX_PAD_COLOR):
-    if mode not in {"letterbox", "stretch"}:
-        raise ValueError("mode muss 'letterbox' oder 'stretch' sein")
+    if mode != "letterbox":
+        raise ValueError("mode muss 'letterbox' sein")
 
     ref_h, ref_w = ref_img.shape[:2]
     gen_h, gen_w = gen_img.shape[:2]
 
     ref_norm = ref_img.copy()
     gen_pil = np_to_pil_uint8(gen_img)
-
-    if mode == "stretch":
-        resized = gen_pil.resize((ref_w, ref_h), resample=Image.Resampling.LANCZOS)
-        gen_norm = np.asarray(resized, dtype=np.float32) / 255.0
-        return ref_norm, gen_norm
 
     scale = min(ref_w / gen_w, ref_h / gen_h)
     scaled_w = max(1, int(round(gen_w * scale)))
@@ -621,7 +616,12 @@ def parse_args():
         epilog="Falls skimage fehlt: pip install scikit-image",
     )
 
-    parser.add_argument("--mode", choices=["letterbox", "stretch"], default="letterbox", help="Normalisierungsmodus")
+    parser.add_argument(
+        "--mode",
+        choices=["letterbox"],
+        default="letterbox",
+        help="Normalisierungsmodus",
+    )
     parser.add_argument("--out", default="normalized", help="Output-Ordner für normalisierte Bilder")
     parser.add_argument("--output-csv", default="image_metrics_results.csv", help="CSV-Datei für Metrikergebnisse")
     parser.add_argument("--lpips-net", default="alex", choices=["alex", "vgg", "squeeze"], help="Backbone für LPIPS")
