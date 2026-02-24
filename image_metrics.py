@@ -114,6 +114,18 @@ def compute_delta_e(ref, gen):
     return float(np.mean(delta_map))
 
 
+def convert_metrics_to_percent(ssim_val, lpips_val, delta_e_val):
+    ssim_percent = float(np.clip(ssim_val * 100.0, 0.0, 100.0))
+    lpips_similarity_percent = float(np.clip((1.0 - lpips_val) * 100.0, 0.0, 100.0))
+    delta_e_similarity_percent = float(np.clip(100.0 - delta_e_val, 0.0, 100.0))
+
+    return {
+        "ssim_percent": ssim_percent,
+        "lpips_similarity_percent": lpips_similarity_percent,
+        "delta_e_similarity_percent": delta_e_similarity_percent,
+    }
+
+
 def create_foreground_mask(img, min_coverage=0.01):
     gray = color.rgb2gray(img)
     otsu = threshold_otsu(gray)
@@ -215,6 +227,7 @@ def evaluate_pair(ref_path, gen_path, lpips_model, mode="letterbox", out_dir="no
     lpips_val = compute_lpips(ref_norm, gen_norm, lpips_model, use_gpu=use_gpu)
     delta_e_val = compute_delta_e(ref_norm, gen_norm)
     geometric = compute_geometric_metrics(ref_norm, gen_norm)
+    percent_metrics = convert_metrics_to_percent(ssim_val, lpips_val, delta_e_val)
 
     print("------------------------------------------------------------")
     print(f"Pair: {basename}")
@@ -222,8 +235,11 @@ def evaluate_pair(ref_path, gen_path, lpips_model, mode="letterbox", out_dir="no
     print(f"  Generated original : {gen_w}x{gen_h}")
     print(f"  Normalized sizes   : {norm_w}x{norm_h}")
     print(f"  SSIM               : {ssim_val:.6f}")
+    print(f"  SSIM (%)           : {percent_metrics['ssim_percent']:.2f}%")
     print(f"  LPIPS              : {lpips_val:.6f}")
+    print(f"  LPIPS Similarity % : {percent_metrics['lpips_similarity_percent']:.2f}%")
     print(f"  Delta E (CIEDE2000): {delta_e_val:.6f}")
+    print(f"  Delta E Similarity %: {percent_metrics['delta_e_similarity_percent']:.2f}%")
     print(f"  Saved ref_norm     : {ref_norm_path}")
     print(f"  Saved gen_norm     : {gen_norm_path}")
 
@@ -237,8 +253,11 @@ def evaluate_pair(ref_path, gen_path, lpips_model, mode="letterbox", out_dir="no
         "normalized_height": norm_h,
         "normalization_mode": mode,
         "ssim": ssim_val,
+        "ssim_percent": percent_metrics["ssim_percent"],
         "lpips": lpips_val,
+        "lpips_similarity_percent": percent_metrics["lpips_similarity_percent"],
         "delta_e_ciede2000": delta_e_val,
+        "delta_e_similarity_percent": percent_metrics["delta_e_similarity_percent"],
         "ref_norm_path": ref_norm_path,
         "gen_norm_path": gen_norm_path,
     }
@@ -289,7 +308,21 @@ def evaluate_folders(reference_dir, generated_dir, output_csv, lpips_model, mode
 
     print("============================================================")
     print(f"[INFO] Ergebnisse gespeichert: {output_csv}")
-    print(df[["filename", "ssim", "lpips", "delta_e_ciede2000", "mask_iou", "mask_dice"]].head())
+    print(
+        df[
+            [
+                "filename",
+                "ssim",
+                "ssim_percent",
+                "lpips",
+                "lpips_similarity_percent",
+                "delta_e_ciede2000",
+                "delta_e_similarity_percent",
+                "mask_iou",
+                "mask_dice",
+            ]
+        ].head()
+    )
 
 
 def parse_args():
