@@ -1,177 +1,124 @@
-const temperature = document.getElementById('temperature');
-const steps = document.getElementById('steps');
-const guidance = document.getElementById('guidance');
-const modelProfile = document.getElementById('modelProfile');
+const refImage = document.getElementById('refImage');
+const genImage = document.getElementById('genImage');
+const lpipsNet = document.getElementById('lpipsNet');
 const carOnlyMode = document.getElementById('carOnlyMode');
-
-const temperatureValue = document.getElementById('temperatureValue');
-const stepsValue = document.getElementById('stepsValue');
-const guidanceValue = document.getElementById('guidanceValue');
+const carMode = document.getElementById('carMode');
+const maskSource = document.getElementById('maskSource');
 
 const runModel = document.getElementById('runModel');
 const resetForm = document.getElementById('resetForm');
 const statusBadge = document.getElementById('statusBadge');
 const previewText = document.getElementById('previewText');
-const runtime = document.getElementById('runtime');
-const confidence = document.getElementById('confidence');
-const memory = document.getElementById('memory');
-const maskFocus = document.getElementById('maskFocus');
-const objectConsistency = document.getElementById('objectConsistency');
-const seedValue = document.getElementById('seedValue');
 const themeToggle = document.getElementById('themeToggle');
+const refPreview = document.getElementById('refPreview');
+const genPreview = document.getElementById('genPreview');
 
-const MODEL_PROFILES = {
-  balanced: { runtimeFactor: 1, confidenceBoost: 0, memoryOffset: 0 },
-  quality: { runtimeFactor: 1.32, confidenceBoost: 4.5, memoryOffset: 220 },
-  fast: { runtimeFactor: 0.72, confidenceBoost: -2.8, memoryOffset: -140 }
-};
-
-function updateSliderValues() {
-  temperatureValue.textContent = Number(temperature.value).toFixed(2);
-  stepsValue.textContent = steps.value;
-  guidanceValue.textContent = Number(guidance.value).toFixed(1);
-}
+const lpipsValue = document.getElementById('lpips');
+const lpipsSimilarity = document.getElementById('lpipsSimilarity');
+const ssim = document.getElementById('ssim');
+const psnr = document.getElementById('psnr');
+const deltaE = document.getElementById('deltaE');
+const lpipsCar = document.getElementById('lpipsCar');
+const maskIou = document.getElementById('maskIou');
+const maskDice = document.getElementById('maskDice');
 
 function setStatus(mode, text) {
   statusBadge.className = `status-badge ${mode}`;
   statusBadge.textContent = text;
 }
 
-function computeSeed(prompt, style) {
-  const sourceText = `${prompt}-${style}-${modelProfile.value}-${carOnlyMode.checked}`;
-  let hash = 0;
-
-  for (let i = 0; i < sourceText.length; i += 1) {
-    hash = (hash << 5) - hash + sourceText.charCodeAt(i);
-    hash |= 0;
+function setMetric(target, value, suffix = '') {
+  if (value === null || value === undefined || value === '') {
+    target.textContent = '--';
+    return;
   }
 
-  return Math.abs(hash).toString().padStart(8, '0').slice(0, 8);
+  const numeric = Number(value);
+  if (!Number.isNaN(numeric)) {
+    target.textContent = `${numeric.toFixed(4)}${suffix}`;
+    return;
+  }
+
+  target.textContent = `${value}${suffix}`;
 }
 
-function calculateInferenceResult() {
-  const prompt = document.getElementById('prompt').value.trim();
-  const style = document.getElementById('style').value;
-  const profile = MODEL_PROFILES[modelProfile.value];
-
-  if (!prompt) {
-    return {
-      isValid: false,
-      message: 'Formuliere zuerst einen Prompt, damit das Modell arbeiten kann.'
-    };
+function showPreview(input, imgTarget) {
+  const [file] = input.files;
+  if (!file) {
+    imgTarget.removeAttribute('src');
+    return;
   }
 
-  const stepsCount = Number(steps.value);
-  const temperatureValueNumber = Number(temperature.value);
-  const guidanceValueNumber = Number(guidance.value);
-  const carOnlyActive = carOnlyMode.checked;
-
-  const runtimeMs = Math.round(
-    (180 + stepsCount * 12 + guidanceValueNumber * 16 + temperatureValueNumber * 120) *
-      profile.runtimeFactor *
-      (carOnlyActive ? 0.86 : 1.08)
-  );
-
-  const confidenceValue = Math.max(
-    55,
-    Math.min(
-      99.9,
-      71 +
-        stepsCount * 0.2 +
-        guidanceValueNumber * 0.85 -
-        temperatureValueNumber * 9 +
-        profile.confidenceBoost +
-        (carOnlyActive ? 3.6 : -1.1)
-    )
-  );
-
-  const memoryValue = Math.max(
-    320,
-    Math.round(460 + stepsCount * 5 + guidanceValueNumber * 9 + profile.memoryOffset + (carOnlyActive ? 75 : 180))
-  );
-
-  const maskFocusValue = Math.max(
-    30,
-    Math.min(99.9, 58 + guidanceValueNumber * 2.2 + (carOnlyActive ? 18 : -6))
-  );
-
-  const objectConsistencyValue = Math.max(
-    40,
-    Math.min(
-      99.9,
-      64 + stepsCount * 0.24 + guidanceValueNumber * 0.6 + profile.confidenceBoost - temperatureValueNumber * 6
-    )
-  );
-
-  return {
-    isValid: true,
-    prompt,
-    style,
-    runtimeMs,
-    confidenceValue,
-    memoryValue,
-    maskFocusValue,
-    objectConsistencyValue,
-    seed: computeSeed(prompt, style)
+  const reader = new FileReader();
+  reader.onload = () => {
+    imgTarget.src = String(reader.result);
   };
+  reader.readAsDataURL(file);
 }
 
-function renderInferenceResult(result) {
-  if (!result.isValid) {
-    previewText.textContent = result.message;
-    setStatus('idle', 'Prompt fehlt');
+async function runComparison() {
+  const [refFile] = refImage.files;
+  const [genFile] = genImage.files;
+
+  if (!refFile || !genFile) {
+    setStatus('idle', 'Bilder fehlen');
+    previewText.textContent = 'Wähle zuerst Referenz- und Generated-Bild aus.';
     return;
   }
 
-  const scopeText = carOnlyMode.checked ? 'Car-Only Segmentierung aktiv' : 'Gesamtszene aktiv';
+  setStatus('running', 'Vergleiche');
+  previewText.textContent = 'Berechne Metriken mit Python-Backend...';
 
-  previewText.textContent = `Ergebnis bereit: ${scopeText}. Stil ${result.style}, Profil ${modelProfile.value}, Kreativität ${Number(
-    temperature.value
-  ).toFixed(2)}, Guidance ${Number(guidance.value).toFixed(1)}, Schritte ${steps.value}. Prompt: "${result.prompt}"`;
+  const payload = new FormData();
+  payload.append('ref_image', refFile);
+  payload.append('gen_image', genFile);
+  payload.append('lpips_net', lpipsNet.value);
+  payload.append('enable_car_only', String(carOnlyMode.checked));
+  payload.append('car_mode', carMode.value);
+  payload.append('mask_source', maskSource.value);
 
-  runtime.textContent = `${result.runtimeMs} ms`;
-  confidence.textContent = `${result.confidenceValue.toFixed(1)} %`;
-  memory.textContent = `${result.memoryValue} MB`;
-  maskFocus.textContent = `${result.maskFocusValue.toFixed(1)} %`;
-  objectConsistency.textContent = `${result.objectConsistencyValue.toFixed(1)} %`;
-  seedValue.textContent = result.seed;
-  setStatus('done', 'Abgeschlossen');
-}
+  try {
+    const response = await fetch('/api/compare', { method: 'POST', body: payload });
+    const data = await response.json();
 
-function runInference() {
-  const result = calculateInferenceResult();
+    if (!response.ok) {
+      throw new Error(data.error || 'Vergleich fehlgeschlagen');
+    }
 
-  if (!result.isValid) {
-    renderInferenceResult(result);
-    return;
+    setMetric(lpipsValue, data.lpips);
+    setMetric(lpipsSimilarity, data.lpips_similarity_percent, ' %');
+    setMetric(ssim, data.ssim);
+    setMetric(psnr, data.psnr, ' dB');
+    setMetric(deltaE, data.delta_e_ciede2000);
+    setMetric(lpipsCar, data.lpips_car_only);
+    setMetric(maskIou, data.mask_iou);
+    setMetric(maskDice, data.mask_dice);
+
+    previewText.textContent = `Vergleich abgeschlossen für ${data.filename}. Ergebnisse aus image_metrics.py wurden geladen.`;
+    setStatus('done', 'Fertig');
+  } catch (error) {
+    setStatus('idle', 'Fehler');
+    previewText.textContent = `Fehler: ${error.message}`;
   }
-
-  setStatus('running', 'Läuft');
-  previewText.textContent = 'Das Modell verarbeitet deine Eingabe...';
-
-  window.setTimeout(() => {
-    renderInferenceResult(result);
-  }, 550);
 }
 
 function resetInterface() {
-  document.getElementById('prompt').value = '';
-  document.getElementById('style').selectedIndex = 0;
-  modelProfile.value = 'balanced';
+  refImage.value = '';
+  genImage.value = '';
+  lpipsNet.value = 'alex';
   carOnlyMode.checked = false;
-  temperature.value = '0.6';
-  steps.value = '35';
-  guidance.value = '7.5';
-  updateSliderValues();
+  carMode.value = 'neutralize_crop';
+  maskSource.value = 'ref';
 
-  runtime.textContent = '-- ms';
-  confidence.textContent = '-- %';
-  memory.textContent = '-- MB';
-  maskFocus.textContent = '-- %';
-  objectConsistency.textContent = '-- %';
-  seedValue.textContent = '--';
+  refPreview.removeAttribute('src');
+  genPreview.removeAttribute('src');
 
-  previewText.textContent = 'Starte das Modell, um eine Ausgabevorschau zu sehen.';
+  [lpipsValue, lpipsSimilarity, ssim, psnr, deltaE, lpipsCar, maskIou, maskDice].forEach((node) => {
+    node.textContent = node.id.includes('Similarity') ? '-- %' : '--';
+  });
+  psnr.textContent = '-- dB';
+
+  previewText.textContent = 'Lade zwei Bilder hoch und starte den Vergleich.';
   setStatus('idle', 'Bereit');
 }
 
@@ -181,11 +128,8 @@ function toggleTheme() {
   themeToggle.textContent = isLight ? 'Night Mode aus' : 'Night Mode';
 }
 
-temperature.addEventListener('input', updateSliderValues);
-steps.addEventListener('input', updateSliderValues);
-guidance.addEventListener('input', updateSliderValues);
-runModel.addEventListener('click', runInference);
+refImage.addEventListener('change', () => showPreview(refImage, refPreview));
+genImage.addEventListener('change', () => showPreview(genImage, genPreview));
+runModel.addEventListener('click', runComparison);
 resetForm.addEventListener('click', resetInterface);
 themeToggle.addEventListener('click', toggleTheme);
-
-updateSliderValues();
