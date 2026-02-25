@@ -1,9 +1,12 @@
+import base64
 import csv
+import io
 import json
 import os
 import shutil
 import subprocess
 import tempfile
+import zipfile
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -12,6 +15,7 @@ from urllib.parse import urlparse
 import cgi
 
 BASE_DIR = Path(__file__).resolve().parent
+SUPPORTED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
 
 
 class MetricsHandler(SimpleHTTPRequestHandler):
@@ -76,15 +80,12 @@ class MetricsHandler(SimpleHTTPRequestHandler):
     def run_image_metrics(self, payload):
         with tempfile.TemporaryDirectory(prefix="metrics_gui_") as tmp_dir:
             tmp_path = Path(tmp_dir)
-            ref_path = tmp_path / Path(payload["ref_image"].filename).name
-            gen_path = tmp_path / Path(payload["gen_image"].filename).name
             csv_path = tmp_path / "result.csv"
             norm_dir = tmp_path / "normalized"
+            car_only_dir = tmp_path / "car_only"
 
-            with ref_path.open("wb") as ref_file:
-                shutil.copyfileobj(payload["ref_image"].file, ref_file)
-            with gen_path.open("wb") as gen_file:
-                shutil.copyfileobj(payload["gen_image"].file, gen_file)
+            ref_path, ref_origin = self.store_upload_as_image(payload["ref_image"], tmp_path, "ref")
+            gen_path, gen_origin = self.store_upload_as_image(payload["gen_image"], tmp_path, "gen")
 
             command = [
                 "python",
@@ -109,6 +110,8 @@ class MetricsHandler(SimpleHTTPRequestHandler):
                         payload["car_mode"],
                         "--mask-source",
                         payload["mask_source"],
+                        "--car-only-dir",
+                        str(car_only_dir),
                     ]
                 )
 
@@ -133,7 +136,81 @@ class MetricsHandler(SimpleHTTPRequestHandler):
                 "lpips_car_only": row.get("lpips_car_only"),
                 "mask_iou": row.get("mask_iou"),
                 "mask_dice": row.get("mask_dice"),
+                "ref_upload": ref_origin,
+                "gen_upload": gen_origin,
+                "car_only_ref_preview": self.image_file_to_data_url(row.get("car_only_ref_path")),
+                "car_only_gen_preview": self.image_file_to_data_url(row.get("car_only_gen_path")),
+                "car_only_mask_preview": self.image_file_to_data_url(row.get("car_only_mask_path")),
             }
+
+    def store_upload_as_image(self, file_field, tmp_path, prefix):
+        original_name = Path(file_field.filename).name
+        suffix = Path(original_name).suffix.lower()
+
+        if suffix == ".zip":
+            extracted_path = self.extract_image_from_zip(file_field, tmp_path, prefix)
+            return extracted_path, f"{original_name} -> {extracted_path.name}"
+
+        if suffix not in SUPPORTED_IMAGE_EXTENSIONS:
+            raise ValueError(f"Dateityp nicht unterstützt: {original_name}")
+
+        output_path = tmp_path / f"{prefix}_{Path(original_name).name}"
+        with output_path.open("wb") as output_file:
+            shutil.copyfileobj(file_field.file, output_file)
+        return output_path, original_name
+
+    def extract_image_from_zip(self, file_field, tmp_path, prefix):
+        zip_bytes = file_field.file.read()
+        if not zip_bytes:
+            raise ValueError("ZIP-Datei ist leer")
+
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as archive:
+            candidates = []
+            for info in archive.infolist():
+                if info.is_dir():
+                    continue
+                inner_name = Path(info.filename)
+                if inner_name.suffix.lower() not in SUPPORTED_IMAGE_EXTENSIONS:
+                    continue
+                if inner_name.name.startswith("."):
+                    continue
+                candidates.append(info)
+
+            if not candidates:
+                raise ValueError("ZIP enthält kein unterstütztes Bildformat")
+
+            candidates.sort(key=lambda item: item.filename.lower())
+            chosen = candidates[0]
+            image_data = archive.read(chosen)
+
+        target_name = f"{prefix}_{Path(chosen.filename).name}"
+        target_path = tmp_path / target_name
+        with target_path.open("wb") as target_file:
+            target_file.write(image_data)
+        return target_path
+
+    def image_file_to_data_url(self, file_path):
+        if not file_path:
+            return None
+
+        path = Path(file_path)
+        if not path.exists() or not path.is_file():
+            return None
+
+        ext = path.suffix.lower()
+        mime = {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".webp": "image/webp",
+            ".bmp": "image/bmp",
+            ".tif": "image/tiff",
+            ".tiff": "image/tiff",
+        }.get(ext, "application/octet-stream")
+
+        raw = path.read_bytes()
+        encoded = base64.b64encode(raw).decode("ascii")
+        return f"data:{mime};base64,{encoded}"
 
     def send_json(self, status_code, payload):
         body = json.dumps(payload).encode("utf-8")

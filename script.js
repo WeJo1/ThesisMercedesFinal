@@ -12,6 +12,10 @@ const previewText = document.getElementById('previewText');
 const themeToggle = document.getElementById('themeToggle');
 const refPreview = document.getElementById('refPreview');
 const genPreview = document.getElementById('genPreview');
+const carOnlyPreviewSection = document.getElementById('carOnlyPreviewSection');
+const carRefPreview = document.getElementById('carRefPreview');
+const carGenPreview = document.getElementById('carGenPreview');
+const carMaskPreview = document.getElementById('carMaskPreview');
 
 const lpipsValue = document.getElementById('lpips');
 const lpipsSimilarity = document.getElementById('lpipsSimilarity');
@@ -22,7 +26,7 @@ const lpipsCar = document.getElementById('lpipsCar');
 const maskIou = document.getElementById('maskIou');
 const maskDice = document.getElementById('maskDice');
 
-const fallbackApiOrigin = 'http://127.0.0.1:4173';
+const fallbackApiOrigins = ['http://127.0.0.1:4173', 'http://localhost:4173'];
 
 function logBrowser(message, details = null) {
   if (details === null) {
@@ -60,9 +64,13 @@ function setMetric(target, value, suffix = '') {
   target.textContent = `${value}${suffix}`;
 }
 
+function isZipFile(file) {
+  return file.name.toLowerCase().endsWith('.zip');
+}
+
 function showPreview(input, imgTarget) {
   const [file] = input.files;
-  if (!file) {
+  if (!file || isZipFile(file)) {
     imgTarget.removeAttribute('src');
     return;
   }
@@ -72,6 +80,30 @@ function showPreview(input, imgTarget) {
     imgTarget.src = String(reader.result);
   };
   reader.readAsDataURL(file);
+}
+
+function setPreviewImage(imgTarget, value) {
+  if (!value) {
+    imgTarget.removeAttribute('src');
+    return;
+  }
+  imgTarget.src = value;
+}
+
+function updateCarOnlyPreview(data) {
+  const hasCarPreview = Boolean(data?.car_only_ref_preview || data?.car_only_gen_preview || data?.car_only_mask_preview);
+  if (!hasCarPreview) {
+    carOnlyPreviewSection.hidden = true;
+    setPreviewImage(carRefPreview, null);
+    setPreviewImage(carGenPreview, null);
+    setPreviewImage(carMaskPreview, null);
+    return;
+  }
+
+  setPreviewImage(carRefPreview, data.car_only_ref_preview);
+  setPreviewImage(carGenPreview, data.car_only_gen_preview);
+  setPreviewImage(carMaskPreview, data.car_only_mask_preview);
+  carOnlyPreviewSection.hidden = false;
 }
 
 async function parseCompareResponse(response) {
@@ -107,14 +139,16 @@ function getComparisonError(response, data) {
 }
 
 function getApiCandidates() {
-  const localApi = `${fallbackApiOrigin}/api/compare`;
+  const candidates = [];
   const sameOriginApi = `${window.location.origin}/api/compare`;
 
-  if (sameOriginApi === localApi) {
-    return [sameOriginApi];
-  }
+  candidates.push(sameOriginApi);
 
-  return [sameOriginApi, localApi];
+  fallbackApiOrigins.forEach((origin) => {
+    candidates.push(`${origin}/api/compare`);
+  });
+
+  return [...new Set(candidates)];
 }
 
 async function sendComparisonRequest(payload) {
@@ -160,6 +194,13 @@ async function sendComparisonRequest(payload) {
         });
         continue;
       }
+
+      if (error instanceof TypeError) {
+        throw new Error(
+          `Backend nicht erreichbar. Starte gui_server.py und prüfe Port 4173. Versuchte Endpunkte: ${apiCandidates.join(', ')}`,
+        );
+      }
+
       break;
     }
   }
@@ -207,12 +248,14 @@ async function runComparison() {
     setMetric(lpipsCar, data.lpips_car_only);
     setMetric(maskIou, data.mask_iou);
     setMetric(maskDice, data.mask_dice);
+    updateCarOnlyPreview(data);
 
     previewText.textContent = `Vergleich abgeschlossen für ${data.filename}. Ergebnisse aus image_metrics.py wurden geladen.`;
     setStatus('done', 'Fertig');
     logBrowser('Zeige Vergleichsergebnis', data);
   } catch (error) {
     setStatus('idle', 'Fehler');
+    updateCarOnlyPreview(null);
     previewText.textContent = `Fehler: ${error.message}`;
     console.error('[CompareGUI] Vergleich abgebrochen', error);
   }
@@ -228,6 +271,7 @@ function resetInterface() {
 
   refPreview.removeAttribute('src');
   genPreview.removeAttribute('src');
+  updateCarOnlyPreview(null);
 
   [lpipsValue, lpipsSimilarity, ssim, psnr, deltaE, lpipsCar, maskIou, maskDice].forEach((node) => {
     node.textContent = node.id.includes('Similarity') ? '-- %' : '--';
