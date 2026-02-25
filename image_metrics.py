@@ -323,9 +323,13 @@ def compute_delta_e(ref, gen):
     return float(np.mean(delta_map))
 
 
-def convert_metrics_to_percent(ssim_val, lpips_val, delta_e_val):
+def convert_metrics_to_percent(ssim_val, lpips_val, delta_e_val, lpips_percent_mode="linear", lpips_percent_alpha=4.0):
     ssim_percent = float(np.clip(ssim_val * 100.0, 0.0, 100.0))
-    lpips_similarity_percent = float(np.clip((1.0 - lpips_val) * 100.0, 0.0, 100.0))
+    lpips_similarity_percent = convert_lpips_to_similarity_percent(
+        lpips_val,
+        mode=lpips_percent_mode,
+        alpha=lpips_percent_alpha,
+    )
     delta_e_similarity_percent = float(np.clip(100.0 - delta_e_val, 0.0, 100.0))
 
     return {
@@ -335,10 +339,17 @@ def convert_metrics_to_percent(ssim_val, lpips_val, delta_e_val):
     }
 
 
-def convert_lpips_to_similarity_percent(lpips_val):
+def convert_lpips_to_similarity_percent(lpips_val, mode="linear", alpha=4.0):
     if lpips_val is None:
         return None
-    return float(np.clip((1.0 - lpips_val) * 100.0, 0.0, 100.0))
+
+    if mode == "linear":
+        return float(np.clip((1.0 - lpips_val) * 100.0, 0.0, 100.0))
+
+    if mode == "exp":
+        return float(np.clip(np.exp(-alpha * lpips_val) * 100.0, 0.0, 100.0))
+
+    raise ValueError("LPIPS-Prozentmodus muss 'exp' oder 'linear' sein")
 
 
 def format_percent(percent_value):
@@ -447,6 +458,8 @@ def evaluate_pair(
     mask_downsample="bilinear",
     eps=1e-8,
     debug_dir=None,
+    lpips_percent_mode="linear",
+    lpips_percent_alpha=4.0,
 ):
     ref_img = load_image(ref_path)
     gen_img = load_image(gen_path)
@@ -465,7 +478,13 @@ def evaluate_pair(
     psnr_val = compute_psnr(ref_norm, gen_norm)
     delta_e_val = compute_delta_e(ref_norm, gen_norm)
     geometric = compute_geometric_metrics(ref_norm, gen_norm)
-    percent_metrics = convert_metrics_to_percent(ssim_val, lpips_val, delta_e_val)
+    percent_metrics = convert_metrics_to_percent(
+        ssim_val,
+        lpips_val,
+        delta_e_val,
+        lpips_percent_mode=lpips_percent_mode,
+        lpips_percent_alpha=lpips_percent_alpha,
+    )
 
     car_metrics = compute_car_only_metrics(
         ref_norm,
@@ -484,7 +503,11 @@ def evaluate_pair(
         debug_dir=debug_dir,
         use_gpu=use_gpu,
     )
-    lpips_car_only_similarity_percent = convert_lpips_to_similarity_percent(car_metrics["lpips_car_only"])
+    lpips_car_only_similarity_percent = convert_lpips_to_similarity_percent(
+        car_metrics["lpips_car_only"],
+        mode=lpips_percent_mode,
+        alpha=lpips_percent_alpha,
+    )
 
     print("------------------------------------------------------------")
     print(f"Pair: {basename}")
@@ -495,7 +518,7 @@ def evaluate_pair(
     print(f"  SSIM (%)           : {percent_metrics['ssim_percent']:.2f}%")
     print(f"  LPIPS              : {lpips_val:.6f}")
     print(f"  PSNR               : {psnr_val:.6f}")
-    print(f"  LPIPS Similarity % : {percent_metrics['lpips_similarity_percent']:.2f}%")
+    print(f"  LPIPS Similarity % : {percent_metrics['lpips_similarity_percent']:.2f}% ({lpips_percent_mode})")
     if segmenter is not None:
         print(f"  Mask area (%)      : {car_metrics['debug']['mask_area_ratio'] * 100.0:.2f}%")
         print(f"  BBox (car)         : {car_metrics['debug']['bbox']}")
@@ -522,6 +545,8 @@ def evaluate_pair(
         "lpips": lpips_val,
         "psnr": psnr_val,
         "lpips_similarity_percent": percent_metrics["lpips_similarity_percent"],
+        "lpips_similarity_mode": lpips_percent_mode,
+        "lpips_similarity_alpha": lpips_percent_alpha if lpips_percent_mode == "exp" else None,
         "delta_e_ciede2000": delta_e_val,
         "delta_e_similarity_percent": percent_metrics["delta_e_similarity_percent"],
         "ref_norm_path": ref_norm_path,
@@ -555,6 +580,8 @@ def evaluate_folders(
     mask_downsample="bilinear",
     eps=1e-8,
     debug_dir=None,
+    lpips_percent_mode="linear",
+    lpips_percent_alpha=4.0,
 ):
     ref_dir = Path(reference_dir)
     gen_dir = Path(generated_dir)
@@ -596,6 +623,8 @@ def evaluate_folders(
             mask_downsample=mask_downsample,
             eps=eps,
             debug_dir=debug_dir,
+            lpips_percent_mode=lpips_percent_mode,
+            lpips_percent_alpha=lpips_percent_alpha,
         )
         results.append(result)
 
@@ -651,6 +680,18 @@ def parse_args():
     parser.add_argument("--min-mask-area", type=int, default=0, help="Minimale Maskenfläche in Pixel")
     parser.add_argument("--mask-downsample", default="bilinear", choices=["bilinear", "nearest"], help="Downsample-Modus der Maske für weighted LPIPS")
     parser.add_argument("--eps", type=float, default=1e-8, help="Epsilon für weighted LPIPS")
+    parser.add_argument(
+        "--lpips-percent-mode",
+        default="linear",
+        choices=["exp", "linear"],
+        help="Umrechnung LPIPS -> Prozent: linear (Standard) oder exp",
+    )
+    parser.add_argument(
+        "--lpips-percent-alpha",
+        type=float,
+        default=4.0,
+        help="Steilheit für exp-Umrechnung (nur für --lpips-percent-mode exp)",
+    )
     parser.add_argument("--mask-score-threshold", type=float, default=0.5, help="Score-Schwelle für Vehicle-Segmentierung")
     parser.add_argument("--debug-dir", default=None, help="Optionales Debug-Verzeichnis für Masken/Crops")
 
@@ -688,6 +729,9 @@ def main():
     print(f"[INFO] Normalized out  : {args.out}")
     print(f"[INFO] Output CSV      : {args.output_csv}")
     print(f"[INFO] Car-only aktiv  : {args.enable_car_only}")
+    print(f"[INFO] LPIPS->% Modus  : {args.lpips_percent_mode}")
+    if args.lpips_percent_mode == "exp":
+        print(f"[INFO] LPIPS->% Alpha  : {args.lpips_percent_alpha}")
     print("============================================================")
 
     lpips_model = init_lpips_model(net=args.lpips_net, use_gpu=args.use_gpu)
@@ -716,6 +760,8 @@ def main():
             mask_downsample=args.mask_downsample,
             eps=args.eps,
             debug_dir=args.debug_dir,
+            lpips_percent_mode=args.lpips_percent_mode,
+            lpips_percent_alpha=args.lpips_percent_alpha,
         )
         pd.DataFrame([result]).to_csv(args.output_csv, index=False, float_format="%.6f")
         print(f"[INFO] Einzelvergleich gespeichert: {args.output_csv}")
@@ -738,6 +784,8 @@ def main():
         mask_downsample=args.mask_downsample,
         eps=args.eps,
         debug_dir=args.debug_dir,
+        lpips_percent_mode=args.lpips_percent_mode,
+        lpips_percent_alpha=args.lpips_percent_alpha,
     )
 
 
