@@ -13,7 +13,7 @@
           <div class="brand-star">✶</div>
           <div>
             <p class="eyebrow">Mercedes-Benz AI</p>
-            <h1>Model Studio</h1>
+            <h1>Image Metrics Studio</h1>
           </div>
         </div>
         <button class="ghost-btn" id="themeToggle" type="button">Night Mode</button>
@@ -21,69 +21,88 @@
 
       <main class="content-grid">
         <section class="panel panel-input">
-          <h2>Modell konfigurieren</h2>
+          <h2>Bilder vergleichen</h2>
           <p class="panel-intro">
-            Definiere Eingaben, passe Inferenz-Parameter an und starte die Berechnung im Mercedes Look &amp; Feel.
+            Wähle Referenz- und Generated-Bild aus und starte dieselbe Logik wie im Python-CMD (LPIPS, SSIM, PSNR,
+            DeltaE und optional Car-Only).
           </p>
 
-          <label for="prompt">Prompt</label>
-          <textarea id="prompt" placeholder="Beschreibe das gewünschte Ergebnis..."></textarea>
+          <label for="refImage">Referenzbild</label>
+          <input id="refImage" type="file" accept="image/*" />
+
+          <label for="genImage">Generated-Bild</label>
+          <input id="genImage" type="file" accept="image/*" />
 
           <div class="field-row">
-            <label for="style">Designmodus</label>
-            <select id="style">
-              <option>Classic Silver</option>
-              <option>AMG Performance</option>
-              <option>Electric Blue</option>
+            <label for="lpipsNet">LPIPS Backbone</label>
+            <select id="lpipsNet">
+              <option value="alex">alex</option>
+              <option value="vgg">vgg</option>
+              <option value="squeeze">squeeze</option>
             </select>
           </div>
 
-          <div class="slider-group">
-            <div class="slider-label">
-              <label for="temperature">Kreativität</label>
-              <span id="temperatureValue">0.60</span>
-            </div>
-            <input id="temperature" type="range" min="0" max="1" step="0.01" value="0.6" />
+          <div class="toggle-row">
+            <input id="carOnlyMode" type="checkbox" />
+            <label for="carOnlyMode">Car-Only Modus aktivieren</label>
           </div>
 
-          <div class="slider-group">
-            <div class="slider-label">
-              <label for="steps">Iterationsschritte</label>
-              <span id="stepsValue">35</span>
+          <details>
+            <summary>Erweiterte Car-Only Parameter</summary>
+            <div class="field-row">
+              <label for="carMode">Car Mode</label>
+              <select id="carMode">
+                <option value="neutralize_crop">neutralize_crop</option>
+                <option value="weighted_lpips">weighted_lpips</option>
+              </select>
             </div>
-            <input id="steps" type="range" min="10" max="100" step="1" value="35" />
-          </div>
+            <div class="field-row">
+              <label for="maskSource">Mask Source</label>
+              <select id="maskSource">
+                <option value="ref">ref</option>
+                <option value="gen">gen</option>
+                <option value="union">union</option>
+              </select>
+            </div>
+          </details>
 
           <div class="actions">
-            <button class="primary-btn" id="runModel" type="button">Modell starten</button>
+            <button class="primary-btn" id="runModel" type="button">Vergleich starten</button>
             <button class="secondary-btn" id="resetForm" type="button">Zurücksetzen</button>
           </div>
         </section>
 
         <section class="panel panel-output">
           <div class="output-header">
-            <h2>Inference Dashboard</h2>
+            <h2>Metric Dashboard</h2>
             <span id="statusBadge" class="status-badge idle">Bereit</span>
           </div>
 
-          <div class="preview-card" id="previewCard">
-            <p class="preview-title">Live-Vorschau</p>
-            <p id="previewText">Starte das Modell, um eine Ausgabevorschau zu sehen.</p>
+          <div class="preview-card">
+            <p class="preview-title">Status</p>
+            <p id="previewText">Lade zwei Bilder hoch und starte den Vergleich.</p>
+          </div>
+
+          <div class="image-preview-grid">
+            <figure>
+              <figcaption>Referenzbild</figcaption>
+              <img id="refPreview" alt="Referenz Vorschau" />
+            </figure>
+            <figure>
+              <figcaption>Generated-Bild</figcaption>
+              <img id="genPreview" alt="Generated Vorschau" />
+            </figure>
           </div>
 
           <div class="stats-grid">
-            <article>
-              <p class="stat-label">Laufzeit</p>
-              <p id="runtime" class="stat-value">-- ms</p>
-            </article>
-            <article>
-              <p class="stat-label">Konfidenz</p>
-              <p id="confidence" class="stat-value">-- %</p>
-            </article>
-            <article>
-              <p class="stat-label">Speicher</p>
-              <p id="memory" class="stat-value">-- MB</p>
-            </article>
+            <article><p class="stat-label">LPIPS</p><p id="lpips" class="stat-value">--</p></article>
+            <article><p class="stat-label">LPIPS Similarity</p><p id="lpipsSimilarity" class="stat-value">-- %</p></article>
+            <article><p class="stat-label">SSIM</p><p id="ssim" class="stat-value">--</p></article>
+            <article><p class="stat-label">PSNR</p><p id="psnr" class="stat-value">-- dB</p></article>
+            <article><p class="stat-label">ΔE CIEDE2000</p><p id="deltaE" class="stat-value">--</p></article>
+            <article><p class="stat-label">Car LPIPS</p><p id="lpipsCar" class="stat-value">--</p></article>
+            <article><p class="stat-label">Mask IoU</p><p id="maskIou" class="stat-value">--</p></article>
+            <article><p class="stat-label">Mask Dice</p><p id="maskDice" class="stat-value">--</p></article>
           </div>
         </section>
       </main>
