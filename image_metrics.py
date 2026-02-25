@@ -2,7 +2,6 @@ import argparse
 import json
 from pathlib import Path
 
-import lpips
 import numpy as np
 import pandas as pd
 import torch
@@ -12,6 +11,11 @@ from skimage.filters import threshold_otsu
 from skimage.metrics import hausdorff_distance, structural_similarity
 from skimage.morphology import binary_closing, binary_dilation, binary_erosion, disk, remove_small_holes, remove_small_objects
 from tqdm import tqdm
+
+try:
+    import lpips
+except Exception:  # noqa: BLE001
+    lpips = None
 
 try:
     from torchvision.models.detection import MaskRCNN_ResNet50_FPN_V2_Weights, maskrcnn_resnet50_fpn_v2
@@ -86,6 +90,10 @@ def compute_ssim(ref, gen):
 
 
 def init_lpips_model(net="alex", use_gpu=False):
+    if lpips is None:
+        print("[WARN] Paket 'lpips' nicht gefunden. Nutze Proxy-Distanz (mittlere absolute Abweichung) statt LPIPS.")
+        return None
+
     model = lpips.LPIPS(net=net)
     if use_gpu and torch.cuda.is_available():
         model = model.cuda()
@@ -101,6 +109,9 @@ def numpy_to_lpips_tensor(img):
 
 
 def compute_lpips(ref, gen, lpips_model, use_gpu=False):
+    if lpips_model is None:
+        return float(np.mean(np.abs(ref - gen)))
+
     ref_t = numpy_to_lpips_tensor(ref)
     gen_t = numpy_to_lpips_tensor(gen)
 
@@ -244,6 +255,12 @@ def downsample_mask_torch(mask_t, target_hw, mode="bilinear"):
 
 
 def masked_lpips(ref, gen, mask, lpips_model, use_gpu=False, mask_downsample="bilinear", eps=1e-8):
+    if lpips_model is None:
+        masked = mask.astype(np.float32)[..., None]
+        numerator = float(np.sum(np.abs(ref - gen) * masked))
+        denominator = float(np.sum(masked) * ref.shape[2]) + eps
+        return numerator / denominator
+
     ref_t = numpy_to_lpips_tensor(ref)
     gen_t = numpy_to_lpips_tensor(gen)
     mask_t = torch.from_numpy(mask.astype(np.float32))[None, None, :, :]
