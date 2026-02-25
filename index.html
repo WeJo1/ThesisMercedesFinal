@@ -26,6 +26,20 @@
             Definiere Eingaben, passe Inferenz-Parameter an und starte die Berechnung im Mercedes Look &amp; Feel.
           </p>
 
+          <div class="field-row">
+            <label for="modelProfile">Model-Profil</label>
+            <select id="modelProfile">
+              <option value="balanced">Balanced</option>
+              <option value="quality">High Quality</option>
+              <option value="fast">Fast Inference</option>
+            </select>
+          </div>
+
+          <div class="toggle-row">
+            <input id="carOnlyMode" type="checkbox" />
+            <label for="carOnlyMode">Car-Only Modus aktivieren</label>
+          </div>
+
           <label for="prompt">Prompt</label>
           <textarea id="prompt" placeholder="Beschreibe das gewünschte Ergebnis..."></textarea>
 
@@ -52,6 +66,14 @@
               <span id="stepsValue">35</span>
             </div>
             <input id="steps" type="range" min="10" max="100" step="1" value="35" />
+          </div>
+
+          <div class="slider-group">
+            <div class="slider-label">
+              <label for="guidance">Guidance Scale</label>
+              <span id="guidanceValue">7.5</span>
+            </div>
+            <input id="guidance" type="range" min="1" max="15" step="0.1" value="7.5" />
           </div>
 
           <div class="actions">
@@ -83,6 +105,18 @@
             <article>
               <p class="stat-label">Speicher</p>
               <p id="memory" class="stat-value">-- MB</p>
+            </article>
+            <article>
+              <p class="stat-label">Maskenfokus</p>
+              <p id="maskFocus" class="stat-value">-- %</p>
+            </article>
+            <article>
+              <p class="stat-label">Objektkonsistenz</p>
+              <p id="objectConsistency" class="stat-value">-- %</p>
+            </article>
+            <article>
+              <p class="stat-label">Seed</p>
+              <p id="seedValue" class="stat-value">--</p>
             </article>
           </div>
         </section>
