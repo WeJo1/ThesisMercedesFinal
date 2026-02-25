@@ -1,0 +1,250 @@
+:root {
+  --bg-start: #05070c;
+  --bg-end: #0f1624;
+  --panel: rgba(13, 21, 36, 0.9);
+  --panel-border: rgba(255, 255, 255, 0.12);
+  --text-primary: #f4f7ff;
+  --text-muted: #adbad4;
+  --accent: #00adef;
+  --accent-soft: rgba(0, 173, 239, 0.2);
+  --ok: #5dd39e;
+  --warning: #ffd166;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  min-height: 100vh;
+  color: var(--text-primary);
+  background: radial-gradient(circle at top right, #1a2a4a 0%, var(--bg-start) 35%, var(--bg-end) 100%);
+}
+
+.app-shell {
+  width: min(1100px, 92vw);
+  margin: 2rem auto;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+
+.brand {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+
+.brand-star {
+  width: 2.8rem;
+  height: 2.8rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 1.35rem;
+  color: var(--accent);
+  box-shadow: inset 0 0 12px rgba(0, 173, 239, 0.35);
+}
+
+.eyebrow {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+}
+
+h1,
+h2 {
+  margin: 0;
+}
+
+h1 {
+  font-size: 1.65rem;
+}
+
+.content-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.2rem;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 1rem;
+  padding: 1.2rem;
+  backdrop-filter: blur(8px);
+}
+
+.panel-intro {
+  color: var(--text-muted);
+  margin-top: 0.5rem;
+  margin-bottom: 1rem;
+  line-height: 1.4;
+}
+
+label {
+  display: block;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  margin-bottom: 0.45rem;
+}
+
+textarea,
+select,
+input[type="range"] {
+  width: 100%;
+}
+
+textarea,
+select {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--panel-border);
+  color: var(--text-primary);
+  border-radius: 0.7rem;
+  padding: 0.72rem 0.8rem;
+  margin-bottom: 1rem;
+}
+
+textarea {
+  min-height: 110px;
+  resize: vertical;
+}
+
+.field-row {
+  margin-bottom: 0.5rem;
+}
+
+.slider-group {
+  margin-bottom: 1rem;
+}
+
+.slider-label {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.4rem;
+}
+
+.actions {
+  display: flex;
+  gap: 0.8rem;
+  margin-top: 0.3rem;
+}
+
+button {
+  border-radius: 999px;
+  border: 1px solid transparent;
+  padding: 0.6rem 1rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.primary-btn {
+  background: linear-gradient(90deg, #00adef 0%, #46c6f9 100%);
+  color: #022337;
+}
+
+.secondary-btn,
+.ghost-btn {
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-primary);
+  border-color: var(--panel-border);
+}
+
+.output-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.9rem;
+}
+
+.status-badge {
+  border-radius: 999px;
+  padding: 0.25rem 0.65rem;
+  font-size: 0.82rem;
+  border: 1px solid transparent;
+}
+
+.status-badge.idle {
+  color: var(--warning);
+  border-color: rgba(255, 209, 102, 0.5);
+}
+
+.status-badge.running {
+  color: var(--accent);
+  border-color: rgba(0, 173, 239, 0.5);
+}
+
+.status-badge.done {
+  color: var(--ok);
+  border-color: rgba(93, 211, 158, 0.5);
+}
+
+.preview-card {
+  padding: 1rem;
+  border-radius: 0.8rem;
+  border: 1px solid var(--panel-border);
+  background: linear-gradient(180deg, rgba(8, 18, 34, 0.7) 0%, rgba(8, 18, 34, 0.35) 100%);
+  margin-bottom: 1rem;
+}
+
+.preview-title {
+  margin-top: 0;
+  color: var(--text-muted);
+  font-size: 0.86rem;
+}
+
+#previewText {
+  margin-bottom: 0;
+  line-height: 1.45;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.stats-grid article {
+  border: 1px solid var(--panel-border);
+  border-radius: 0.7rem;
+  padding: 0.65rem;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.stat-label {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.stat-value {
+  margin-top: 0.35rem;
+  margin-bottom: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.light-mode {
+  --bg-start: #e9eef9;
+  --bg-end: #f7f9ff;
+  --panel: rgba(255, 255, 255, 0.86);
+  --panel-border: rgba(7, 23, 54, 0.15);
+  --text-primary: #0f1b34;
+  --text-muted: #3d4e71;
+  --accent-soft: rgba(0, 173, 239, 0.15);
+}
+
+@media (max-width: 900px) {
+  .content-grid {
+    grid-template-columns: 1fr;
+  }
+}
