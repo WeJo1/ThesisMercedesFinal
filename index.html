@@ -27,11 +27,11 @@
             DeltaE und optional Car-Only).
           </p>
 
-          <label for="refImage">Referenzbild</label>
-          <input id="refImage" type="file" accept="image/*" />
+          <label for="refImage">Referenzbild oder ZIP</label>
+          <input id="refImage" type="file" accept="image/*,.zip,application/zip" />
 
-          <label for="genImage">Generated-Bild</label>
-          <input id="genImage" type="file" accept="image/*" />
+          <label for="genImage">Generated-Bild oder ZIP</label>
+          <input id="genImage" type="file" accept="image/*,.zip,application/zip" />
 
           <div class="field-row">
             <label for="lpipsNet">LPIPS Backbone</label>
@@ -93,6 +93,25 @@
               <img id="genPreview" alt="Generated Vorschau" />
             </figure>
           </div>
+
+
+          <section id="carOnlyPreviewSection" class="car-preview-section" hidden>
+            <p class="preview-title">Car-Only Zuschnitt (Preview)</p>
+            <div class="image-preview-grid">
+              <figure>
+                <figcaption>Car-Only Referenz</figcaption>
+                <img id="carRefPreview" alt="Car-Only Referenz Vorschau" />
+              </figure>
+              <figure>
+                <figcaption>Car-Only Generated</figcaption>
+                <img id="carGenPreview" alt="Car-Only Generated Vorschau" />
+              </figure>
+              <figure>
+                <figcaption>Car-Only Maske</figcaption>
+                <img id="carMaskPreview" alt="Car-Only Masken Vorschau" />
+              </figure>
+            </div>
+          </section>
 
           <div class="stats-grid">
             <article><p class="stat-label">LPIPS</p><p id="lpips" class="stat-value">--</p></article>

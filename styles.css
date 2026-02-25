@@ -251,6 +251,23 @@ button {
   border-radius: 0.4rem;
 }
 
+.car-preview-section {
+  border: 1px solid var(--panel-border);
+  border-radius: 0.8rem;
+  padding: 0.8rem;
+  margin-bottom: 1rem;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.car-preview-section .preview-title {
+  margin-bottom: 0.7rem;
+}
+
+.car-preview-section .image-preview-grid {
+  margin-bottom: 0;
+}
+
+
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
