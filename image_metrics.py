@@ -10,6 +10,7 @@ from PIL import Image
 from skimage import color
 from skimage.filters import threshold_otsu
 from skimage.metrics import hausdorff_distance, structural_similarity
+from skimage.morphology import binary_closing, binary_dilation, disk, remove_small_holes, remove_small_objects
 from tqdm import tqdm
 
 try:
@@ -57,7 +58,10 @@ def normalize_pair(ref_img, gen_img, mode="letterbox", pad_color=LETTERBOX_PAD_C
     canvas.paste(resized, (offset_x, offset_y))
 
     gen_norm = np.asarray(canvas, dtype=np.float32) / 255.0
-    return ref_norm, gen_norm
+
+    content_mask = np.zeros((ref_h, ref_w), dtype=bool)
+    content_mask[offset_y : offset_y + scaled_h, offset_x : offset_x + scaled_w] = True
+    return ref_norm, gen_norm, content_mask
 
 
 def save_normalized_pair(ref_norm, gen_norm, basename, out_dir):
@@ -110,6 +114,24 @@ def compute_lpips(ref, gen, lpips_model, use_gpu=False):
     return float(dist.item())
 
 
+def compute_lpips_on_content(ref, gen, content_mask, lpips_model, use_gpu=False, mask_downsample="bilinear", eps=1e-8):
+    if content_mask is None:
+        return compute_lpips(ref, gen, lpips_model, use_gpu=use_gpu)
+
+    if not np.any(content_mask):
+        return compute_lpips(ref, gen, lpips_model, use_gpu=use_gpu)
+
+    return masked_lpips(
+        ref,
+        gen,
+        content_mask,
+        lpips_model,
+        use_gpu=use_gpu,
+        mask_downsample=mask_downsample,
+        eps=eps,
+    )
+
+
 def compute_psnr(ref, gen, eps=1e-12):
     mse = float(np.mean((ref - gen) ** 2))
     if mse <= eps:
@@ -159,6 +181,21 @@ def segment_car_mask(image, segmenter, cache_key=None):
     if cache_key is not None:
         segmenter["cache"][cache_key] = combined.copy()
     return combined
+
+
+def refine_car_mask(mask, ref_mask, gen_mask, grow_px=10, min_object_area=500, max_hole_area=3000):
+    merged_mask = (ref_mask | gen_mask).astype(bool)
+    refined_mask = mask.astype(bool)
+
+    if np.any(merged_mask):
+        grow_disk = disk(max(1, int(grow_px)))
+        grown_mask = binary_dilation(refined_mask, footprint=grow_disk)
+        refined_mask = refined_mask | (merged_mask & grown_mask)
+
+    refined_mask = binary_closing(refined_mask, footprint=disk(2))
+    refined_mask = remove_small_objects(refined_mask, min_size=max(1, int(min_object_area)))
+    refined_mask = remove_small_holes(refined_mask, area_threshold=max(1, int(max_hole_area)))
+    return refined_mask.astype(bool)
 
 
 def compute_mask_bbox(mask, pad_px=20):
@@ -246,6 +283,9 @@ def compute_car_only_metrics(
     debug_dir=None,
     car_only_dir=None,
     use_gpu=False,
+    mask_grow_px=10,
+    mask_min_object_area=500,
+    mask_max_hole_area=3000,
 ):
     if segmenter is None:
         debug = {"mask_area_ratio": 0.0, "bbox": None, "fallback_reason": "Car-only deaktiviert"}
@@ -261,17 +301,35 @@ def compute_car_only_metrics(
     gen_mask = segment_car_mask(gen_norm, segmenter, cache_key=f"gen::{Path(gen_path).resolve()}")
 
     if mask_source == "ref":
-        mask = ref_mask
+        base_mask = ref_mask
     elif mask_source == "gen":
-        mask = gen_mask
+        base_mask = gen_mask
     else:
-        mask = ref_mask | gen_mask
+        base_mask = ref_mask | gen_mask
+
+    mask = refine_car_mask(
+        base_mask,
+        ref_mask,
+        gen_mask,
+        grow_px=mask_grow_px,
+        min_object_area=mask_min_object_area,
+        max_hole_area=mask_max_hole_area,
+    )
 
     mask_area = int(np.sum(mask))
     total_area = int(mask.size)
     area_ratio = float(mask_area / total_area) if total_area > 0 else 0.0
 
-    debug = {"mask_area_ratio": area_ratio, "bbox": None, "fallback_reason": None}
+    debug = {
+        "mask_area_ratio": area_ratio,
+        "bbox": None,
+        "fallback_reason": None,
+        "mask_refine": {
+            "grow_px": mask_grow_px,
+            "min_object_area": mask_min_object_area,
+            "max_hole_area": mask_max_hole_area,
+        },
+    }
     if mask_area <= int(min_mask_area):
         debug["fallback_reason"] = f"Mask area zu klein ({mask_area} px)"
         return {
@@ -494,6 +552,9 @@ def evaluate_pair(
     eps=1e-8,
     debug_dir=None,
     car_only_dir=None,
+    mask_grow_px=10,
+    mask_min_object_area=500,
+    mask_max_hole_area=3000,
 ):
     ref_img = load_image(ref_path)
     gen_img = load_image(gen_path)
@@ -501,14 +562,22 @@ def evaluate_pair(
     ref_h, ref_w = ref_img.shape[:2]
     gen_h, gen_w = gen_img.shape[:2]
 
-    ref_norm, gen_norm = normalize_pair(ref_img, gen_img, mode=mode)
+    ref_norm, gen_norm, content_mask = normalize_pair(ref_img, gen_img, mode=mode)
     norm_h, norm_w = ref_norm.shape[:2]
 
     basename = Path(ref_path).stem
     ref_norm_path, gen_norm_path = save_normalized_pair(ref_norm, gen_norm, basename, out_dir)
 
     ssim_val = compute_ssim(ref_norm, gen_norm)
-    lpips_val = compute_lpips(ref_norm, gen_norm, lpips_model, use_gpu=use_gpu)
+    lpips_val = compute_lpips_on_content(
+        ref_norm,
+        gen_norm,
+        content_mask,
+        lpips_model,
+        use_gpu=use_gpu,
+        mask_downsample=mask_downsample,
+        eps=eps,
+    )
     psnr_val = compute_psnr(ref_norm, gen_norm)
     delta_e_val = compute_delta_e(ref_norm, gen_norm)
     geometric = compute_geometric_metrics(ref_norm, gen_norm)
@@ -543,6 +612,9 @@ def evaluate_pair(
         debug_dir=debug_dir,
         car_only_dir=car_only_dir,
         use_gpu=use_gpu,
+        mask_grow_px=mask_grow_px,
+        mask_min_object_area=mask_min_object_area,
+        mask_max_hole_area=mask_max_hole_area,
     )
     lpips_car_only_similarity_percent = convert_lpips_to_similarity_percent(car_metrics["lpips_car_only"])
 
@@ -627,6 +699,9 @@ def evaluate_folders(
     eps=1e-8,
     debug_dir=None,
     car_only_dir=None,
+    mask_grow_px=10,
+    mask_min_object_area=500,
+    mask_max_hole_area=3000,
 ):
     ref_dir = Path(reference_dir)
     gen_dir = Path(generated_dir)
@@ -669,6 +744,9 @@ def evaluate_folders(
             eps=eps,
             debug_dir=debug_dir,
             car_only_dir=car_only_dir,
+            mask_grow_px=mask_grow_px,
+            mask_min_object_area=mask_min_object_area,
+            mask_max_hole_area=mask_max_hole_area,
         )
         results.append(result)
 
@@ -725,6 +803,9 @@ def parse_args():
     parser.add_argument("--neutral-value", type=float, default=0.5, help="Neutralwert für Hintergrundpixel [0..1]")
     parser.add_argument("--min-mask-area", type=int, default=0, help="Minimale Maskenfläche in Pixel")
     parser.add_argument("--mask-downsample", default="bilinear", choices=["bilinear", "nearest"], help="Downsample-Modus der Maske für weighted LPIPS")
+    parser.add_argument("--mask-grow-px", type=int, default=10, help="Erweitere die Car-Maske lokal um X Pixel")
+    parser.add_argument("--mask-min-object-area", type=int, default=500, help="Entferne sehr kleine Maskeninseln")
+    parser.add_argument("--mask-max-hole-area", type=int, default=3000, help="Fülle kleine Löcher in der Car-Maske")
     parser.add_argument("--eps", type=float, default=1e-8, help="Epsilon für weighted LPIPS")
     parser.add_argument("--mask-score-threshold", type=float, default=0.5, help="Score-Schwelle für Vehicle-Segmentierung")
     parser.add_argument("--debug-dir", default=None, help="Optionales Debug-Verzeichnis für Masken/Crops")
@@ -745,6 +826,9 @@ def parse_args():
             args.neutral_value != 0.5,
             args.min_mask_area != 0,
             args.mask_downsample != "bilinear",
+            args.mask_grow_px != 10,
+            args.mask_min_object_area != 500,
+            args.mask_max_hole_area != 3000,
             args.eps != 1e-8,
             args.mask_score_threshold != 0.5,
             args.debug_dir is not None,
@@ -790,6 +874,9 @@ def main():
             neutral_value=args.neutral_value,
             min_mask_area=args.min_mask_area,
             mask_downsample=args.mask_downsample,
+            mask_grow_px=args.mask_grow_px,
+            mask_min_object_area=args.mask_min_object_area,
+            mask_max_hole_area=args.mask_max_hole_area,
             eps=args.eps,
             debug_dir=args.debug_dir,
             car_only_dir=args.car_only_dir if args.enable_car_only else None,
@@ -813,6 +900,9 @@ def main():
         neutral_value=args.neutral_value,
         min_mask_area=args.min_mask_area,
         mask_downsample=args.mask_downsample,
+        mask_grow_px=args.mask_grow_px,
+        mask_min_object_area=args.mask_min_object_area,
+        mask_max_hole_area=args.mask_max_hole_area,
         eps=args.eps,
         debug_dir=args.debug_dir,
         car_only_dir=args.car_only_dir if args.enable_car_only else None,
