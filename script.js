@@ -1,64 +1,124 @@
-const temperature = document.getElementById('temperature');
-const steps = document.getElementById('steps');
-const temperatureValue = document.getElementById('temperatureValue');
-const stepsValue = document.getElementById('stepsValue');
+const refImage = document.getElementById('refImage');
+const genImage = document.getElementById('genImage');
+const lpipsNet = document.getElementById('lpipsNet');
+const carOnlyMode = document.getElementById('carOnlyMode');
+const carMode = document.getElementById('carMode');
+const maskSource = document.getElementById('maskSource');
+
 const runModel = document.getElementById('runModel');
 const resetForm = document.getElementById('resetForm');
 const statusBadge = document.getElementById('statusBadge');
 const previewText = document.getElementById('previewText');
-const runtime = document.getElementById('runtime');
-const confidence = document.getElementById('confidence');
-const memory = document.getElementById('memory');
 const themeToggle = document.getElementById('themeToggle');
+const refPreview = document.getElementById('refPreview');
+const genPreview = document.getElementById('genPreview');
 
-function updateSliderValues() {
-  temperatureValue.textContent = Number(temperature.value).toFixed(2);
-  stepsValue.textContent = steps.value;
-}
+const lpipsValue = document.getElementById('lpips');
+const lpipsSimilarity = document.getElementById('lpipsSimilarity');
+const ssim = document.getElementById('ssim');
+const psnr = document.getElementById('psnr');
+const deltaE = document.getElementById('deltaE');
+const lpipsCar = document.getElementById('lpipsCar');
+const maskIou = document.getElementById('maskIou');
+const maskDice = document.getElementById('maskDice');
 
 function setStatus(mode, text) {
   statusBadge.className = `status-badge ${mode}`;
   statusBadge.textContent = text;
 }
 
-function simulateInference() {
-  const prompt = document.getElementById('prompt').value.trim();
-  const style = document.getElementById('style').value;
-
-  if (!prompt) {
-    previewText.textContent = 'Formuliere zuerst einen Prompt, damit das Modell arbeiten kann.';
-    setStatus('idle', 'Prompt fehlt');
+function setMetric(target, value, suffix = '') {
+  if (value === null || value === undefined || value === '') {
+    target.textContent = '--';
     return;
   }
 
-  setStatus('running', 'Läuft');
-  previewText.textContent = 'Das Modell verarbeitet deine Eingabe...';
+  const numeric = Number(value);
+  if (!Number.isNaN(numeric)) {
+    target.textContent = `${numeric.toFixed(4)}${suffix}`;
+    return;
+  }
 
-  const fakeRuntime = Math.floor(250 + Math.random() * 750);
-  const fakeConfidence = (82 + Math.random() * 16).toFixed(1);
-  const fakeMemory = Math.floor(512 + Number(steps.value) * 3 + Number(temperature.value) * 80);
+  target.textContent = `${value}${suffix}`;
+}
 
-  window.setTimeout(() => {
-    previewText.textContent = `Ergebnis bereit: Stil ${style}, Kreativität ${Number(
-      temperature.value
-    ).toFixed(2)}, Schritte ${steps.value}. Prompt: "${prompt}"`;
-    runtime.textContent = `${fakeRuntime} ms`;
-    confidence.textContent = `${fakeConfidence} %`;
-    memory.textContent = `${fakeMemory} MB`;
-    setStatus('done', 'Abgeschlossen');
-  }, 700);
+function showPreview(input, imgTarget) {
+  const [file] = input.files;
+  if (!file) {
+    imgTarget.removeAttribute('src');
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    imgTarget.src = String(reader.result);
+  };
+  reader.readAsDataURL(file);
+}
+
+async function runComparison() {
+  const [refFile] = refImage.files;
+  const [genFile] = genImage.files;
+
+  if (!refFile || !genFile) {
+    setStatus('idle', 'Bilder fehlen');
+    previewText.textContent = 'Wähle zuerst Referenz- und Generated-Bild aus.';
+    return;
+  }
+
+  setStatus('running', 'Vergleiche');
+  previewText.textContent = 'Berechne Metriken mit Python-Backend...';
+
+  const payload = new FormData();
+  payload.append('ref_image', refFile);
+  payload.append('gen_image', genFile);
+  payload.append('lpips_net', lpipsNet.value);
+  payload.append('enable_car_only', String(carOnlyMode.checked));
+  payload.append('car_mode', carMode.value);
+  payload.append('mask_source', maskSource.value);
+
+  try {
+    const response = await fetch('/api/compare', { method: 'POST', body: payload });
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || 'Vergleich fehlgeschlagen');
+    }
+
+    setMetric(lpipsValue, data.lpips);
+    setMetric(lpipsSimilarity, data.lpips_similarity_percent, ' %');
+    setMetric(ssim, data.ssim);
+    setMetric(psnr, data.psnr, ' dB');
+    setMetric(deltaE, data.delta_e_ciede2000);
+    setMetric(lpipsCar, data.lpips_car_only);
+    setMetric(maskIou, data.mask_iou);
+    setMetric(maskDice, data.mask_dice);
+
+    previewText.textContent = `Vergleich abgeschlossen für ${data.filename}. Ergebnisse aus image_metrics.py wurden geladen.`;
+    setStatus('done', 'Fertig');
+  } catch (error) {
+    setStatus('idle', 'Fehler');
+    previewText.textContent = `Fehler: ${error.message}`;
+  }
 }
 
 function resetInterface() {
-  document.getElementById('prompt').value = '';
-  document.getElementById('style').selectedIndex = 0;
-  temperature.value = '0.6';
-  steps.value = '35';
-  updateSliderValues();
-  runtime.textContent = '-- ms';
-  confidence.textContent = '-- %';
-  memory.textContent = '-- MB';
-  previewText.textContent = 'Starte das Modell, um eine Ausgabevorschau zu sehen.';
+  refImage.value = '';
+  genImage.value = '';
+  lpipsNet.value = 'alex';
+  carOnlyMode.checked = false;
+  carMode.value = 'neutralize_crop';
+  maskSource.value = 'ref';
+
+  refPreview.removeAttribute('src');
+  genPreview.removeAttribute('src');
+
+  [lpipsValue, lpipsSimilarity, ssim, psnr, deltaE, lpipsCar, maskIou, maskDice].forEach((node) => {
+    node.textContent = node.id.includes('Similarity') ? '-- %' : '--';
+  });
+  psnr.textContent = '-- dB';
+
+  previewText.textContent = 'Lade zwei Bilder hoch und starte den Vergleich.';
   setStatus('idle', 'Bereit');
 }
 
@@ -68,10 +128,8 @@ function toggleTheme() {
   themeToggle.textContent = isLight ? 'Night Mode aus' : 'Night Mode';
 }
 
-temperature.addEventListener('input', updateSliderValues);
-steps.addEventListener('input', updateSliderValues);
-runModel.addEventListener('click', simulateInference);
+refImage.addEventListener('change', () => showPreview(refImage, refPreview));
+genImage.addEventListener('change', () => showPreview(genImage, genPreview));
+runModel.addEventListener('click', runComparison);
 resetForm.addEventListener('click', resetInterface);
 themeToggle.addEventListener('click', toggleTheme);
-
-updateSliderValues();
