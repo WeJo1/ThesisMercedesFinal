@@ -15,6 +15,20 @@ BASE_DIR = Path(__file__).resolve().parent
 
 
 class MetricsHandler(SimpleHTTPRequestHandler):
+    def log_message(self, format, *args):  # noqa: A003
+        message = format % args
+        print(f"[HTTP] {self.address_string()} {self.command} {self.path} -> {message}")
+
+    def end_headers(self):
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        super().end_headers()
+
+    def do_OPTIONS(self):
+        self.send_response(HTTPStatus.NO_CONTENT)
+        self.end_headers()
+
     def do_POST(self):
         parsed = urlparse(self.path)
         if parsed.path != "/api/compare":
@@ -22,10 +36,13 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             return
 
         try:
+            print("[API] Starte Vergleich über /api/compare")
             payload = self.parse_form_data()
             result = self.run_image_metrics(payload)
+            print("[API] Vergleich erfolgreich abgeschlossen")
             self.send_json(HTTPStatus.OK, result)
         except Exception as exc:  # noqa: BLE001
+            print(f"[API] Vergleich fehlgeschlagen: {exc}")
             self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
 
     def parse_form_data(self):

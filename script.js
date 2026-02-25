@@ -22,6 +22,24 @@ const lpipsCar = document.getElementById('lpipsCar');
 const maskIou = document.getElementById('maskIou');
 const maskDice = document.getElementById('maskDice');
 
+const fallbackApiOrigin = 'http://127.0.0.1:4173';
+
+function logBrowser(message, details = null) {
+  if (details === null) {
+    console.log(`[CompareGUI] ${message}`);
+    return;
+  }
+  console.log(`[CompareGUI] ${message}`, details);
+}
+
+function warnBrowser(message, details = null) {
+  if (details === null) {
+    console.warn(`[CompareGUI] ${message}`);
+    return;
+  }
+  console.warn(`[CompareGUI] ${message}`, details);
+}
+
 function setStatus(mode, text) {
   statusBadge.className = `status-badge ${mode}`;
   statusBadge.textContent = text;
@@ -88,6 +106,67 @@ function getComparisonError(response, data) {
   return `${defaultMessage} (HTTP ${response.status})`;
 }
 
+function getApiCandidates() {
+  const localApi = `${fallbackApiOrigin}/api/compare`;
+  const sameOriginApi = `${window.location.origin}/api/compare`;
+
+  if (sameOriginApi === localApi) {
+    return [sameOriginApi];
+  }
+
+  return [sameOriginApi, localApi];
+}
+
+async function sendComparisonRequest(payload) {
+  const apiCandidates = getApiCandidates();
+  let lastError = null;
+
+  for (const apiUrl of apiCandidates) {
+    try {
+      logBrowser('Sende Anfrage an API', { apiUrl });
+      const response = await fetch(apiUrl, { method: 'POST', body: payload });
+      const data = await parseCompareResponse(response);
+
+      logBrowser('Empfange API-Antwort', {
+        apiUrl,
+        status: response.status,
+        ok: response.ok,
+        data,
+      });
+
+      if (response.ok) {
+        return data;
+      }
+
+      const errorMessage = getComparisonError(response, data);
+      const shouldTryFallback = (response.status === 404 || response.status === 501) && apiUrl !== apiCandidates[apiCandidates.length - 1];
+      if (shouldTryFallback) {
+        warnBrowser('Primäre API nicht kompatibel. Nutze Fallback.', {
+          apiUrl,
+          status: response.status,
+          errorMessage,
+        });
+        continue;
+      }
+
+      throw new Error(errorMessage);
+    } catch (error) {
+      lastError = error;
+      const canRetry = apiUrl !== apiCandidates[apiCandidates.length - 1];
+      if (canRetry) {
+        warnBrowser('API-Anfrage fehlgeschlagen. Probiere nächsten Endpunkt.', {
+          apiUrl,
+          error: error.message,
+        });
+        continue;
+      }
+      break;
+    }
+  }
+
+  throw lastError || new Error('Vergleich fehlgeschlagen');
+}
+
 async function runComparison() {
   const [refFile] = refImage.files;
   const [genFile] = genImage.files;
@@ -110,12 +189,15 @@ async function runComparison() {
   payload.append('mask_source', maskSource.value);
 
   try {
-    const response = await fetch('/api/compare', { method: 'POST', body: payload });
-    const data = await parseCompareResponse(response);
-
-    if (!response.ok) {
-      throw new Error(getComparisonError(response, data));
-    }
+    logBrowser('Starte Vergleich', {
+      refFile: refFile.name,
+      genFile: genFile.name,
+      lpipsNet: lpipsNet.value,
+      enableCarOnly: carOnlyMode.checked,
+      carMode: carMode.value,
+      maskSource: maskSource.value,
+    });
+    const data = await sendComparisonRequest(payload);
 
     setMetric(lpipsValue, data.lpips);
     setMetric(lpipsSimilarity, data.lpips_similarity_percent, ' %');
@@ -128,9 +210,11 @@ async function runComparison() {
 
     previewText.textContent = `Vergleich abgeschlossen für ${data.filename}. Ergebnisse aus image_metrics.py wurden geladen.`;
     setStatus('done', 'Fertig');
+    logBrowser('Zeige Vergleichsergebnis', data);
   } catch (error) {
     setStatus('idle', 'Fehler');
     previewText.textContent = `Fehler: ${error.message}`;
+    console.error('[CompareGUI] Vergleich abgebrochen', error);
   }
 }
 
