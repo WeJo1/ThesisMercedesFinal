@@ -56,6 +56,38 @@ function showPreview(input, imgTarget) {
   reader.readAsDataURL(file);
 }
 
+async function parseCompareResponse(response) {
+  const contentType = response.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    return response.json();
+  }
+
+  const text = await response.text();
+  return { error: text.trim() };
+}
+
+function getComparisonError(response, data) {
+  const defaultMessage = 'Vergleich fehlgeschlagen';
+  const serverMessage = data?.error || data?.message;
+
+  if (serverMessage) {
+    if (response.status === 501) {
+      return 'POST wird vom aktiven Server nicht unterstützt. Starte stattdessen gui_server.py.';
+    }
+    return String(serverMessage);
+  }
+
+  if (response.status === 404) {
+    return 'API-Route /api/compare fehlt. Starte gui_server.py statt python -m http.server.';
+  }
+
+  if (response.status === 501) {
+    return 'POST wird vom aktiven Server nicht unterstützt. Starte stattdessen gui_server.py.';
+  }
+
+  return `${defaultMessage} (HTTP ${response.status})`;
+}
+
 async function runComparison() {
   const [refFile] = refImage.files;
   const [genFile] = genImage.files;
@@ -79,10 +111,10 @@ async function runComparison() {
 
   try {
     const response = await fetch('/api/compare', { method: 'POST', body: payload });
-    const data = await response.json();
+    const data = await parseCompareResponse(response);
 
     if (!response.ok) {
-      throw new Error(data.error || 'Vergleich fehlgeschlagen');
+      throw new Error(getComparisonError(response, data));
     }
 
     setMetric(lpipsValue, data.lpips);
