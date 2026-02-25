@@ -244,11 +244,18 @@ def compute_car_only_metrics(
     mask_downsample="bilinear",
     eps=1e-8,
     debug_dir=None,
+    car_only_dir=None,
     use_gpu=False,
 ):
     if segmenter is None:
         debug = {"mask_area_ratio": 0.0, "bbox": None, "fallback_reason": "Car-only deaktiviert"}
-        return {"lpips_car_only": None, "ssim_car_only": None, "psnr_car_only": None, "debug": debug}
+        return {
+            "lpips_car_only": None,
+            "ssim_car_only": None,
+            "psnr_car_only": None,
+            "car_only_paths": {"ref": None, "gen": None, "mask": None},
+            "debug": debug,
+        }
 
     ref_mask = segment_car_mask(ref_norm, segmenter, cache_key=f"ref::{Path(ref_path).resolve()}")
     gen_mask = segment_car_mask(gen_norm, segmenter, cache_key=f"gen::{Path(gen_path).resolve()}")
@@ -267,7 +274,13 @@ def compute_car_only_metrics(
     debug = {"mask_area_ratio": area_ratio, "bbox": None, "fallback_reason": None}
     if mask_area <= int(min_mask_area):
         debug["fallback_reason"] = f"Mask area zu klein ({mask_area} px)"
-        return {"lpips_car_only": None, "ssim_car_only": None, "psnr_car_only": None, "debug": debug}
+        return {
+            "lpips_car_only": None,
+            "ssim_car_only": None,
+            "psnr_car_only": None,
+            "car_only_paths": {"ref": None, "gen": None, "mask": None},
+            "debug": debug,
+        }
 
     bbox = compute_mask_bbox(mask, pad_px=pad_px)
     debug["bbox"] = {"x0": bbox[0], "y0": bbox[1], "x1": bbox[2], "y1": bbox[3], "pad_px": pad_px}
@@ -297,10 +310,11 @@ def compute_car_only_metrics(
     else:
         raise ValueError("car_mode muss 'neutralize_crop' oder 'weighted_lpips' sein")
 
+    stem = Path(ref_path).stem
+
     if debug_dir:
         debug_path = Path(debug_dir)
         debug_path.mkdir(parents=True, exist_ok=True)
-        stem = Path(ref_path).stem
         save_mask_image(mask, debug_path / f"{stem}_mask.png")
         with open(debug_path / f"{stem}_crop_box.json", "w", encoding="utf-8") as fp:
             json.dump(debug["bbox"], fp, indent=2)
@@ -308,10 +322,30 @@ def compute_car_only_metrics(
         np_to_pil_uint8(gen_car).save(debug_path / f"{stem}_gen_neutral.png")
         np_to_pil_uint8(np.repeat(mask_crop[..., None].astype(np.float32), 3, axis=2)).save(debug_path / f"{stem}_crop_mask.png")
 
+    car_only_paths = {"ref": None, "gen": None, "mask": None}
+    if car_only_dir:
+        car_only_path = Path(car_only_dir)
+        car_only_path.mkdir(parents=True, exist_ok=True)
+
+        ref_car_path = car_only_path / f"{stem}_ref_car_only.png"
+        gen_car_path = car_only_path / f"{stem}_gen_car_only.png"
+        mask_car_path = car_only_path / f"{stem}_car_mask.png"
+
+        np_to_pil_uint8(ref_car).save(ref_car_path)
+        np_to_pil_uint8(gen_car).save(gen_car_path)
+        np_to_pil_uint8(np.repeat(mask_crop[..., None].astype(np.float32), 3, axis=2)).save(mask_car_path)
+
+        car_only_paths = {
+            "ref": str(ref_car_path),
+            "gen": str(gen_car_path),
+            "mask": str(mask_car_path),
+        }
+
     return {
         "lpips_car_only": lpips_car,
         "ssim_car_only": ssim_car,
         "psnr_car_only": psnr_car,
+        "car_only_paths": car_only_paths,
         "debug": debug,
     }
 
@@ -447,6 +481,7 @@ def evaluate_pair(
     mask_downsample="bilinear",
     eps=1e-8,
     debug_dir=None,
+    car_only_dir=None,
 ):
     ref_img = load_image(ref_path)
     gen_img = load_image(gen_path)
@@ -482,6 +517,7 @@ def evaluate_pair(
         mask_downsample=mask_downsample,
         eps=eps,
         debug_dir=debug_dir,
+        car_only_dir=car_only_dir,
         use_gpu=use_gpu,
     )
     lpips_car_only_similarity_percent = convert_lpips_to_similarity_percent(car_metrics["lpips_car_only"])
@@ -501,6 +537,10 @@ def evaluate_pair(
         print(f"  BBox (car)         : {car_metrics['debug']['bbox']}")
         print(f"  LPIPS car-only     : {car_metrics['lpips_car_only']}")
         print(f"  LPIPS car-only (%) : {format_percent(lpips_car_only_similarity_percent)}")
+        if car_metrics.get("car_only_paths", {}).get("ref"):
+            print(f"  Car-only Ref saved : {car_metrics['car_only_paths']['ref']}")
+            print(f"  Car-only Gen saved : {car_metrics['car_only_paths']['gen']}")
+            print(f"  Car-only Mask saved: {car_metrics['car_only_paths']['mask']}")
     else:
         print("  Car-only           : deaktiviert (nutze Full-Image-Logik)")
     print(f"  Delta E (CIEDE2000): {delta_e_val:.6f}")
@@ -533,6 +573,9 @@ def evaluate_pair(
         "car_mask_area_ratio": car_metrics["debug"]["mask_area_ratio"],
         "car_bbox": json.dumps(car_metrics["debug"]["bbox"]) if car_metrics["debug"]["bbox"] else None,
         "car_fallback_reason": car_metrics["debug"]["fallback_reason"],
+        "car_only_ref_path": car_metrics["car_only_paths"]["ref"] if car_metrics.get("car_only_paths") else None,
+        "car_only_gen_path": car_metrics["car_only_paths"]["gen"] if car_metrics.get("car_only_paths") else None,
+        "car_only_mask_path": car_metrics["car_only_paths"]["mask"] if car_metrics.get("car_only_paths") else None,
     }
     result.update(geometric)
     return result
@@ -555,6 +598,7 @@ def evaluate_folders(
     mask_downsample="bilinear",
     eps=1e-8,
     debug_dir=None,
+    car_only_dir=None,
 ):
     ref_dir = Path(reference_dir)
     gen_dir = Path(generated_dir)
@@ -596,6 +640,7 @@ def evaluate_folders(
             mask_downsample=mask_downsample,
             eps=eps,
             debug_dir=debug_dir,
+            car_only_dir=car_only_dir,
         )
         results.append(result)
 
@@ -653,6 +698,7 @@ def parse_args():
     parser.add_argument("--eps", type=float, default=1e-8, help="Epsilon für weighted LPIPS")
     parser.add_argument("--mask-score-threshold", type=float, default=0.5, help="Score-Schwelle für Vehicle-Segmentierung")
     parser.add_argument("--debug-dir", default=None, help="Optionales Debug-Verzeichnis für Masken/Crops")
+    parser.add_argument("--car-only-dir", default="car_only", help="Verzeichnis für gespeicherte Car-only-Crops")
 
     parser.add_argument("--ref", help="Pfad zu einem einzelnen Referenzbild")
     parser.add_argument("--gen", help="Pfad zu einem einzelnen Generated-Bild")
@@ -716,6 +762,7 @@ def main():
             mask_downsample=args.mask_downsample,
             eps=args.eps,
             debug_dir=args.debug_dir,
+            car_only_dir=args.car_only_dir if args.enable_car_only else None,
         )
         pd.DataFrame([result]).to_csv(args.output_csv, index=False, float_format="%.6f")
         print(f"[INFO] Einzelvergleich gespeichert: {args.output_csv}")
@@ -738,6 +785,7 @@ def main():
         mask_downsample=args.mask_downsample,
         eps=args.eps,
         debug_dir=args.debug_dir,
+        car_only_dir=args.car_only_dir if args.enable_car_only else None,
     )
 
 
