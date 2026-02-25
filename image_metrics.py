@@ -375,6 +375,18 @@ def convert_lpips_to_similarity_percent(lpips_val):
     return float(np.clip((1.0 - lpips_val) * 100.0, 0.0, 100.0))
 
 
+def compute_foreground_mask_union(ref, gen):
+    ref_mask = create_foreground_mask(ref)
+    gen_mask = create_foreground_mask(gen)
+    union_mask = ref_mask | gen_mask
+
+    if not np.any(union_mask):
+        h, w = ref.shape[:2]
+        return np.ones((h, w), dtype=bool)
+
+    return union_mask.astype(bool)
+
+
 def format_percent(percent_value):
     if percent_value is None:
         return "None"
@@ -502,6 +514,18 @@ def evaluate_pair(
     geometric = compute_geometric_metrics(ref_norm, gen_norm)
     percent_metrics = convert_metrics_to_percent(ssim_val, lpips_val, delta_e_val)
 
+    foreground_mask = compute_foreground_mask_union(ref_norm, gen_norm)
+    lpips_foreground = masked_lpips(
+        ref_norm,
+        gen_norm,
+        foreground_mask,
+        lpips_model,
+        use_gpu=use_gpu,
+        mask_downsample=mask_downsample,
+        eps=eps,
+    )
+    lpips_foreground_similarity_percent = convert_lpips_to_similarity_percent(lpips_foreground)
+
     car_metrics = compute_car_only_metrics(
         ref_norm,
         gen_norm,
@@ -532,6 +556,8 @@ def evaluate_pair(
     print(f"  LPIPS              : {lpips_val:.6f}")
     print(f"  PSNR               : {psnr_val:.6f}")
     print(f"  LPIPS Similarity % : {percent_metrics['lpips_similarity_percent']:.2f}%")
+    print(f"  LPIPS foreground   : {lpips_foreground:.6f}")
+    print(f"  LPIPS foreground % : {format_percent(lpips_foreground_similarity_percent)}")
     if segmenter is not None:
         print(f"  Mask area (%)      : {car_metrics['debug']['mask_area_ratio'] * 100.0:.2f}%")
         print(f"  BBox (car)         : {car_metrics['debug']['bbox']}")
@@ -562,6 +588,8 @@ def evaluate_pair(
         "lpips": lpips_val,
         "psnr": psnr_val,
         "lpips_similarity_percent": percent_metrics["lpips_similarity_percent"],
+        "lpips_foreground": lpips_foreground,
+        "lpips_foreground_similarity_percent": lpips_foreground_similarity_percent,
         "delta_e_ciede2000": delta_e_val,
         "delta_e_similarity_percent": percent_metrics["delta_e_similarity_percent"],
         "ref_norm_path": ref_norm_path,
@@ -660,6 +688,8 @@ def evaluate_folders(
                 "ssim_percent",
                 "lpips",
                 "lpips_similarity_percent",
+                "lpips_foreground",
+                "lpips_foreground_similarity_percent",
                 "delta_e_ciede2000",
                 "delta_e_similarity_percent",
                 "lpips_car_only",
