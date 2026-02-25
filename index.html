@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mercedes Model Studio</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-star">✶</div>
+          <div>
+            <p class="eyebrow">Mercedes-Benz AI</p>
+            <h1>Model Studio</h1>
+          </div>
+        </div>
+        <button class="ghost-btn" id="themeToggle" type="button">Night Mode</button>
+      </header>
+
+      <main class="content-grid">
+        <section class="panel panel-input">
+          <h2>Modell konfigurieren</h2>
+          <p class="panel-intro">
+            Definiere Eingaben, passe Inferenz-Parameter an und starte die Berechnung im Mercedes Look &amp; Feel.
+          </p>
+
+          <label for="prompt">Prompt</label>
+          <textarea id="prompt" placeholder="Beschreibe das gewünschte Ergebnis..."></textarea>
+
+          <div class="field-row">
+            <label for="style">Designmodus</label>
+            <select id="style">
+              <option>Classic Silver</option>
+              <option>AMG Performance</option>
+              <option>Electric Blue</option>
+            </select>
+          </div>
+
+          <div class="slider-group">
+            <div class="slider-label">
+              <label for="temperature">Kreativität</label>
+              <span id="temperatureValue">0.60</span>
+            </div>
+            <input id="temperature" type="range" min="0" max="1" step="0.01" value="0.6" />
+          </div>
+
+          <div class="slider-group">
+            <div class="slider-label">
+              <label for="steps">Iterationsschritte</label>
+              <span id="stepsValue">35</span>
+            </div>
+            <input id="steps" type="range" min="10" max="100" step="1" value="35" />
+          </div>
+
+          <div class="actions">
+            <button class="primary-btn" id="runModel" type="button">Modell starten</button>
+            <button class="secondary-btn" id="resetForm" type="button">Zurücksetzen</button>
+          </div>
+        </section>
+
+        <section class="panel panel-output">
+          <div class="output-header">
+            <h2>Inference Dashboard</h2>
+            <span id="statusBadge" class="status-badge idle">Bereit</span>
+          </div>
+
+          <div class="preview-card" id="previewCard">
+            <p class="preview-title">Live-Vorschau</p>
+            <p id="previewText">Starte das Modell, um eine Ausgabevorschau zu sehen.</p>
+          </div>
+
+          <div class="stats-grid">
+            <article>
+              <p class="stat-label">Laufzeit</p>
+              <p id="runtime" class="stat-value">-- ms</p>
+            </article>
+            <article>
+              <p class="stat-label">Konfidenz</p>
+              <p id="confidence" class="stat-value">-- %</p>
+            </article>
+            <article>
+              <p class="stat-label">Speicher</p>
+              <p id="memory" class="stat-value">-- MB</p>
+            </article>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="script.js"></script>
+  </body>
+</html>
