@@ -15,7 +15,6 @@ const genPreview = document.getElementById('genPreview');
 const carOnlyPreviewSection = document.getElementById('carOnlyPreviewSection');
 const carRefPreview = document.getElementById('carRefPreview');
 const carGenPreview = document.getElementById('carGenPreview');
-const carMaskPreview = document.getElementById('carMaskPreview');
 
 const lpipsValue = document.getElementById('lpips');
 const lpipsSimilarity = document.getElementById('lpipsSimilarity');
@@ -101,18 +100,16 @@ function setPreviewImage(imgTarget, value) {
 }
 
 function updateCarOnlyPreview(data) {
-  const hasCarPreview = Boolean(data?.car_only_ref_preview || data?.car_only_gen_preview || data?.car_only_mask_preview);
+  const hasCarPreview = Boolean(data?.car_only_ref_preview || data?.car_only_gen_preview);
   if (!hasCarPreview) {
     carOnlyPreviewSection.hidden = true;
     setPreviewImage(carRefPreview, null);
     setPreviewImage(carGenPreview, null);
-    setPreviewImage(carMaskPreview, null);
     return;
   }
 
   setPreviewImage(carRefPreview, data.car_only_ref_preview);
   setPreviewImage(carGenPreview, data.car_only_gen_preview);
-  setPreviewImage(carMaskPreview, data.car_only_mask_preview);
   carOnlyPreviewSection.hidden = false;
 }
 
