@@ -20,7 +20,6 @@ const carMaskPreview = document.getElementById('carMaskPreview');
 const lpipsValue = document.getElementById('lpips');
 const lpipsSimilarity = document.getElementById('lpipsSimilarity');
 const ssim = document.getElementById('ssim');
-const psnr = document.getElementById('psnr');
 const deltaE = document.getElementById('deltaE');
 const lpipsCar = document.getElementById('lpipsCar');
 const maskIou = document.getElementById('maskIou');
@@ -47,6 +46,17 @@ function warnBrowser(message, details = null) {
 function setStatus(mode, text) {
   statusBadge.className = `status-badge ${mode}`;
   statusBadge.textContent = text;
+}
+
+function formatMetricPair(mainValue, percentValue) {
+  const numericMain = Number(mainValue);
+  const numericPercent = Number(percentValue);
+
+  if (Number.isNaN(numericMain) || Number.isNaN(numericPercent)) {
+    return '--';
+  }
+
+  return `${numericMain.toFixed(4)} (${numericPercent.toFixed(2)} %)`;
 }
 
 function setMetric(target, value, suffix = '') {
@@ -242,10 +252,9 @@ async function runComparison() {
 
     setMetric(lpipsValue, data.lpips);
     setMetric(lpipsSimilarity, data.lpips_similarity_percent, ' %');
-    setMetric(ssim, data.ssim);
-    setMetric(psnr, data.psnr, ' dB');
+    ssim.textContent = formatMetricPair(data.ssim, data.ssim_percent);
     setMetric(deltaE, data.delta_e_ciede2000);
-    setMetric(lpipsCar, data.lpips_car_only);
+    lpipsCar.textContent = formatMetricPair(data.lpips_car_only, data.lpips_car_only_similarity_percent);
     setMetric(maskIou, data.mask_iou);
     setMetric(maskDice, data.mask_dice);
     updateCarOnlyPreview(data);
@@ -273,10 +282,9 @@ function resetInterface() {
   genPreview.removeAttribute('src');
   updateCarOnlyPreview(null);
 
-  [lpipsValue, lpipsSimilarity, ssim, psnr, deltaE, lpipsCar, maskIou, maskDice].forEach((node) => {
+  [lpipsValue, lpipsSimilarity, ssim, deltaE, lpipsCar, maskIou, maskDice].forEach((node) => {
     node.textContent = node.id.includes('Similarity') ? '-- %' : '--';
   });
-  psnr.textContent = '-- dB';
 
   previewText.textContent = 'Lade zwei Bilder hoch und starte den Vergleich.';
   setStatus('idle', 'Bereit');
