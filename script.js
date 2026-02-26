@@ -27,6 +27,7 @@ const maskIou = document.getElementById('maskIou');
 const maskDice = document.getElementById('maskDice');
 
 const fallbackApiOrigins = ['http://127.0.0.1:4173', 'http://localhost:4173'];
+let isComparisonRunning = false;
 
 function logBrowser(message, details = null) {
   if (details === null) {
@@ -53,6 +54,18 @@ function setStatus(mode, text) {
 function setLoadingState(isLoading) {
   loadingIndicator.hidden = !isLoading;
   runModel.disabled = isLoading;
+}
+
+function startCalculation(message) {
+  isComparisonRunning = true;
+  setStatus('running', 'Vergleiche');
+  setLoadingState(true);
+  previewText.textContent = message;
+}
+
+function stopCalculation() {
+  isComparisonRunning = false;
+  setLoadingState(false);
 }
 
 function closeMetricInfoBoxes(exceptBox = null) {
@@ -169,11 +182,16 @@ function renderComparisonList(comparisons) {
 
     const contentNode = document.createElement('div');
     contentNode.className = 'comparison-item-content';
+    const hasPairPreview = Boolean(item.ref_preview || item.gen_preview);
     contentNode.innerHTML = `
-      <div class="comparison-mini-grid">
+      ${
+        hasPairPreview
+          ? `<div class="comparison-mini-grid">
         <img src="${item.ref_preview || ''}" alt="Referenz ${item.filename || ''}" />
         <img src="${item.gen_preview || ''}" alt="Generated ${item.filename || ''}" />
-      </div>
+      </div>`
+          : '<p class="comparison-note">Vorschau für Batch-Elemente deaktiviert, um Stabilität und Geschwindigkeit zu verbessern.</p>'
+      }
       <ul>
         <li>LPIPS: ${formatMetricPair(item.lpips, item.lpips_similarity_percent)}</li>
         <li>SSIM: ${formatMetricPair(item.ssim, item.ssim_percent)}</li>
@@ -198,8 +216,10 @@ function renderComparisonList(comparisons) {
       });
 
       renderMetrics(item);
-      setPreviewImage(refPreview, item.ref_preview);
-      setPreviewImage(genPreview, item.gen_preview);
+      if (item.ref_preview || item.gen_preview) {
+        setPreviewImage(refPreview, item.ref_preview);
+        setPreviewImage(genPreview, item.gen_preview);
+      }
       updateCarOnlyPreview(item);
       previewText.textContent = `Vergleich abgeschlossen für ${item.filename}.`; 
     });
@@ -311,6 +331,10 @@ async function sendComparisonRequest(payload) {
 }
 
 async function runComparison() {
+  if (isComparisonRunning) {
+    return;
+  }
+
   const [refFile] = refImage.files;
   const [genFile] = genImage.files;
 
@@ -320,9 +344,7 @@ async function runComparison() {
     return;
   }
 
-  setStatus('running', 'Vergleiche');
-  setLoadingState(true);
-  previewText.textContent = 'Berechne Metriken mit Python-Backend...';
+  startCalculation('Berechne Metriken mit Python-Backend...');
 
   const payload = new FormData();
   payload.append('ref_image', refFile);
@@ -353,7 +375,10 @@ async function runComparison() {
 
     const isBatch = Boolean(data.batch_mode && data.comparison_count > 1);
     if (isBatch) {
-      previewText.textContent = `Vergleich abgeschlossen: ${data.comparison_count} passende Dateipaare ausgewertet.`;
+      const previewHint = data.batch_previews_limited
+        ? ' Vorschauen wurden nur für das erste Paar geladen, um Abstürze bei großen ZIP-Dateien zu vermeiden.'
+        : '';
+      previewText.textContent = `Vergleich abgeschlossen: ${data.comparison_count} passende Dateipaare ausgewertet.${previewHint}`;
     } else {
       previewText.textContent = `Vergleich abgeschlossen für ${firstComparison.filename}. Ergebnisse aus image_metrics.py wurden geladen.`;
     }
@@ -368,7 +393,7 @@ async function runComparison() {
     previewText.textContent = `Fehler: ${error.message}`;
     console.error('[CompareGUI] Vergleich abgebrochen', error);
   } finally {
-    setLoadingState(false);
+    stopCalculation();
   }
 }
 
@@ -392,7 +417,7 @@ function resetInterface() {
 
   previewText.textContent = 'Lade zwei Bilder hoch und starte den Vergleich.';
   setStatus('idle', 'Bereit');
-  setLoadingState(false);
+  stopCalculation();
 }
 
 metricInfoBoxes.forEach((box) => {
@@ -421,4 +446,4 @@ genImage.addEventListener('change', () => showPreview(genImage, genPreview));
 runModel.addEventListener('click', runComparison);
 resetForm.addEventListener('click', resetInterface);
 
-setLoadingState(false);
+stopCalculation();
