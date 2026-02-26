@@ -259,6 +259,12 @@ button {
   gap: 0.7rem;
 }
 
+.comparison-note {
+  margin: 0.3rem 0 0.7rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
 .comparison-item {
   margin-bottom: 0;
 }
