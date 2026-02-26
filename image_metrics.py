@@ -160,13 +160,6 @@ def compute_lpips_on_content(ref, gen, content_mask, lpips_model, use_gpu=False,
     )
 
 
-def compute_psnr(ref, gen, eps=1e-12):
-    mse = float(np.mean((ref - gen) ** 2))
-    if mse <= eps:
-        return float("inf")
-    return float(10.0 * np.log10(1.0 / mse))
-
-
 def build_vehicle_segmenter(use_gpu=False, score_threshold=0.5, mask_threshold=0.5):
     if torch is None:
         raise RuntimeError(f"torch ist nicht verfügbar ({TORCH_IMPORT_ERROR}). Deaktiviere --enable-car-only oder installiere torch korrekt.")
@@ -265,6 +258,15 @@ def apply_neutralize_crop(img, mask, bbox, neutral_value=0.5):
     return img_crop, mask_crop
 
 
+def apply_masked_car_crop(img, mask, bbox):
+    x0, y0, x1, y1 = bbox
+    img_crop = img[y0:y1, x0:x1, :].copy()
+    mask_crop = mask[y0:y1, x0:x1]
+    masked_crop = np.zeros_like(img_crop)
+    masked_crop[mask_crop] = img_crop[mask_crop]
+    return masked_crop, mask_crop
+
+
 def downsample_mask_torch(mask_t, target_hw, mode="bilinear"):
     if torch is None:
         raise RuntimeError(f"'torch' ist nicht verfügbar: {TORCH_IMPORT_ERROR}")
@@ -348,7 +350,6 @@ def compute_car_only_metrics(
         return {
             "lpips_car_only": None,
             "ssim_car_only": None,
-            "psnr_car_only": None,
             "car_only_paths": {"ref": None, "gen": None, "mask": None},
             "debug": debug,
         }
@@ -393,7 +394,6 @@ def compute_car_only_metrics(
         return {
             "lpips_car_only": None,
             "ssim_car_only": None,
-            "psnr_car_only": None,
             "car_only_paths": {"ref": None, "gen": None, "mask": None},
             "debug": debug,
         }
@@ -404,14 +404,17 @@ def compute_car_only_metrics(
     if car_mode == "neutralize_crop":
         ref_car, mask_crop = apply_neutralize_crop(ref_norm, mask, bbox, neutral_value=neutral_value)
         gen_car, _ = apply_neutralize_crop(gen_norm, mask, bbox, neutral_value=neutral_value)
+        ref_preview, _ = apply_masked_car_crop(ref_norm, mask, bbox)
+        gen_preview, _ = apply_masked_car_crop(gen_norm, mask, bbox)
         lpips_car = compute_lpips(ref_car, gen_car, lpips_model, use_gpu=use_gpu)
         ssim_car = compute_ssim(ref_car, gen_car)
-        psnr_car = compute_psnr(ref_car, gen_car)
     elif car_mode == "weighted_lpips":
         x0, y0, x1, y1 = bbox
         ref_car = ref_norm[y0:y1, x0:x1, :]
         gen_car = gen_norm[y0:y1, x0:x1, :]
         mask_crop = mask[y0:y1, x0:x1]
+        ref_preview, _ = apply_masked_car_crop(ref_norm, mask, bbox)
+        gen_preview, _ = apply_masked_car_crop(gen_norm, mask, bbox)
         lpips_car = masked_lpips(
             ref_car,
             gen_car,
@@ -422,7 +425,6 @@ def compute_car_only_metrics(
             eps=eps,
         )
         ssim_car = compute_ssim(ref_car, gen_car)
-        psnr_car = compute_psnr(ref_car, gen_car)
     else:
         raise ValueError("car_mode muss 'neutralize_crop' oder 'weighted_lpips' sein")
 
@@ -447,8 +449,8 @@ def compute_car_only_metrics(
         gen_car_path = car_only_path / f"{stem}_gen_car_only.png"
         mask_car_path = car_only_path / f"{stem}_car_mask.png"
 
-        np_to_pil_uint8(ref_car).save(ref_car_path)
-        np_to_pil_uint8(gen_car).save(gen_car_path)
+        np_to_pil_uint8(ref_preview).save(ref_car_path)
+        np_to_pil_uint8(gen_preview).save(gen_car_path)
         np_to_pil_uint8(np.repeat(mask_crop[..., None].astype(np.float32), 3, axis=2)).save(mask_car_path)
 
         car_only_paths = {
@@ -460,7 +462,6 @@ def compute_car_only_metrics(
     return {
         "lpips_car_only": lpips_car,
         "ssim_car_only": ssim_car,
-        "psnr_car_only": psnr_car,
         "car_only_paths": car_only_paths,
         "debug": debug,
     }
@@ -640,7 +641,6 @@ def evaluate_pair(
         mask_downsample=mask_downsample,
         eps=eps,
     )
-    psnr_val = compute_psnr(ref_norm, gen_norm)
     delta_e_val = compute_delta_e(ref_norm, gen_norm)
     geometric = compute_geometric_metrics(ref_norm, gen_norm)
     percent_metrics = convert_metrics_to_percent(ssim_val, lpips_val, delta_e_val)
@@ -691,7 +691,6 @@ def evaluate_pair(
     print(f"  SSIM               : {ssim_val:.6f}")
     print(f"  SSIM (%)           : {percent_metrics['ssim_percent']:.2f}%")
     print(f"  LPIPS              : {lpips_val:.6f}")
-    print(f"  PSNR               : {psnr_val:.6f}")
     print(f"  LPIPS Similarity % : {percent_metrics['lpips_similarity_percent']:.2f}%")
     print(f"  LPIPS foreground   : {lpips_foreground:.6f}")
     print(f"  LPIPS foreground % : {format_percent(lpips_foreground_similarity_percent)}")
@@ -723,7 +722,6 @@ def evaluate_pair(
         "ssim": ssim_val,
         "ssim_percent": percent_metrics["ssim_percent"],
         "lpips": lpips_val,
-        "psnr": psnr_val,
         "lpips_similarity_percent": percent_metrics["lpips_similarity_percent"],
         "lpips_foreground": lpips_foreground,
         "lpips_foreground_similarity_percent": lpips_foreground_similarity_percent,
@@ -734,7 +732,6 @@ def evaluate_pair(
         "lpips_car_only": car_metrics["lpips_car_only"],
         "lpips_car_only_similarity_percent": lpips_car_only_similarity_percent,
         "ssim_car_only": car_metrics["ssim_car_only"],
-        "psnr_car_only": car_metrics["psnr_car_only"],
         "car_mask_area_ratio": car_metrics["debug"]["mask_area_ratio"],
         "car_bbox": json.dumps(car_metrics["debug"]["bbox"]) if car_metrics["debug"]["bbox"] else None,
         "car_fallback_reason": car_metrics["debug"]["fallback_reason"],
@@ -862,7 +859,7 @@ def parse_args():
     parser.add_argument("--output-csv", default="image_metrics_results.csv", help="CSV-Datei für Metrikergebnisse")
     parser.add_argument("--lpips-net", default="alex", choices=["alex", "vgg", "squeeze"], help="Backbone für LPIPS")
     parser.add_argument("--use-gpu", action="store_true", help="Nutze CUDA, falls verfügbar")
-    parser.add_argument("--enable-car-only", action="store_true", help="Aktiviere Car-only Metriken (LPIPS/SSIM/PSNR)")
+    parser.add_argument("--enable-car-only", action="store_true", help="Aktiviere Car-only Metriken (LPIPS/SSIM)")
     parser.add_argument("--car-only", action="store_true", help="Kurzform für --enable-car-only")
     parser.add_argument("--car-mode", default="neutralize_crop", choices=["neutralize_crop", "weighted_lpips"], help="Auto-fokussierte LPIPS-Berechnung")
     parser.add_argument("--mask-source", default="ref", choices=["ref", "gen", "union"], help="Quelle für die Auto-Maske")
