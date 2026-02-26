@@ -113,13 +113,66 @@
           </section>
 
           <div class="stats-grid">
-            <article><p class="stat-label">LPIPS (Wert + %)</p><p id="lpips" class="stat-value">--</p></article>
-            <article><p class="stat-label">SSIM (Wert + %)</p><p id="ssim" class="stat-value">--</p></article>
-            <article><p class="stat-label">ΔE CIEDE2000 (Wert + %)</p><p id="deltaE" class="stat-value">--</p></article>
-            <article><p class="stat-label">LPIPS car-only (Wert + %)</p><p id="lpipsCar" class="stat-value">--</p></article>
-            <article><p class="stat-label">Mask IoU</p><p id="maskIou" class="stat-value">--</p></article>
-            <article><p class="stat-label">Mask Dice</p><p id="maskDice" class="stat-value">--</p></article>
-            <article><p class="stat-label">Hinweis Maskenmetriken</p><p class="stat-value stat-info">IoU = Überschneidung/Union, Dice = 2·Schnittmenge/(Summe Flächen).</p></article>
+            <article>
+              <div class="stat-label-row">
+                <p class="stat-label">LPIPS (Wert + %)</p>
+                <details class="metric-info">
+                  <summary aria-label="LPIPS Erklärung anzeigen">ⓘ</summary>
+                  <p>Niedriger ist besser: 0 bedeutet nahezu identisch.</p>
+                </details>
+              </div>
+              <p id="lpips" class="stat-value">--</p>
+            </article>
+            <article>
+              <div class="stat-label-row">
+                <p class="stat-label">SSIM (Wert + %)</p>
+                <details class="metric-info">
+                  <summary aria-label="SSIM Erklärung anzeigen">ⓘ</summary>
+                  <p>Höher ist besser: 1 bedeutet strukturell sehr ähnlich.</p>
+                </details>
+              </div>
+              <p id="ssim" class="stat-value">--</p>
+            </article>
+            <article>
+              <div class="stat-label-row">
+                <p class="stat-label">ΔE CIEDE2000 (Wert + %)</p>
+                <details class="metric-info">
+                  <summary aria-label="DeltaE Erklärung anzeigen">ⓘ</summary>
+                  <p>Niedriger ist besser: misst den sichtbaren Farbabstand.</p>
+                </details>
+              </div>
+              <p id="deltaE" class="stat-value">--</p>
+            </article>
+            <article>
+              <div class="stat-label-row">
+                <p class="stat-label">LPIPS car-only (Wert + %)</p>
+                <details class="metric-info">
+                  <summary aria-label="LPIPS car-only Erklärung anzeigen">ⓘ</summary>
+                  <p>Wie LPIPS, aber nur im Fahrzeugbereich; niedriger ist besser.</p>
+                </details>
+              </div>
+              <p id="lpipsCar" class="stat-value">--</p>
+            </article>
+            <article>
+              <div class="stat-label-row">
+                <p class="stat-label">Mask IoU</p>
+                <details class="metric-info">
+                  <summary aria-label="Mask IoU Erklärung anzeigen">ⓘ</summary>
+                  <p>Höher ist besser: Anteil der überlappenden Maskenfläche.</p>
+                </details>
+              </div>
+              <p id="maskIou" class="stat-value">--</p>
+            </article>
+            <article>
+              <div class="stat-label-row">
+                <p class="stat-label">Mask Dice</p>
+                <details class="metric-info">
+                  <summary aria-label="Mask Dice Erklärung anzeigen">ⓘ</summary>
+                  <p>Höher ist besser: gewichtet gemeinsame Fläche doppelt.</p>
+                </details>
+              </div>
+              <p id="maskDice" class="stat-value">--</p>
+            </article>
           </div>
         </section>
       </main>
