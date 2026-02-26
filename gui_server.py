@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import zipfile
 from http import HTTPStatus
@@ -88,7 +89,7 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             gen_path, gen_origin = self.store_upload_as_image(payload["gen_image"], tmp_path, "gen")
 
             command = [
-                "python",
+                sys.executable,
                 str(BASE_DIR / "image_metrics.py"),
                 "--ref",
                 str(ref_path),
