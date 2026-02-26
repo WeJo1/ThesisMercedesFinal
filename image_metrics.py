@@ -350,7 +350,7 @@ def compute_car_only_metrics(
         return {
             "lpips_car_only": None,
             "ssim_car_only": None,
-            "car_only_paths": {"ref": None, "gen": None, "mask": None},
+            "car_only_paths": {"ref": None, "gen": None},
             "debug": debug,
         }
 
@@ -394,7 +394,7 @@ def compute_car_only_metrics(
         return {
             "lpips_car_only": None,
             "ssim_car_only": None,
-            "car_only_paths": {"ref": None, "gen": None, "mask": None},
+            "car_only_paths": {"ref": None, "gen": None},
             "debug": debug,
         }
 
@@ -440,23 +440,19 @@ def compute_car_only_metrics(
         np_to_pil_uint8(gen_car).save(debug_path / f"{stem}_gen_neutral.png")
         np_to_pil_uint8(np.repeat(mask_crop[..., None].astype(np.float32), 3, axis=2)).save(debug_path / f"{stem}_crop_mask.png")
 
-    car_only_paths = {"ref": None, "gen": None, "mask": None}
+    car_only_paths = {"ref": None, "gen": None}
     if car_only_dir:
         car_only_path = Path(car_only_dir)
         car_only_path.mkdir(parents=True, exist_ok=True)
 
         ref_car_path = car_only_path / f"{stem}_ref_car_only.png"
         gen_car_path = car_only_path / f"{stem}_gen_car_only.png"
-        mask_car_path = car_only_path / f"{stem}_car_mask.png"
-
         np_to_pil_uint8(ref_preview).save(ref_car_path)
         np_to_pil_uint8(gen_preview).save(gen_car_path)
-        np_to_pil_uint8(np.repeat(mask_crop[..., None].astype(np.float32), 3, axis=2)).save(mask_car_path)
 
         car_only_paths = {
             "ref": str(ref_car_path),
             "gen": str(gen_car_path),
-            "mask": str(mask_car_path),
         }
 
     return {
@@ -702,7 +698,6 @@ def evaluate_pair(
         if car_metrics.get("car_only_paths", {}).get("ref"):
             print(f"  Car-only Ref saved : {car_metrics['car_only_paths']['ref']}")
             print(f"  Car-only Gen saved : {car_metrics['car_only_paths']['gen']}")
-            print(f"  Car-only Mask saved: {car_metrics['car_only_paths']['mask']}")
     else:
         print("  Car-only           : deaktiviert (nutze Full-Image-Logik)")
     print(f"  Delta E (CIEDE2000): {delta_e_val:.6f}")
@@ -737,7 +732,6 @@ def evaluate_pair(
         "car_fallback_reason": car_metrics["debug"]["fallback_reason"],
         "car_only_ref_path": car_metrics["car_only_paths"]["ref"] if car_metrics.get("car_only_paths") else None,
         "car_only_gen_path": car_metrics["car_only_paths"]["gen"] if car_metrics.get("car_only_paths") else None,
-        "car_only_mask_path": car_metrics["car_only_paths"]["mask"] if car_metrics.get("car_only_paths") else None,
     }
     result.update(geometric)
     return result
