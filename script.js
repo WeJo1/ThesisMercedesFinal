@@ -9,6 +9,7 @@ const runModel = document.getElementById('runModel');
 const resetForm = document.getElementById('resetForm');
 const statusBadge = document.getElementById('statusBadge');
 const previewText = document.getElementById('previewText');
+const loadingIndicator = document.getElementById('loadingIndicator');
 const refPreview = document.getElementById('refPreview');
 const genPreview = document.getElementById('genPreview');
 const carOnlyPreviewSection = document.getElementById('carOnlyPreviewSection');
@@ -16,6 +17,7 @@ const carRefPreview = document.getElementById('carRefPreview');
 const carGenPreview = document.getElementById('carGenPreview');
 const comparisonSection = document.getElementById('comparisonSection');
 const comparisonList = document.getElementById('comparisonList');
+const metricInfoBoxes = document.querySelectorAll('.metric-info');
 
 const lpipsValue = document.getElementById('lpips');
 const ssim = document.getElementById('ssim');
@@ -45,6 +47,21 @@ function warnBrowser(message, details = null) {
 function setStatus(mode, text) {
   statusBadge.className = `status-badge ${mode}`;
   statusBadge.textContent = text;
+}
+
+
+function setLoadingState(isLoading) {
+  loadingIndicator.hidden = !isLoading;
+  runModel.disabled = isLoading;
+}
+
+function closeMetricInfoBoxes(exceptBox = null) {
+  metricInfoBoxes.forEach((box) => {
+    if (box === exceptBox) {
+      return;
+    }
+    box.open = false;
+  });
 }
 
 function formatMetricPair(mainValue, percentValue) {
@@ -304,6 +321,7 @@ async function runComparison() {
   }
 
   setStatus('running', 'Vergleiche');
+  setLoadingState(true);
   previewText.textContent = 'Berechne Metriken mit Python-Backend...';
 
   const payload = new FormData();
@@ -349,6 +367,8 @@ async function runComparison() {
     comparisonList.innerHTML = '';
     previewText.textContent = `Fehler: ${error.message}`;
     console.error('[CompareGUI] Vergleich abgebrochen', error);
+  } finally {
+    setLoadingState(false);
   }
 }
 
@@ -372,9 +392,33 @@ function resetInterface() {
 
   previewText.textContent = 'Lade zwei Bilder hoch und starte den Vergleich.';
   setStatus('idle', 'Bereit');
+  setLoadingState(false);
 }
+
+metricInfoBoxes.forEach((box) => {
+  box.addEventListener('toggle', () => {
+    if (box.open) {
+      closeMetricInfoBoxes(box);
+    }
+  });
+});
+
+document.addEventListener('click', (event) => {
+  const clickedInsideInfoBox = event.target instanceof Element && event.target.closest('.metric-info');
+  if (!clickedInsideInfoBox) {
+    closeMetricInfoBoxes();
+  }
+});
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    closeMetricInfoBoxes();
+  }
+});
 
 refImage.addEventListener('change', () => showPreview(refImage, refPreview));
 genImage.addEventListener('change', () => showPreview(genImage, genPreview));
 runModel.addEventListener('click', runComparison);
 resetForm.addEventListener('click', resetInterface);
+
+setLoadingState(false);
