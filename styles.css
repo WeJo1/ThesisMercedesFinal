@@ -327,6 +327,51 @@ button {
   color: var(--text-muted);
 }
 
+.stat-label-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.45rem;
+}
+
+.metric-info {
+  margin-left: auto;
+  position: relative;
+}
+
+.metric-info summary {
+  all: unset;
+  cursor: pointer;
+  color: rgba(173, 186, 212, 0.72);
+  line-height: 1;
+  font-size: 0.92rem;
+}
+
+.metric-info summary:hover {
+  color: rgba(173, 186, 212, 0.95);
+}
+
+.metric-info[open] summary {
+  color: var(--text-primary);
+}
+
+.metric-info p {
+  margin: 0;
+  position: absolute;
+  top: 1.2rem;
+  right: 0;
+  z-index: 5;
+  width: min(220px, 50vw);
+  padding: 0.5rem 0.6rem;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--text-primary);
+  border: 1px solid var(--panel-border);
+  border-radius: 0.45rem;
+  background: rgba(8, 18, 34, 0.96);
+  box-shadow: 0 8px 14px rgba(0, 0, 0, 0.35);
+}
+
 .stat-value {
   margin-top: 0.35rem;
   margin-bottom: 0;
