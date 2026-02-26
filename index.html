@@ -16,7 +16,6 @@
             <h1>Image Metrics Studio</h1>
           </div>
         </div>
-        <button class="ghost-btn" id="themeToggle" type="button">Night Mode</button>
       </header>
 
       <main class="content-grid">
@@ -83,6 +82,11 @@
             <p id="previewText">Lade zwei Bilder hoch und starte den Vergleich.</p>
           </div>
 
+          <section id="comparisonSection" class="comparison-section" hidden>
+            <p class="preview-title">Vergleichspaare (Dateiname anklicken)</p>
+            <div id="comparisonList" class="comparison-list"></div>
+          </section>
+
           <div class="image-preview-grid">
             <figure>
               <figcaption>Referenzbild</figcaption>
@@ -93,7 +97,6 @@
               <img id="genPreview" alt="Generated Vorschau" />
             </figure>
           </div>
-
 
           <section id="carOnlyPreviewSection" class="car-preview-section" hidden>
             <p class="preview-title">Car-Only Zuschnitt (Preview)</p>
@@ -110,13 +113,13 @@
           </section>
 
           <div class="stats-grid">
-            <article><p class="stat-label">LPIPS</p><p id="lpips" class="stat-value">--</p></article>
-            <article><p class="stat-label">LPIPS Similarity</p><p id="lpipsSimilarity" class="stat-value">-- %</p></article>
+            <article><p class="stat-label">LPIPS (Wert + %)</p><p id="lpips" class="stat-value">--</p></article>
             <article><p class="stat-label">SSIM (Wert + %)</p><p id="ssim" class="stat-value">--</p></article>
-            <article><p class="stat-label">ΔE CIEDE2000</p><p id="deltaE" class="stat-value">--</p></article>
+            <article><p class="stat-label">ΔE CIEDE2000 (Wert + %)</p><p id="deltaE" class="stat-value">--</p></article>
             <article><p class="stat-label">LPIPS car-only (Wert + %)</p><p id="lpipsCar" class="stat-value">--</p></article>
             <article><p class="stat-label">Mask IoU</p><p id="maskIou" class="stat-value">--</p></article>
             <article><p class="stat-label">Mask Dice</p><p id="maskDice" class="stat-value">--</p></article>
+            <article><p class="stat-label">Hinweis Maskenmetriken</p><p class="stat-value stat-info">IoU = Überschneidung/Union, Dice = 2·Schnittmenge/(Summe Flächen).</p></article>
           </div>
         </section>
       </main>

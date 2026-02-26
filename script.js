@@ -9,15 +9,15 @@ const runModel = document.getElementById('runModel');
 const resetForm = document.getElementById('resetForm');
 const statusBadge = document.getElementById('statusBadge');
 const previewText = document.getElementById('previewText');
-const themeToggle = document.getElementById('themeToggle');
 const refPreview = document.getElementById('refPreview');
 const genPreview = document.getElementById('genPreview');
 const carOnlyPreviewSection = document.getElementById('carOnlyPreviewSection');
 const carRefPreview = document.getElementById('carRefPreview');
 const carGenPreview = document.getElementById('carGenPreview');
+const comparisonSection = document.getElementById('comparisonSection');
+const comparisonList = document.getElementById('comparisonList');
 
 const lpipsValue = document.getElementById('lpips');
-const lpipsSimilarity = document.getElementById('lpipsSimilarity');
 const ssim = document.getElementById('ssim');
 const deltaE = document.getElementById('deltaE');
 const lpipsCar = document.getElementById('lpipsCar');
@@ -56,6 +56,15 @@ function formatMetricPair(mainValue, percentValue) {
   }
 
   return `${numericMain.toFixed(4)} (${numericPercent.toFixed(2)} %)`;
+}
+
+
+function formatNumeric(value, digits = 4, suffix = '') {
+  const numeric = Number(value);
+  if (Number.isNaN(numeric)) {
+    return '--';
+  }
+  return `${numeric.toFixed(digits)}${suffix}`;
 }
 
 function setMetric(target, value, suffix = '') {
@@ -111,6 +120,75 @@ function updateCarOnlyPreview(data) {
   setPreviewImage(carRefPreview, data.car_only_ref_preview);
   setPreviewImage(carGenPreview, data.car_only_gen_preview);
   carOnlyPreviewSection.hidden = false;
+}
+
+function renderMetrics(data) {
+  lpipsValue.textContent = formatMetricPair(data.lpips, data.lpips_similarity_percent);
+  ssim.textContent = formatMetricPair(data.ssim, data.ssim_percent);
+  deltaE.textContent = formatMetricPair(data.delta_e_ciede2000, data.delta_e_similarity_percent);
+  lpipsCar.textContent = formatMetricPair(data.lpips_car_only, data.lpips_car_only_similarity_percent);
+  setMetric(maskIou, data.mask_iou);
+  setMetric(maskDice, data.mask_dice);
+}
+
+function renderComparisonList(comparisons) {
+  if (!Array.isArray(comparisons) || comparisons.length <= 1) {
+    comparisonSection.hidden = true;
+    comparisonList.innerHTML = '';
+    return;
+  }
+
+  comparisonSection.hidden = false;
+  comparisonList.innerHTML = '';
+
+  comparisons.forEach((item, index) => {
+    const detailsNode = document.createElement('details');
+    detailsNode.className = 'comparison-item';
+    detailsNode.open = index === 0;
+
+    const summaryNode = document.createElement('summary');
+    summaryNode.textContent = item.filename || `Paar ${index + 1}`;
+    detailsNode.append(summaryNode);
+
+    const contentNode = document.createElement('div');
+    contentNode.className = 'comparison-item-content';
+    contentNode.innerHTML = `
+      <div class="comparison-mini-grid">
+        <img src="${item.ref_preview || ''}" alt="Referenz ${item.filename || ''}" />
+        <img src="${item.gen_preview || ''}" alt="Generated ${item.filename || ''}" />
+      </div>
+      <ul>
+        <li>LPIPS: ${formatMetricPair(item.lpips, item.lpips_similarity_percent)}</li>
+        <li>SSIM: ${formatMetricPair(item.ssim, item.ssim_percent)}</li>
+        <li>ΔE CIEDE2000: ${formatMetricPair(item.delta_e_ciede2000, item.delta_e_similarity_percent)}</li>
+      </ul>
+    `;
+    detailsNode.append(contentNode);
+
+    detailsNode.addEventListener('toggle', () => {
+      if (!detailsNode.open) {
+        return;
+      }
+
+      comparisons.forEach((_, innerIndex) => {
+        if (innerIndex === index) {
+          return;
+        }
+        const sibling = comparisonList.children[innerIndex];
+        if (sibling) {
+          sibling.open = false;
+        }
+      });
+
+      renderMetrics(item);
+      setPreviewImage(refPreview, item.ref_preview);
+      setPreviewImage(genPreview, item.gen_preview);
+      updateCarOnlyPreview(item);
+      previewText.textContent = `Vergleich abgeschlossen für ${item.filename}.`; 
+    });
+
+    comparisonList.append(detailsNode);
+  });
 }
 
 async function parseCompareResponse(response) {
@@ -246,22 +324,29 @@ async function runComparison() {
       maskSource: maskSource.value,
     });
     const data = await sendComparisonRequest(payload);
+    const comparisons = Array.isArray(data.comparisons) && data.comparisons.length > 0 ? data.comparisons : [data];
+    const firstComparison = comparisons[0];
 
-    setMetric(lpipsValue, data.lpips);
-    setMetric(lpipsSimilarity, data.lpips_similarity_percent, ' %');
-    ssim.textContent = formatMetricPair(data.ssim, data.ssim_percent);
-    setMetric(deltaE, data.delta_e_ciede2000);
-    lpipsCar.textContent = formatMetricPair(data.lpips_car_only, data.lpips_car_only_similarity_percent);
-    setMetric(maskIou, data.mask_iou);
-    setMetric(maskDice, data.mask_dice);
-    updateCarOnlyPreview(data);
+    renderMetrics(firstComparison);
+    setPreviewImage(refPreview, firstComparison.ref_preview);
+    setPreviewImage(genPreview, firstComparison.gen_preview);
+    updateCarOnlyPreview(firstComparison);
+    renderComparisonList(comparisons);
 
-    previewText.textContent = `Vergleich abgeschlossen für ${data.filename}. Ergebnisse aus image_metrics.py wurden geladen.`;
+    const isBatch = Boolean(data.batch_mode && data.comparison_count > 1);
+    if (isBatch) {
+      previewText.textContent = `Vergleich abgeschlossen: ${data.comparison_count} passende Dateipaare ausgewertet.`;
+    } else {
+      previewText.textContent = `Vergleich abgeschlossen für ${firstComparison.filename}. Ergebnisse aus image_metrics.py wurden geladen.`;
+    }
+
     setStatus('done', 'Fertig');
     logBrowser('Zeige Vergleichsergebnis', data);
   } catch (error) {
     setStatus('idle', 'Fehler');
     updateCarOnlyPreview(null);
+    comparisonSection.hidden = true;
+    comparisonList.innerHTML = '';
     previewText.textContent = `Fehler: ${error.message}`;
     console.error('[CompareGUI] Vergleich abgebrochen', error);
   }
@@ -278,8 +363,10 @@ function resetInterface() {
   refPreview.removeAttribute('src');
   genPreview.removeAttribute('src');
   updateCarOnlyPreview(null);
+  comparisonSection.hidden = true;
+  comparisonList.innerHTML = '';
 
-  [lpipsValue, lpipsSimilarity, ssim, deltaE, lpipsCar, maskIou, maskDice].forEach((node) => {
+  [lpipsValue, ssim, deltaE, lpipsCar, maskIou, maskDice].forEach((node) => {
     node.textContent = node.id.includes('Similarity') ? '-- %' : '--';
   });
 
@@ -287,14 +374,7 @@ function resetInterface() {
   setStatus('idle', 'Bereit');
 }
 
-function toggleTheme() {
-  document.body.classList.toggle('light-mode');
-  const isLight = document.body.classList.contains('light-mode');
-  themeToggle.textContent = isLight ? 'Night Mode aus' : 'Night Mode';
-}
-
 refImage.addEventListener('change', () => showPreview(refImage, refPreview));
 genImage.addEventListener('change', () => showPreview(genImage, genPreview));
 runModel.addEventListener('click', runComparison);
 resetForm.addEventListener('click', resetInterface);
-themeToggle.addEventListener('click', toggleTheme);

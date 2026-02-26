@@ -20,6 +20,25 @@ SUPPORTED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", 
 
 
 class MetricsHandler(SimpleHTTPRequestHandler):
+    def build_preview_payload(self, row):
+        return {
+            "filename": row.get("filename"),
+            "lpips": row.get("lpips"),
+            "lpips_similarity_percent": row.get("lpips_similarity_percent"),
+            "ssim": row.get("ssim"),
+            "ssim_percent": row.get("ssim_percent"),
+            "delta_e_ciede2000": row.get("delta_e_ciede2000"),
+            "delta_e_similarity_percent": row.get("delta_e_similarity_percent"),
+            "lpips_car_only": row.get("lpips_car_only"),
+            "lpips_car_only_similarity_percent": row.get("lpips_car_only_similarity_percent"),
+            "mask_iou": row.get("mask_iou"),
+            "mask_dice": row.get("mask_dice"),
+            "ref_preview": self.image_file_to_data_url(row.get("ref_norm_path")),
+            "gen_preview": self.image_file_to_data_url(row.get("gen_norm_path")),
+            "car_only_ref_preview": self.image_file_to_data_url(row.get("car_only_ref_path")),
+            "car_only_gen_preview": self.image_file_to_data_url(row.get("car_only_gen_path")),
+        }
+
     def log_message(self, format, *args):  # noqa: A003
         message = format % args
         print(f"[HTTP] {self.address_string()} {self.command} {self.path} -> {message}")
@@ -85,16 +104,17 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             norm_dir = tmp_path / "normalized"
             car_only_dir = tmp_path / "car_only"
 
-            ref_path, ref_origin = self.store_upload_as_image(payload["ref_image"], tmp_path, "ref")
-            gen_path, gen_origin = self.store_upload_as_image(payload["gen_image"], tmp_path, "gen")
+            ref_asset = self.store_upload_asset(payload["ref_image"], tmp_path, "ref")
+            gen_asset = self.store_upload_asset(payload["gen_image"], tmp_path, "gen")
+
+            if ref_asset["kind"] != gen_asset["kind"]:
+                raise ValueError("Lade entweder zwei Einzelbilder oder zwei ZIP-Dateien hoch.")
+
+            compare_as_batch = ref_asset["kind"] == "directory" and gen_asset["kind"] == "directory"
 
             command = [
                 sys.executable,
                 str(BASE_DIR / "image_metrics.py"),
-                "--ref",
-                str(ref_path),
-                "--gen",
-                str(gen_path),
                 "--output-csv",
                 str(csv_path),
                 "--out",
@@ -102,6 +122,25 @@ class MetricsHandler(SimpleHTTPRequestHandler):
                 "--lpips-net",
                 payload["lpips_net"],
             ]
+
+            if compare_as_batch:
+                command.extend(
+                    [
+                        "--reference-dir",
+                        str(ref_asset["path"]),
+                        "--generated-dir",
+                        str(gen_asset["path"]),
+                    ]
+                )
+            else:
+                command.extend(
+                    [
+                        "--ref",
+                        str(ref_asset["path"]),
+                        "--gen",
+                        str(gen_asset["path"]),
+                    ]
+                )
 
             if payload["enable_car_only"]:
                 command.extend(
@@ -121,36 +160,34 @@ class MetricsHandler(SimpleHTTPRequestHandler):
                 raise RuntimeError(process.stderr.strip() or process.stdout.strip() or "image_metrics.py fehlgeschlagen")
 
             with csv_path.open("r", encoding="utf-8") as csv_file:
-                reader = csv.DictReader(csv_file)
-                row = next(reader, None)
+                rows = list(csv.DictReader(csv_file))
 
-            if row is None:
+            if not rows:
                 raise RuntimeError("Keine Metriken im CSV gefunden")
 
+            comparisons = [self.build_preview_payload(row) for row in rows]
+            first_comparison = comparisons[0]
+
             return {
-                "filename": row.get("filename"),
-                "lpips": row.get("lpips"),
-                "lpips_similarity_percent": row.get("lpips_similarity_percent"),
-                "ssim": row.get("ssim"),
-                "ssim_percent": row.get("ssim_percent"),
-                "delta_e_ciede2000": row.get("delta_e_ciede2000"),
-                "lpips_car_only": row.get("lpips_car_only"),
-                "lpips_car_only_similarity_percent": row.get("lpips_car_only_similarity_percent"),
-                "mask_iou": row.get("mask_iou"),
-                "mask_dice": row.get("mask_dice"),
-                "ref_upload": ref_origin,
-                "gen_upload": gen_origin,
-                "car_only_ref_preview": self.image_file_to_data_url(row.get("car_only_ref_path")),
-                "car_only_gen_preview": self.image_file_to_data_url(row.get("car_only_gen_path")),
+                **first_comparison,
+                "ref_upload": ref_asset["origin"],
+                "gen_upload": gen_asset["origin"],
+                "comparisons": comparisons,
+                "comparison_count": len(comparisons),
+                "batch_mode": compare_as_batch,
             }
 
-    def store_upload_as_image(self, file_field, tmp_path, prefix):
+    def store_upload_asset(self, file_field, tmp_path, prefix):
         original_name = Path(file_field.filename).name
         suffix = Path(original_name).suffix.lower()
 
         if suffix == ".zip":
-            extracted_path = self.extract_image_from_zip(file_field, tmp_path, prefix)
-            return extracted_path, f"{original_name} -> {extracted_path.name}"
+            extracted_path = self.extract_images_from_zip(file_field, tmp_path, prefix)
+            return {
+                "kind": "directory",
+                "path": extracted_path,
+                "origin": f"{original_name} -> {extracted_path.name}",
+            }
 
         if suffix not in SUPPORTED_IMAGE_EXTENSIONS:
             raise ValueError(f"Dateityp nicht unterstützt: {original_name}")
@@ -158,15 +195,22 @@ class MetricsHandler(SimpleHTTPRequestHandler):
         output_path = tmp_path / f"{prefix}_{Path(original_name).name}"
         with output_path.open("wb") as output_file:
             shutil.copyfileobj(file_field.file, output_file)
-        return output_path, original_name
+        return {
+            "kind": "file",
+            "path": output_path,
+            "origin": original_name,
+        }
 
-    def extract_image_from_zip(self, file_field, tmp_path, prefix):
+    def extract_images_from_zip(self, file_field, tmp_path, prefix):
         zip_bytes = file_field.file.read()
         if not zip_bytes:
             raise ValueError("ZIP-Datei ist leer")
 
+        target_dir = tmp_path / f"{prefix}_zip"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        known_names = set()
+
         with zipfile.ZipFile(io.BytesIO(zip_bytes)) as archive:
-            candidates = []
             for info in archive.infolist():
                 if info.is_dir():
                     continue
@@ -175,20 +219,20 @@ class MetricsHandler(SimpleHTTPRequestHandler):
                     continue
                 if inner_name.name.startswith("."):
                     continue
-                candidates.append(info)
 
-            if not candidates:
-                raise ValueError("ZIP enthält kein unterstütztes Bildformat")
+                candidate_name = inner_name.name
+                if candidate_name in known_names:
+                    raise ValueError(f"Doppelter Dateiname im ZIP gefunden: {candidate_name}")
 
-            candidates.sort(key=lambda item: item.filename.lower())
-            chosen = candidates[0]
-            image_data = archive.read(chosen)
+                image_data = archive.read(info)
+                with (target_dir / candidate_name).open("wb") as target_file:
+                    target_file.write(image_data)
+                known_names.add(candidate_name)
 
-        target_name = f"{prefix}_{Path(chosen.filename).name}"
-        target_path = tmp_path / target_name
-        with target_path.open("wb") as target_file:
-            target_file.write(image_data)
-        return target_path
+        if not known_names:
+            raise ValueError("ZIP enthält kein unterstütztes Bildformat")
+
+        return target_dir
 
     def image_file_to_data_url(self, file_path):
         if not file_path:
