@@ -171,8 +171,7 @@ button {
   color: #022337;
 }
 
-.secondary-btn,
-.ghost-btn {
+.secondary-btn {
   background: rgba(255, 255, 255, 0.03);
   color: var(--text-primary);
   border-color: var(--panel-border);
@@ -223,6 +222,48 @@ button {
   line-height: 1.45;
 }
 
+.comparison-section {
+  border: 1px solid var(--panel-border);
+  border-radius: 0.8rem;
+  padding: 0.8rem;
+  margin-bottom: 1rem;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.comparison-list {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.comparison-item {
+  margin-bottom: 0;
+}
+
+.comparison-item-content {
+  margin-top: 0.6rem;
+  color: var(--text-muted);
+}
+
+.comparison-item-content ul {
+  margin: 0.55rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.comparison-mini-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.comparison-mini-grid img {
+  width: 100%;
+  border-radius: 0.45rem;
+  border: 1px solid var(--panel-border);
+  aspect-ratio: 4 / 3;
+  object-fit: contain;
+  background: rgba(0, 0, 0, 0.25);
+}
+
 .image-preview-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -267,7 +308,6 @@ button {
   margin-bottom: 0;
 }
 
-
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -295,15 +335,6 @@ button {
   overflow-wrap: anywhere;
 }
 
-.light-mode {
-  --bg-start: #e9eef9;
-  --bg-end: #f7f9ff;
-  --panel: rgba(255, 255, 255, 0.86);
-  --panel-border: rgba(7, 23, 54, 0.15);
-  --text-primary: #0f1b34;
-  --text-muted: #3d4e71;
-}
-
 @media (max-width: 900px) {
   .content-grid {
     grid-template-columns: 1fr;
@@ -312,7 +343,8 @@ button {
 
 @media (max-width: 560px) {
   .stats-grid,
-  .image-preview-grid {
+  .image-preview-grid,
+  .comparison-mini-grid {
     grid-template-columns: 1fr;
   }
 }
