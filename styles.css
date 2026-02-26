@@ -217,6 +217,30 @@ button {
   font-size: 0.86rem;
 }
 
+.loading-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.6rem;
+  color: var(--accent);
+  font-size: 0.82rem;
+}
+
+.loading-spinner {
+  width: 0.95rem;
+  height: 0.95rem;
+  border-radius: 50%;
+  border: 2px solid rgba(0, 173, 239, 0.3);
+  border-top-color: var(--accent);
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 #previewText {
   margin-bottom: 0;
   line-height: 1.45;

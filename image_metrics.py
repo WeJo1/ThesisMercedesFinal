@@ -542,7 +542,7 @@ def safe_centroid(mask):
     return np.array([mean_y, mean_x], dtype=np.float32)
 
 
-def compute_geometric_metrics(ref, gen):
+def compute_geometric_metrics(ref, gen, include_hausdorff=True):
     ref_mask = create_foreground_mask(ref)
     gen_mask = create_foreground_mask(gen)
 
@@ -578,8 +578,11 @@ def compute_geometric_metrics(ref, gen):
     centroid_distance_px = float(np.linalg.norm(ref_center - gen_center))
     centroid_distance_norm = float(centroid_distance_px / diag)
 
-    hausdorff_px = float(hausdorff_distance(ref_mask, gen_mask))
-    hausdorff_norm = float(hausdorff_px / diag)
+    hausdorff_px = None
+    hausdorff_norm = None
+    if include_hausdorff:
+        hausdorff_px = float(hausdorff_distance(ref_mask, gen_mask))
+        hausdorff_norm = float(hausdorff_px / diag)
 
     metrics = {
         "mask_iou": iou,
@@ -614,6 +617,7 @@ def evaluate_pair(
     mask_min_object_area=500,
     mask_max_hole_area=3000,
     mask_trim_px=1,
+    include_hausdorff=True,
 ):
     ref_img = load_image(ref_path)
     gen_img = load_image(gen_path)
@@ -638,7 +642,7 @@ def evaluate_pair(
         eps=eps,
     )
     delta_e_val = compute_delta_e(ref_norm, gen_norm)
-    geometric = compute_geometric_metrics(ref_norm, gen_norm)
+    geometric = compute_geometric_metrics(ref_norm, gen_norm, include_hausdorff=include_hausdorff)
     percent_metrics = convert_metrics_to_percent(ssim_val, lpips_val, delta_e_val)
 
     foreground_mask = compute_foreground_mask_union(ref_norm, gen_norm)
@@ -759,6 +763,7 @@ def evaluate_folders(
     mask_min_object_area=500,
     mask_max_hole_area=3000,
     mask_trim_px=1,
+    include_hausdorff=True,
 ):
     ref_dir = Path(reference_dir)
     gen_dir = Path(generated_dir)
@@ -805,6 +810,7 @@ def evaluate_folders(
             mask_min_object_area=mask_min_object_area,
             mask_max_hole_area=mask_max_hole_area,
             mask_trim_px=mask_trim_px,
+            include_hausdorff=include_hausdorff,
         )
         results.append(result)
 
@@ -870,6 +876,11 @@ def parse_args():
     parser.add_argument("--mask-threshold", type=float, default=0.5, help="Pixel-Schwelle der Segmentierungsmaske [0..1]")
     parser.add_argument("--debug-dir", default=None, help="Optionales Debug-Verzeichnis für Masken/Crops")
     parser.add_argument("--car-only-dir", default="car_only", help="Verzeichnis für gespeicherte Car-only-Crops")
+    parser.add_argument(
+        "--skip-hausdorff",
+        action="store_true",
+        help="Überspringe Hausdorff-Distanz für schnellere Batch-Berechnung",
+    )
 
     parser.add_argument("--ref", help="Pfad zu einem einzelnen Referenzbild")
     parser.add_argument("--gen", help="Pfad zu einem einzelnen Generated-Bild")
@@ -951,6 +962,7 @@ def main():
             eps=args.eps,
             debug_dir=args.debug_dir,
             car_only_dir=args.car_only_dir if args.enable_car_only else None,
+            include_hausdorff=not args.skip_hausdorff,
         )
         pd.DataFrame([result]).to_csv(args.output_csv, index=False, float_format="%.6f")
         print(f"[INFO] Einzelvergleich gespeichert: {args.output_csv}")
@@ -978,6 +990,7 @@ def main():
         eps=args.eps,
         debug_dir=args.debug_dir,
         car_only_dir=args.car_only_dir if args.enable_car_only else None,
+        include_hausdorff=not args.skip_hausdorff,
     )
 
 
