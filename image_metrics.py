@@ -4,13 +4,20 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import torch
 from PIL import Image
 from skimage import color
 from skimage.filters import threshold_otsu
 from skimage.metrics import hausdorff_distance, structural_similarity
 from skimage.morphology import binary_closing, binary_dilation, binary_erosion, disk, remove_small_holes, remove_small_objects
 from tqdm import tqdm
+
+TORCH_IMPORT_ERROR = None
+
+try:
+    import torch
+except Exception as exc:  # noqa: BLE001
+    torch = None
+    TORCH_IMPORT_ERROR = str(exc)
 
 try:
     import lpips
@@ -94,6 +101,13 @@ def init_lpips_model(net="alex", use_gpu=False):
         print("[WARN] Paket 'lpips' nicht gefunden. Nutze Proxy-Distanz (mittlere absolute Abweichung) statt LPIPS.")
         return None
 
+    if torch is None:
+        print(
+            "[WARN] 'torch' konnte nicht geladen werden "
+            f"({TORCH_IMPORT_ERROR}). Nutze Proxy-Distanz (mittlere absolute Abweichung) statt LPIPS."
+        )
+        return None
+
     model = lpips.LPIPS(net=net)
     if use_gpu and torch.cuda.is_available():
         model = model.cuda()
@@ -102,6 +116,9 @@ def init_lpips_model(net="alex", use_gpu=False):
 
 
 def numpy_to_lpips_tensor(img):
+    if torch is None:
+        raise RuntimeError(f"'torch' ist nicht verfügbar: {TORCH_IMPORT_ERROR}")
+
     chw = img.transpose(2, 0, 1)
     tensor = torch.from_numpy(chw).float()
     tensor = tensor * 2.0 - 1.0
@@ -151,6 +168,9 @@ def compute_psnr(ref, gen, eps=1e-12):
 
 
 def build_vehicle_segmenter(use_gpu=False, score_threshold=0.5, mask_threshold=0.5):
+    if torch is None:
+        raise RuntimeError(f"torch ist nicht verfügbar ({TORCH_IMPORT_ERROR}). Deaktiviere --enable-car-only oder installiere torch korrekt.")
+
     if maskrcnn_resnet50_fpn_v2 is None:
         raise RuntimeError("torchvision MaskRCNN ist nicht verfügbar. Installiere torchvision >= 0.13.")
 
@@ -246,6 +266,9 @@ def apply_neutralize_crop(img, mask, bbox, neutral_value=0.5):
 
 
 def downsample_mask_torch(mask_t, target_hw, mode="bilinear"):
+    if torch is None:
+        raise RuntimeError(f"'torch' ist nicht verfügbar: {TORCH_IMPORT_ERROR}")
+
     align_corners = False if mode == "bilinear" else None
     if mode == "nearest":
         resized = torch.nn.functional.interpolate(mask_t, size=target_hw, mode=mode)
@@ -902,11 +925,15 @@ def main():
     segmenter = None
     if args.enable_car_only:
         print("[INFO] Car-only wird aktiviert. Einfacher Aufruf: python image_metrics.py --car-only")
-        segmenter = build_vehicle_segmenter(
-            use_gpu=args.use_gpu,
-            score_threshold=args.mask_score_threshold,
-            mask_threshold=args.mask_threshold,
-        )
+        try:
+            segmenter = build_vehicle_segmenter(
+                use_gpu=args.use_gpu,
+                score_threshold=args.mask_score_threshold,
+                mask_threshold=args.mask_threshold,
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"[WARN] Car-only wurde deaktiviert: {exc}")
+            args.enable_car_only = False
 
     if args.ref or args.gen:
         if not (args.ref and args.gen):
