@@ -17,11 +17,14 @@ import cgi
 
 BASE_DIR = Path(__file__).resolve().parent
 SUPPORTED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
+MAX_ZIP_IMAGE_COUNT = 250
+MAX_ZIP_TOTAL_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
+MAX_ZIP_SINGLE_IMAGE_BYTES = 25 * 1024 * 1024
 
 
 class MetricsHandler(SimpleHTTPRequestHandler):
-    def build_preview_payload(self, row):
-        return {
+    def build_preview_payload(self, row, include_previews=True):
+        payload = {
             "filename": row.get("filename"),
             "lpips": row.get("lpips"),
             "lpips_similarity_percent": row.get("lpips_similarity_percent"),
@@ -33,11 +36,19 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             "lpips_car_only_similarity_percent": row.get("lpips_car_only_similarity_percent"),
             "mask_iou": row.get("mask_iou"),
             "mask_dice": row.get("mask_dice"),
-            "ref_preview": self.image_file_to_data_url(row.get("ref_norm_path")),
-            "gen_preview": self.image_file_to_data_url(row.get("gen_norm_path")),
-            "car_only_ref_preview": self.image_file_to_data_url(row.get("car_only_ref_path")),
-            "car_only_gen_preview": self.image_file_to_data_url(row.get("car_only_gen_path")),
+            "ref_preview": None,
+            "gen_preview": None,
+            "car_only_ref_preview": None,
+            "car_only_gen_preview": None,
         }
+
+        if include_previews:
+            payload["ref_preview"] = self.image_file_to_data_url(row.get("ref_norm_path"))
+            payload["gen_preview"] = self.image_file_to_data_url(row.get("gen_norm_path"))
+            payload["car_only_ref_preview"] = self.image_file_to_data_url(row.get("car_only_ref_path"))
+            payload["car_only_gen_preview"] = self.image_file_to_data_url(row.get("car_only_gen_path"))
+
+        return payload
 
     def log_message(self, format, *args):  # noqa: A003
         message = format % args
@@ -166,7 +177,11 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             if not rows:
                 raise RuntimeError("Keine Metriken im CSV gefunden")
 
-            comparisons = [self.build_preview_payload(row) for row in rows]
+            comparisons = []
+            for index, row in enumerate(rows):
+                should_include_previews = not compare_as_batch or index == 0
+                comparisons.append(self.build_preview_payload(row, include_previews=should_include_previews))
+
             first_comparison = comparisons[0]
 
             return {
@@ -176,6 +191,7 @@ class MetricsHandler(SimpleHTTPRequestHandler):
                 "comparisons": comparisons,
                 "comparison_count": len(comparisons),
                 "batch_mode": compare_as_batch,
+                "batch_previews_limited": compare_as_batch and len(comparisons) > 1,
             }
 
     def store_upload_asset(self, file_field, tmp_path, prefix):
@@ -210,6 +226,7 @@ class MetricsHandler(SimpleHTTPRequestHandler):
         target_dir = tmp_path / f"{prefix}_zip"
         target_dir.mkdir(parents=True, exist_ok=True)
         known_names = set()
+        total_uncompressed_bytes = 0
 
         with zipfile.ZipFile(io.BytesIO(zip_bytes)) as archive:
             for info in archive.infolist():
@@ -220,14 +237,25 @@ class MetricsHandler(SimpleHTTPRequestHandler):
                     continue
                 if inner_name.name.startswith("."):
                     continue
+                if len(known_names) >= MAX_ZIP_IMAGE_COUNT:
+                    raise ValueError(f"ZIP enthält zu viele Bilder. Maximum ist {MAX_ZIP_IMAGE_COUNT} Dateien.")
+                if info.file_size > MAX_ZIP_SINGLE_IMAGE_BYTES:
+                    raise ValueError(
+                        f"Datei {inner_name.name} ist zu groß ({info.file_size} Bytes). Maximum sind {MAX_ZIP_SINGLE_IMAGE_BYTES} Bytes."
+                    )
+
+                total_uncompressed_bytes += info.file_size
+                if total_uncompressed_bytes > MAX_ZIP_TOTAL_UNCOMPRESSED_BYTES:
+                    raise ValueError(
+                        "ZIP enthält zu viele Daten. Bitte verwende kleinere ZIP-Dateien oder teile sie auf."
+                    )
 
                 candidate_name = inner_name.name
                 if candidate_name in known_names:
                     raise ValueError(f"Doppelter Dateiname im ZIP gefunden: {candidate_name}")
 
-                image_data = archive.read(info)
-                with (target_dir / candidate_name).open("wb") as target_file:
-                    target_file.write(image_data)
+                with archive.open(info) as image_file, (target_dir / candidate_name).open("wb") as target_file:
+                    shutil.copyfileobj(image_file, target_file)
                 known_names.add(candidate_name)
 
         if not known_names:
