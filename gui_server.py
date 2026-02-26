@@ -142,7 +142,6 @@ class MetricsHandler(SimpleHTTPRequestHandler):
                 "gen_upload": gen_origin,
                 "car_only_ref_preview": self.image_file_to_data_url(row.get("car_only_ref_path")),
                 "car_only_gen_preview": self.image_file_to_data_url(row.get("car_only_gen_path")),
-                "car_only_mask_preview": self.image_file_to_data_url(row.get("car_only_mask_path")),
             }
 
     def store_upload_as_image(self, file_field, tmp_path, prefix):
