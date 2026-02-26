@@ -130,6 +130,7 @@ class MetricsHandler(SimpleHTTPRequestHandler):
                         str(ref_asset["path"]),
                         "--generated-dir",
                         str(gen_asset["path"]),
+                        "--skip-hausdorff",
                     ]
                 )
             else:
