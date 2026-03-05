@@ -3,6 +3,7 @@ import csv
 import io
 import json
 import os
+import socket
 import shutil
 import subprocess
 import sys
@@ -298,7 +299,14 @@ class MetricsHandler(SimpleHTTPRequestHandler):
 def main():
     port = int(os.environ.get("PORT", "4173"))
     server = ThreadingHTTPServer(("0.0.0.0", port), MetricsHandler)
-    print(f"[INFO] GUI Server läuft auf http://0.0.0.0:{port}")
+    print(f"[INFO] GUI Server läuft auf http://127.0.0.1:{port}")
+    print("[INFO] Öffne im Browser nicht 0.0.0.0, sondern localhost oder 127.0.0.1.")
+    try:
+        local_ip = socket.gethostbyname(socket.gethostname())
+        if local_ip and local_ip != "127.0.0.1":
+            print(f"[INFO] LAN-Zugriff (gleiches Netzwerk): http://{local_ip}:{port}")
+    except OSError:
+        pass
     server.serve_forever()
 
 
