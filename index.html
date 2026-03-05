@@ -3,185 +3,250 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Mercedes Model Studio</title>
-    <link rel="stylesheet" href="styles.css" />
+    <title>Mercedes Morphing Loader Demo</title>
+    <style>
+      :root {
+        --bg: radial-gradient(circle at 20% 20%, #242424 0%, #111 55%, #090909 100%);
+        --ring: #4c4c4c;
+        --fg: #f2f2f2;
+        --soft: #b7b7b7;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      }
+
+      .demo-shell {
+        display: grid;
+        gap: 1rem;
+        justify-items: center;
+      }
+
+      .loader-wrap {
+        width: 220px;
+        height: 220px;
+        display: grid;
+        place-items: center;
+        transition: opacity 420ms ease;
+      }
+
+      .loader-wrap.loader-hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .loader-svg {
+        width: 170px;
+        height: 170px;
+        overflow: visible;
+      }
+
+      .rim-ring {
+        fill: none;
+        stroke: var(--ring);
+        stroke-width: 3.4;
+      }
+
+      .morph-group {
+        transform-origin: 50px 50px;
+      }
+
+      .morph-group.is-spinning {
+        animation: spin-fast 0.22s linear infinite;
+      }
+
+      .morph-group.is-braking {
+        animation: spin-brake 520ms cubic-bezier(0.18, 0.86, 0.24, 1) forwards;
+      }
+
+      .morph-path {
+        fill: none;
+        stroke: var(--fg);
+        stroke-width: 5;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        filter: drop-shadow(0 0 0 rgba(255, 255, 255, 0));
+        transition: filter 360ms ease, transform 360ms ease;
+        transform-origin: 50px 50px;
+      }
+
+      .morph-path.is-morphing {
+        filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.22));
+      }
+
+      .morph-path.is-complete {
+        filter: drop-shadow(0 0 7px rgba(255, 255, 255, 0.26));
+        transform: scale(1.03);
+      }
+
+      .hint {
+        color: var(--soft);
+        font-size: 0.92rem;
+      }
+
+      @keyframes spin-fast {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      @keyframes spin-brake {
+        from {
+          transform: rotate(0deg);
+        }
+        to {
+          transform: rotate(220deg);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .morph-group.is-spinning,
+        .morph-group.is-braking {
+          animation: none !important;
+        }
+
+        .morph-path {
+          transition: none;
+          filter: none;
+          transform: none;
+        }
+      }
+    </style>
   </head>
   <body>
-    <div class="app-shell">
-      <header class="topbar">
-        <div class="brand">
-          <div class="brand-star" aria-hidden="true"></div>
-          <div>
-            <p class="eyebrow">Mercedes-Benz AI</p>
-            <h1>Image Metrics Studio</h1>
-          </div>
-        </div>
-      </header>
+    <main class="demo-shell">
+      <div id="loader" class="loader-wrap" aria-live="polite" aria-label="Ladevorgang läuft">
+        <svg class="loader-svg" viewBox="0 0 100 100" role="img" aria-label="Morphing Mercedes Loader">
+          <circle class="rim-ring" cx="50" cy="50" r="44" />
+          <g id="morphGroup" class="morph-group">
+            <path id="morphPath" class="morph-path" d="" />
+          </g>
+        </svg>
+      </div>
+      <p class="hint">Demo: finishLoading() wird nach 2400ms automatisch aufgerufen.</p>
+    </main>
 
-      <main class="content-grid">
-        <section class="panel panel-input">
-          <h2>Bilder vergleichen</h2>
-          <p class="panel-intro">
-            Wähle Referenz- und Generated-Bild aus und starte dieselbe Logik wie im Python-CMD (LPIPS, SSIM,
-            DeltaE und optional Car-Only).
-          </p>
+    <script src="https://unpkg.com/flubber@0.4.2/dist/flubber.min.js"></script>
+    <script>
+      // =========================================================
+      // 1) HIER DEINE ECHTEN SVG-PFADDATEN EINSETZEN
+      // =========================================================
+      const PATH_D_WHEEL = "PASTE_WHEEL_D_HERE";
+      const PATH_D_STAR = "PASTE_STAR_D_HERE";
 
-          <label for="refImage">Referenzbild oder ZIP</label>
-          <input id="refImage" type="file" accept="image/*,.zip,application/zip" />
+      const loaderEl = document.getElementById("loader");
+      const morphGroupEl = document.getElementById("morphGroup");
+      const morphPathEl = document.getElementById("morphPath");
+      const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-          <label for="genImage">Generated-Bild oder ZIP</label>
-          <input id="genImage" type="file" accept="image/*,.zip,application/zip" />
+      let isFinishing = false;
+      let autoFinishTimer = null;
 
-          <div class="field-row">
-            <label for="lpipsNet">LPIPS Backbone</label>
-            <select id="lpipsNet">
-              <option value="alex">alex</option>
-              <option value="vgg">vgg</option>
-              <option value="squeeze">squeeze</option>
-            </select>
-          </div>
+      function setPath(d) {
+        morphPathEl.setAttribute("d", d);
+      }
 
-          <div class="toggle-row">
-            <input id="carOnlyMode" type="checkbox" />
-            <label for="carOnlyMode">Car-Only Modus aktivieren</label>
-          </div>
+      function runMorph({ fromPath, toPath, duration = 1050, onDone }) {
+        const interpolate = flubber.interpolate(fromPath, toPath, {
+          maxSegmentLength: 1.5,
+          string: true,
+        });
 
-          <details>
-            <summary>Erweiterte Car-Only Parameter</summary>
-            <div class="field-row">
-              <label for="carMode">Car Mode</label>
-              <select id="carMode">
-                <option value="neutralize_crop">neutralize_crop</option>
-                <option value="weighted_lpips">weighted_lpips</option>
-              </select>
-            </div>
-            <div class="field-row">
-              <label for="maskSource">Mask Source</label>
-              <select id="maskSource">
-                <option value="ref">ref</option>
-                <option value="gen">gen</option>
-                <option value="union">union</option>
-              </select>
-            </div>
-          </details>
+        const start = performance.now();
 
-          <div class="actions">
-            <button class="primary-btn" id="runModel" type="button">Vergleich starten</button>
-            <button class="secondary-btn" id="resetForm" type="button">Zurücksetzen</button>
-          </div>
-        </section>
+        function tick(now) {
+          const elapsed = now - start;
+          const rawT = Math.min(elapsed / duration, 1);
+          const easedT = 1 - Math.pow(1 - rawT, 3);
 
-        <section class="panel panel-output">
-          <div class="output-header">
-            <h2>Metric Dashboard</h2>
-            <span id="statusBadge" class="status-badge idle">Bereit</span>
-          </div>
+          setPath(interpolate(easedT));
 
-          <div class="preview-card">
-            <p class="preview-title">Status</p>
-            <div id="loadingIndicator" class="loading-indicator" hidden>
-              <span class="loading-spinner" aria-hidden="true"></span>
-              <span>Vergleich läuft...</span>
-            </div>
-            <p id="previewText">Lade zwei Bilder hoch und starte den Vergleich.</p>
-          </div>
+          if (rawT < 1) {
+            requestAnimationFrame(tick);
+            return;
+          }
 
-          <section id="comparisonSection" class="comparison-section" hidden>
-            <p class="preview-title">Vergleichspaare (Dateiname anklicken)</p>
-            <div id="comparisonList" class="comparison-list"></div>
-          </section>
+          setPath(toPath);
+          if (typeof onDone === "function") onDone();
+        }
 
-          <div class="image-preview-grid">
-            <figure class="preview-figure">
-              <figcaption>Referenzbild</figcaption>
-              <img id="refPreview" alt="Referenz Vorschau" />
-            </figure>
-            <figure class="preview-figure">
-              <figcaption>Generated-Bild</figcaption>
-              <img id="genPreview" alt="Generated Vorschau" />
-            </figure>
-          </div>
+        requestAnimationFrame(tick);
+      }
 
-          <section id="carOnlyPreviewSection" class="car-preview-section" hidden>
-            <p class="preview-title">Car-Only Zuschnitt (Preview)</p>
-            <div class="image-preview-grid">
-              <figure class="preview-figure">
-                <figcaption>Car-Only Referenz</figcaption>
-                <img id="carRefPreview" alt="Car-Only Referenz Vorschau" />
-              </figure>
-              <figure class="preview-figure">
-                <figcaption>Car-Only Generated</figcaption>
-                <img id="carGenPreview" alt="Car-Only Generated Vorschau" />
-              </figure>
-            </div>
-          </section>
+      function showLoading() {
+        isFinishing = false;
+        loaderEl.classList.remove("loader-hidden");
+        morphPathEl.classList.remove("is-morphing", "is-complete");
+        morphGroupEl.classList.remove("is-braking");
+        morphGroupEl.classList.add("is-spinning");
 
-          <div class="stats-grid">
-            <article>
-              <div class="stat-label-row">
-                <p class="stat-label">LPIPS (Wert + %)</p>
-                <details class="metric-info">
-                  <summary aria-label="LPIPS Erklärung anzeigen">ⓘ</summary>
-                  <p>Niedriger ist besser: 0 bedeutet nahezu identisch.</p>
-                </details>
-              </div>
-              <p id="lpips" class="stat-value">--</p>
-            </article>
-            <article>
-              <div class="stat-label-row">
-                <p class="stat-label">SSIM (Wert + %)</p>
-                <details class="metric-info">
-                  <summary aria-label="SSIM Erklärung anzeigen">ⓘ</summary>
-                  <p>Höher ist besser: 1 bedeutet strukturell sehr ähnlich.</p>
-                </details>
-              </div>
-              <p id="ssim" class="stat-value">--</p>
-            </article>
-            <article>
-              <div class="stat-label-row">
-                <p class="stat-label">ΔE CIEDE2000 (Wert + %)</p>
-                <details class="metric-info">
-                  <summary aria-label="DeltaE Erklärung anzeigen">ⓘ</summary>
-                  <p>Niedriger ist besser: misst den sichtbaren Farbabstand.</p>
-                </details>
-              </div>
-              <p id="deltaE" class="stat-value">--</p>
-            </article>
-            <article>
-              <div class="stat-label-row">
-                <p class="stat-label">LPIPS car-only (Wert + %)</p>
-                <details class="metric-info">
-                  <summary aria-label="LPIPS car-only Erklärung anzeigen">ⓘ</summary>
-                  <p>Wie LPIPS, aber nur im Fahrzeugbereich; niedriger ist besser.</p>
-                </details>
-              </div>
-              <p id="lpipsCar" class="stat-value">--</p>
-            </article>
-            <article>
-              <div class="stat-label-row">
-                <p class="stat-label">Mask IoU</p>
-                <details class="metric-info">
-                  <summary aria-label="Mask IoU Erklärung anzeigen">ⓘ</summary>
-                  <p>Höher ist besser: Anteil der überlappenden Maskenfläche.</p>
-                </details>
-              </div>
-              <p id="maskIou" class="stat-value">--</p>
-            </article>
-            <article>
-              <div class="stat-label-row">
-                <p class="stat-label">Mask Dice</p>
-                <details class="metric-info">
-                  <summary aria-label="Mask Dice Erklärung anzeigen">ⓘ</summary>
-                  <p>Höher ist besser: gewichtet gemeinsame Fläche doppelt.</p>
-                </details>
-              </div>
-              <p id="maskDice" class="stat-value">--</p>
-            </article>
-          </div>
-        </section>
-      </main>
-    </div>
+        if (prefersReducedMotion) {
+          morphGroupEl.classList.remove("is-spinning");
+          setPath(PATH_D_STAR);
+          return;
+        }
 
-    <script src="script.js"></script>
+        setPath(PATH_D_WHEEL);
+
+        clearTimeout(autoFinishTimer);
+        autoFinishTimer = setTimeout(() => {
+          finishLoading();
+        }, 2400);
+      }
+
+      function finishLoading() {
+        if (isFinishing) return;
+        isFinishing = true;
+        clearTimeout(autoFinishTimer);
+
+        if (prefersReducedMotion) {
+          setPath(PATH_D_STAR);
+          morphGroupEl.classList.remove("is-spinning", "is-braking");
+          morphPathEl.classList.add("is-complete");
+          return;
+        }
+
+        morphGroupEl.classList.remove("is-spinning");
+        void morphGroupEl.getBoundingClientRect(); // Reflow erzwingen, damit braking-Animation sauber startet.
+        morphGroupEl.classList.add("is-braking");
+
+        setTimeout(() => {
+          morphGroupEl.classList.remove("is-braking");
+          morphPathEl.classList.add("is-morphing");
+
+          runMorph({
+            fromPath: morphPathEl.getAttribute("d") || PATH_D_WHEEL,
+            toPath: PATH_D_STAR,
+            duration: 1050,
+            onDone: () => {
+              morphPathEl.classList.remove("is-morphing");
+              morphPathEl.classList.add("is-complete");
+
+              // Optional: Loader nach dem Morph ausblenden.
+              setTimeout(() => {
+                loaderEl.classList.add("loader-hidden");
+              }, 560);
+            },
+          });
+        }, 420);
+      }
+
+      // API global bereitstellen.
+      window.showLoading = showLoading;
+      window.finishLoading = finishLoading;
+
+      // Demo direkt starten.
+      showLoading();
+    </script>
   </body>
 </html>
