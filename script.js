@@ -116,16 +116,33 @@ function isZipFile(file) {
   return file.name.toLowerCase().endsWith('.zip');
 }
 
+function hasMatchingComparisonTypes(refFile, genFile) {
+  const comparesFolders = isZipFile(refFile) && isZipFile(genFile);
+  const comparesImages = !isZipFile(refFile) && !isZipFile(genFile);
+  return comparesFolders || comparesImages;
+}
+
+function updatePreviewState(imgTarget, hasImage) {
+  const previewFigure = imgTarget.closest('.preview-figure');
+  if (!previewFigure) {
+    return;
+  }
+
+  previewFigure.classList.toggle('has-image', hasImage);
+}
+
 function showPreview(input, imgTarget) {
   const [file] = input.files;
   if (!file || isZipFile(file)) {
     imgTarget.removeAttribute('src');
+    updatePreviewState(imgTarget, false);
     return;
   }
 
   const reader = new FileReader();
   reader.onload = () => {
     imgTarget.src = String(reader.result);
+    updatePreviewState(imgTarget, true);
   };
   reader.readAsDataURL(file);
 }
@@ -133,9 +150,11 @@ function showPreview(input, imgTarget) {
 function setPreviewImage(imgTarget, value) {
   if (!value) {
     imgTarget.removeAttribute('src');
+    updatePreviewState(imgTarget, false);
     return;
   }
   imgTarget.src = value;
+  updatePreviewState(imgTarget, true);
 }
 
 function updateCarOnlyPreview(data) {
@@ -344,6 +363,12 @@ async function runComparison() {
     return;
   }
 
+  if (!hasMatchingComparisonTypes(refFile, genFile)) {
+    setStatus('idle', 'Typ prüfen');
+    previewText.textContent = 'Vergleiche entweder zwei Bilder oder zwei ZIP-Ordner. Mischformen sind nicht erlaubt.';
+    return;
+  }
+
   startCalculation('Berechne Metriken mit Python-Backend...');
 
   const payload = new FormData();
@@ -445,5 +470,9 @@ refImage.addEventListener('change', () => showPreview(refImage, refPreview));
 genImage.addEventListener('change', () => showPreview(genImage, genPreview));
 runModel.addEventListener('click', runComparison);
 resetForm.addEventListener('click', resetInterface);
+
+[refPreview, genPreview, carRefPreview, carGenPreview].forEach((imgNode) => {
+  updatePreviewState(imgNode, Boolean(imgNode.getAttribute('src')));
+});
 
 stopCalculation();
