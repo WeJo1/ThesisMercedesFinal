@@ -19,6 +19,8 @@ const comparisonSection = document.getElementById('comparisonSection');
 const comparisonList = document.getElementById('comparisonList');
 const metricInfoBoxes = document.querySelectorAll('.metric-info');
 const brandStar = document.querySelector('.brand-star');
+const topbar = document.querySelector('.topbar');
+const contentGrid = document.querySelector('.content-grid');
 
 const lpipsValue = document.getElementById('lpips');
 const ssim = document.getElementById('ssim');
@@ -29,6 +31,11 @@ const maskDice = document.getElementById('maskDice');
 
 const fallbackApiOrigins = ['http://127.0.0.1:4173', 'http://localhost:4173'];
 let isComparisonRunning = false;
+
+const iconCandidates = {
+  wheel: ['icons/felge.png', 'icons/flge.png', 'icons/felge.svg'],
+  star: ['icons/stern.png', 'icons/Stern.png', 'icons/stern.svg'],
+};
 
 function logBrowser(message, details = null) {
   if (details === null) {
@@ -56,9 +63,58 @@ function startBrandIntroAnimation() {
     return;
   }
 
+  brandStar.classList.remove('is-star');
   window.setTimeout(() => {
     brandStar.classList.add('is-star');
   }, 3000);
+}
+
+function ensureMainBoardVisible() {
+  if (!contentGrid) {
+    return;
+  }
+
+  contentGrid.hidden = false;
+  contentGrid.style.removeProperty('display');
+}
+
+function setHeaderLoadingState(isLoading) {
+  if (!topbar) {
+    return;
+  }
+  topbar.classList.toggle('is-loading', isLoading);
+}
+
+function resolveIconPath(path) {
+  return new Promise((resolve) => {
+    const testImage = new Image();
+    testImage.onload = () => resolve(path);
+    testImage.onerror = () => resolve(null);
+    testImage.src = path;
+  });
+}
+
+async function useBestAvailableIcons() {
+  const wheelPath = await findFirstAvailableIcon(iconCandidates.wheel);
+  const starPath = await findFirstAvailableIcon(iconCandidates.star);
+
+  if (wheelPath) {
+    document.documentElement.style.setProperty('--mercedes-wheel', `url("${wheelPath}")`);
+  }
+
+  if (starPath) {
+    document.documentElement.style.setProperty('--mercedes-star', `url("${starPath}")`);
+  }
+}
+
+async function findFirstAvailableIcon(candidates) {
+  for (const candidate of candidates) {
+    const validPath = await resolveIconPath(candidate);
+    if (validPath) {
+      return validPath;
+    }
+  }
+  return null;
 }
 
 
@@ -71,12 +127,14 @@ function setLoadingState(isLoading) {
 function startCalculation(message) {
   isComparisonRunning = true;
   setStatus('running', 'Vergleiche');
+  setHeaderLoadingState(true);
   setLoadingState(true);
   previewText.textContent = message;
 }
 
 function stopCalculation() {
   isComparisonRunning = false;
+  setHeaderLoadingState(false);
   setLoadingState(false);
 }
 
@@ -490,4 +548,5 @@ resetForm.addEventListener('click', resetInterface);
 });
 
 stopCalculation();
-startBrandIntroAnimation();
+ensureMainBoardVisible();
+useBestAvailableIcons().finally(startBrandIntroAnimation);

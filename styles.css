@@ -82,6 +82,14 @@ body {
   animation: star-reveal 900ms ease-out forwards;
 }
 
+.topbar.is-loading .brand-star {
+  animation: rotate-wheel 1.2s linear infinite;
+}
+
+.topbar.is-loading .brand-star.is-star {
+  animation: star-reveal 900ms ease-out forwards;
+}
+
 .eyebrow {
   margin: 0;
   text-transform: uppercase;
