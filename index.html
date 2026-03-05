@@ -140,9 +140,16 @@
     <script>
       // =========================================================
       // 1) HIER DEINE ECHTEN SVG-PFADDATEN EINSETZEN
+      //    - Wenn Platzhalter stehen bleiben, nutzt die Demo Fallback-Pfade.
       // =========================================================
-      const PATH_D_WHEEL = "PASTE_WHEEL_D_HERE";
-      const PATH_D_STAR = "PASTE_STAR_D_HERE";
+      const PATH_D_WHEEL = "PASTE_WHEEL_D_HERE"; // <-- Wheel/Spoke-Pfad hier einfügen
+      const PATH_D_STAR = "PASTE_STAR_D_HERE"; // <-- Stern-Pfad hier einfügen
+
+      // Fallback-Pfade für die Demo, falls noch keine echten Daten eingesetzt wurden.
+      const DEFAULT_WHEEL_PATH =
+        "M50 22L50 78M22 50L78 50M31 31L69 69M69 31L31 69M50 28A22 22 0 1 1 50 72A22 22 0 1 1 50 28Z";
+      const DEFAULT_STAR_PATH =
+        "M50 18L58 42L83 42L63 57L70 82L50 66L30 82L37 57L17 42L42 42Z";
 
       const loaderEl = document.getElementById("loader");
       const morphGroupEl = document.getElementById("morphGroup");
@@ -151,6 +158,15 @@
 
       let isFinishing = false;
       let autoFinishTimer = null;
+
+      function normalizeInputPath(pathValue, fallbackPath) {
+        const value = (pathValue || "").trim();
+        if (!value || /^PASTE_[A-Z_]+_HERE$/i.test(value)) return fallbackPath;
+        return value;
+      }
+
+      const wheelPath = normalizeInputPath(PATH_D_WHEEL, DEFAULT_WHEEL_PATH);
+      const starPath = normalizeInputPath(PATH_D_STAR, DEFAULT_STAR_PATH);
 
       function setPath(d) {
         morphPathEl.setAttribute("d", d);
@@ -192,11 +208,11 @@
 
         if (prefersReducedMotion) {
           morphGroupEl.classList.remove("is-spinning");
-          setPath(PATH_D_STAR);
+          setPath(starPath);
           return;
         }
 
-        setPath(PATH_D_WHEEL);
+        setPath(wheelPath);
 
         clearTimeout(autoFinishTimer);
         autoFinishTimer = setTimeout(() => {
@@ -210,7 +226,7 @@
         clearTimeout(autoFinishTimer);
 
         if (prefersReducedMotion) {
-          setPath(PATH_D_STAR);
+          setPath(starPath);
           morphGroupEl.classList.remove("is-spinning", "is-braking");
           morphPathEl.classList.add("is-complete");
           return;
@@ -225,8 +241,8 @@
           morphPathEl.classList.add("is-morphing");
 
           runMorph({
-            fromPath: morphPathEl.getAttribute("d") || PATH_D_WHEEL,
-            toPath: PATH_D_STAR,
+            fromPath: morphPathEl.getAttribute("d") || wheelPath,
+            toPath: starPath,
             duration: 1050,
             onDone: () => {
               morphPathEl.classList.remove("is-morphing");
