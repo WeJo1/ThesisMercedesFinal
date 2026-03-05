@@ -18,6 +18,7 @@ const carGenPreview = document.getElementById('carGenPreview');
 const comparisonSection = document.getElementById('comparisonSection');
 const comparisonList = document.getElementById('comparisonList');
 const metricInfoBoxes = document.querySelectorAll('.metric-info');
+const brandStar = document.querySelector('.brand-star');
 
 const lpipsValue = document.getElementById('lpips');
 const ssim = document.getElementById('ssim');
@@ -48,6 +49,16 @@ function warnBrowser(message, details = null) {
 function setStatus(mode, text) {
   statusBadge.className = `status-badge ${mode}`;
   statusBadge.textContent = text;
+}
+
+function startBrandIntroAnimation() {
+  if (!brandStar) {
+    return;
+  }
+
+  window.setTimeout(() => {
+    brandStar.classList.add('is-star');
+  }, 3000);
 }
 
 
@@ -479,3 +490,4 @@ resetForm.addEventListener('click', resetInterface);
 });
 
 stopCalculation();
+startBrandIntroAnimation();
