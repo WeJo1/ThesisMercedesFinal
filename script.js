@@ -53,6 +53,7 @@ function setStatus(mode, text) {
 
 function setLoadingState(isLoading) {
   loadingIndicator.hidden = !isLoading;
+  loadingIndicator.setAttribute('aria-hidden', String(!isLoading));
   runModel.disabled = isLoading;
 }
 
@@ -358,12 +359,14 @@ async function runComparison() {
   const [genFile] = genImage.files;
 
   if (!refFile || !genFile) {
+    stopCalculation();
     setStatus('idle', 'Bilder fehlen');
     previewText.textContent = 'Wähle zuerst Referenz- und Generated-Bild aus.';
     return;
   }
 
   if (!hasMatchingComparisonTypes(refFile, genFile)) {
+    stopCalculation();
     setStatus('idle', 'Typ prüfen');
     previewText.textContent = 'Vergleiche entweder zwei Bilder oder zwei ZIP-Ordner. Mischformen sind nicht erlaubt.';
     return;
