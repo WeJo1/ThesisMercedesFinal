@@ -454,6 +454,41 @@ button {
   padding: 0.72rem;
   background: var(--metric-bg);
   box-shadow: 0 4px 10px rgba(18, 32, 51, 0.06);
+  position: relative;
+  overflow: hidden;
+  transition: transform 220ms ease, box-shadow 220ms ease, border-color 220ms ease;
+}
+
+.stats-grid article::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 4px;
+  background: linear-gradient(90deg, #0a84c6 0%, #066ca0 100%);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 220ms ease;
+}
+
+.stats-grid article:hover,
+.stats-grid article:focus-within {
+  transform: translateY(-3px);
+  box-shadow: 0 11px 22px rgba(18, 32, 51, 0.16);
+  border-color: rgba(10, 132, 198, 0.45);
+}
+
+.stats-grid article:hover::after,
+.stats-grid article:focus-within::after {
+  transform: scaleX(1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stats-grid article,
+  .stats-grid article::after {
+    transition: none;
+  }
 }
 
 .stat-label {
@@ -530,3 +565,4 @@ button {
     grid-template-columns: 1fr;
   }
 }
+
