@@ -33,7 +33,7 @@ const fallbackApiOrigins = ['http://127.0.0.1:4173', 'http://localhost:4173'];
 let isComparisonRunning = false;
 
 const iconCandidates = {
-  wheel: ['icons/felge.svg?v=2', 'icons/felge.svg'],
+  wheel: ['icons/stern.svg?v=2', 'icons/stern.svg'],
   star: ['icons/stern.svg?v=2', 'icons/stern.svg'],
 };
 
@@ -556,4 +556,3 @@ resetForm.addEventListener('click', resetInterface);
 stopCalculation();
 ensureMainBoardVisible();
 useBestAvailableIcons().finally(startBrandIntroAnimation);
-
