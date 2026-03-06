@@ -18,7 +18,7 @@ const carGenPreview = document.getElementById('carGenPreview');
 const comparisonSection = document.getElementById('comparisonSection');
 const comparisonList = document.getElementById('comparisonList');
 const metricInfoBoxes = document.querySelectorAll('.metric-info');
-const brandStar = document.querySelector('.brand-star');
+const brandIcons = document.querySelector('.brand-icons');
 const topbar = document.querySelector('.topbar');
 const contentGrid = document.querySelector('.content-grid');
 
@@ -59,13 +59,13 @@ function setStatus(mode, text) {
 }
 
 function startBrandIntroAnimation() {
-  if (!brandStar) {
+  if (!brandIcons) {
     return;
   }
 
-  brandStar.classList.remove('is-star');
+  brandIcons.classList.remove('is-star');
   window.setTimeout(() => {
-    brandStar.classList.add('is-star');
+    brandIcons.classList.add('is-star');
   }, 3000);
 }
 
