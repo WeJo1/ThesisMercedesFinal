@@ -63,12 +63,13 @@ function startBrandIntroAnimation() {
     return;
   }
 
-  brandIcons.classList.remove('is-star');
-  brandIcons.classList.add('is-wheel');
+  brandIcons.classList.remove('is-wheel', 'is-star');
+  brandIcons.classList.add('is-intro');
+
   window.setTimeout(() => {
-    brandIcons.classList.remove('is-wheel');
+    brandIcons.classList.remove('is-intro', 'is-wheel');
     brandIcons.classList.add('is-star');
-  }, 3000);
+  }, 4400);
 }
 
 function ensureMainBoardVisible() {
