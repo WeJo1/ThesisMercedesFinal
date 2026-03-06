@@ -33,8 +33,8 @@ const fallbackApiOrigins = ['http://127.0.0.1:4173', 'http://localhost:4173'];
 let isComparisonRunning = false;
 
 const iconCandidates = {
-  wheel: ['icons/felge.svg'],
-  star: ['icons/stern.svg'],
+  wheel: ['icons/felge.svg?v=2', 'icons/felge.svg'],
+  star: ['icons/stern.svg?v=2', 'icons/stern.svg'],
 };
 
 function logBrowser(message, details = null) {
@@ -64,7 +64,9 @@ function startBrandIntroAnimation() {
   }
 
   brandIcons.classList.remove('is-star');
+  brandIcons.classList.add('is-wheel');
   window.setTimeout(() => {
+    brandIcons.classList.remove('is-wheel');
     brandIcons.classList.add('is-star');
   }, 3000);
 }
@@ -554,5 +556,4 @@ resetForm.addEventListener('click', resetInterface);
 stopCalculation();
 ensureMainBoardVisible();
 useBestAvailableIcons().finally(startBrandIntroAnimation);
-
 
