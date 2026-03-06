@@ -1,9 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Stern">
-  <g fill="none" stroke="#122033" stroke-linecap="round" stroke-linejoin="round">
-    <circle cx="50" cy="50" r="48" stroke-width="3"/>
-    <path d="M50 18L50 58" stroke-width="2.7"/>
-    <path d="M50 58L24.5 74.5" stroke-width="2.7"/>
-    <path d="M50 58L75.5 74.5" stroke-width="2.7"/>
-    <circle cx="50" cy="58" r="2.2" stroke-width="2"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-label="Stern" fill="none">
+  <g stroke="#122033" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="60" cy="60" r="56" stroke-width="4" />
+    <path d="M60 23V69" stroke-width="3.2" />
+    <path d="M60 69L29.5 88.5" stroke-width="3.2" />
+    <path d="M60 69L90.5 88.5" stroke-width="3.2" />
+    <circle cx="60" cy="69" r="2.6" stroke-width="2.6" />
   </g>
 </svg>
