@@ -116,11 +116,11 @@ body {
 }
 
 .brand-icons.is-intro .brand-icon-wheel {
-  animation: wheel-accelerate-and-morph 4.4s both;
+  animation: wheel-morph-linear 4.4s linear both;
 }
 
 .brand-icons.is-intro .brand-icon-star {
-  animation: star-morph-decelerate 4.4s both;
+  animation: star-morph-linear 4.4s linear both;
 }
 
 .brand-icons.is-star .brand-icon-star {
@@ -371,54 +371,40 @@ button {
   }
 }
 
-@keyframes wheel-accelerate-and-morph {
+@keyframes wheel-morph-linear {
   0% {
     opacity: 1;
     filter: blur(0);
     transform: scale(1) rotate(0deg);
   }
-  15% {
-    transform: scale(1) rotate(25deg);
-  }
-  32% {
-    transform: scale(1) rotate(140deg);
-  }
-  52% {
-    transform: scale(1) rotate(420deg);
-  }
-  66% {
+  65% {
     opacity: 1;
     filter: blur(0);
     transform: scale(1) rotate(780deg);
   }
-  84% {
-    opacity: 0.28;
-    filter: blur(1.4px);
-    transform: scale(0.86) rotate(990deg);
+  85% {
+    opacity: 0.24;
+    filter: blur(1.6px);
+    transform: scale(0.86) rotate(1020deg);
   }
   100% {
     opacity: 0;
     filter: blur(2.2px);
-    transform: scale(0.76) rotate(1080deg);
+    transform: scale(0.76) rotate(1200deg);
   }
 }
 
-@keyframes star-morph-decelerate {
+@keyframes star-morph-linear {
   0%,
   56% {
     opacity: 0;
     filter: blur(6px);
     transform: scale(0.56) rotate(-240deg);
   }
-  70% {
-    opacity: 0.9;
+  75% {
+    opacity: 0.92;
     filter: blur(1px);
-    transform: scale(1.02) rotate(-460deg);
-  }
-  84% {
-    opacity: 1;
-    filter: blur(0);
-    transform: scale(1) rotate(-180deg);
+    transform: scale(1.02) rotate(-120deg);
   }
   100% {
     opacity: 1;
