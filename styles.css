@@ -136,7 +136,7 @@ body {
   filter: blur(2px);
 }
 
-.brand-icons:not(.is-wheel):not(.is-star) .brand-icon-wheel {
+.brand-icons:not(.is-wheel):not(.is-star):not(.is-intro) .brand-icon-wheel {
   opacity: 0;
   animation: none;
 }
