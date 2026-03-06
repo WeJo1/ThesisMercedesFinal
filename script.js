@@ -69,7 +69,7 @@ function startBrandIntroAnimation() {
   window.setTimeout(() => {
     brandIcons.classList.remove('is-intro', 'is-wheel');
     brandIcons.classList.add('is-star');
-  }, 4400);
+  }, 5000);
 }
 
 function ensureMainBoardVisible() {
