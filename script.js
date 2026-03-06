@@ -33,7 +33,7 @@ const fallbackApiOrigins = ['http://127.0.0.1:4173', 'http://localhost:4173'];
 let isComparisonRunning = false;
 
 const iconCandidates = {
-  wheel: ['icons/stern.png?v=2', 'icons/stern.png'],
+  wheel: ['icons/felge.png?v=2', 'icons/felge.png'],
   star: ['icons/stern.png?v=2', 'icons/stern.png'],
 };
 
