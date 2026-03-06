@@ -3,17 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Mercedes Model Studio</title>
+    <title>Mercedes Bildvergleich</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <div class="app-shell">
       <header class="topbar">
         <div class="brand">
-          <div class="brand-star" aria-hidden="true"></div>
+          <div class="brand-icons" aria-hidden="true">
+            <span class="brand-icon brand-icon-wheel"></span>
+            <span class="brand-icon brand-icon-star"></span>
+          </div>
           <div>
-            <p class="eyebrow">Mercedes-Benz AI</p>
-            <h1>Image Metrics Studio</h1>
+            <p class="eyebrow">Mercedes-Benz</p>
+            <h1>Bildvergleich</h1>
           </div>
         </div>
       </header>
@@ -22,18 +25,17 @@
         <section class="panel panel-input">
           <h2>Bilder vergleichen</h2>
           <p class="panel-intro">
-            Wähle Referenz- und Generated-Bild aus und starte dieselbe Logik wie im Python-CMD (LPIPS, SSIM,
-            DeltaE und optional Car-Only).
+            Wähle Referenz- und Vergleichsbild aus und starte die Auswertung.
           </p>
 
           <label for="refImage">Referenzbild oder ZIP</label>
           <input id="refImage" type="file" accept="image/*,.zip,application/zip" />
 
-          <label for="genImage">Generated-Bild oder ZIP</label>
+          <label for="genImage">Vergleichsbild oder ZIP</label>
           <input id="genImage" type="file" accept="image/*,.zip,application/zip" />
 
           <div class="field-row">
-            <label for="lpipsNet">LPIPS Backbone</label>
+            <label for="lpipsNet">LPIPS Modell</label>
             <select id="lpipsNet">
               <option value="alex">alex</option>
               <option value="vgg">vgg</option>
@@ -43,20 +45,20 @@
 
           <div class="toggle-row">
             <input id="carOnlyMode" type="checkbox" />
-            <label for="carOnlyMode">Car-Only Modus aktivieren</label>
+            <label for="carOnlyMode">Fahrzeug-Modus aktivieren</label>
           </div>
 
           <details>
-            <summary>Erweiterte Car-Only Parameter</summary>
+            <summary>Erweiterte Fahrzeug-Einstellungen</summary>
             <div class="field-row">
-              <label for="carMode">Car Mode</label>
+              <label for="carMode">Fahrzeug-Modus</label>
               <select id="carMode">
                 <option value="neutralize_crop">neutralize_crop</option>
                 <option value="weighted_lpips">weighted_lpips</option>
               </select>
             </div>
             <div class="field-row">
-              <label for="maskSource">Mask Source</label>
+              <label for="maskSource">Maskenquelle</label>
               <select id="maskSource">
                 <option value="ref">ref</option>
                 <option value="gen">gen</option>
@@ -73,7 +75,7 @@
 
         <section class="panel panel-output">
           <div class="output-header">
-            <h2>Metric Dashboard</h2>
+            <h2>Ergebnisse</h2>
             <span id="statusBadge" class="status-badge idle">Bereit</span>
           </div>
 
@@ -97,21 +99,21 @@
               <img id="refPreview" alt="Referenz Vorschau" />
             </figure>
             <figure class="preview-figure">
-              <figcaption>Generated-Bild</figcaption>
-              <img id="genPreview" alt="Generated Vorschau" />
+              <figcaption>Vergleichsbild</figcaption>
+              <img id="genPreview" alt="Vergleichsbild Vorschau" />
             </figure>
           </div>
 
           <section id="carOnlyPreviewSection" class="car-preview-section" hidden>
-            <p class="preview-title">Car-Only Zuschnitt (Preview)</p>
+            <p class="preview-title">Fahrzeug-Zuschnitt (Vorschau)</p>
             <div class="image-preview-grid">
               <figure class="preview-figure">
-                <figcaption>Car-Only Referenz</figcaption>
-                <img id="carRefPreview" alt="Car-Only Referenz Vorschau" />
+                <figcaption>Fahrzeug Referenz</figcaption>
+                <img id="carRefPreview" alt="Fahrzeug Referenz Vorschau" />
               </figure>
               <figure class="preview-figure">
-                <figcaption>Car-Only Generated</figcaption>
-                <img id="carGenPreview" alt="Car-Only Generated Vorschau" />
+                <figcaption>Fahrzeug Vergleich</figcaption>
+                <img id="carGenPreview" alt="Fahrzeug Vergleich Vorschau" />
               </figure>
             </div>
           </section>
@@ -122,7 +124,7 @@
                 <p class="stat-label">LPIPS (Wert + %)</p>
                 <details class="metric-info">
                   <summary aria-label="LPIPS Erklärung anzeigen">ⓘ</summary>
-                  <p>Niedriger ist besser: 0 bedeutet nahezu identisch.</p>
+                  <p>Je kleiner der Wert, desto ähnlicher sind die Bilder.</p>
                 </details>
               </div>
               <p id="lpips" class="stat-value">--</p>
@@ -132,7 +134,7 @@
                 <p class="stat-label">SSIM (Wert + %)</p>
                 <details class="metric-info">
                   <summary aria-label="SSIM Erklärung anzeigen">ⓘ</summary>
-                  <p>Höher ist besser: 1 bedeutet strukturell sehr ähnlich.</p>
+                  <p>Zeigt, wie gut Formen und Konturen übereinstimmen.</p>
                 </details>
               </div>
               <p id="ssim" class="stat-value">--</p>
@@ -142,7 +144,7 @@
                 <p class="stat-label">ΔE CIEDE2000 (Wert + %)</p>
                 <details class="metric-info">
                   <summary aria-label="DeltaE Erklärung anzeigen">ⓘ</summary>
-                  <p>Niedriger ist besser: misst den sichtbaren Farbabstand.</p>
+                  <p>Zeigt, wie stark sich die Farben sichtbar unterscheiden.</p>
                 </details>
               </div>
               <p id="deltaE" class="stat-value">--</p>
@@ -152,7 +154,7 @@
                 <p class="stat-label">LPIPS car-only (Wert + %)</p>
                 <details class="metric-info">
                   <summary aria-label="LPIPS car-only Erklärung anzeigen">ⓘ</summary>
-                  <p>Wie LPIPS, aber nur im Fahrzeugbereich; niedriger ist besser.</p>
+                  <p>Bewertet nur das Fahrzeug im Bild. Ist der Modus aus, bleibt der Wert leer.</p>
                 </details>
               </div>
               <p id="lpipsCar" class="stat-value">--</p>
@@ -162,7 +164,7 @@
                 <p class="stat-label">Mask IoU</p>
                 <details class="metric-info">
                   <summary aria-label="Mask IoU Erklärung anzeigen">ⓘ</summary>
-                  <p>Höher ist besser: Anteil der überlappenden Maskenfläche.</p>
+                  <p>Zeigt, wie gut sich die erkannten Fahrzeugflächen überdecken.</p>
                 </details>
               </div>
               <p id="maskIou" class="stat-value">--</p>
@@ -172,7 +174,7 @@
                 <p class="stat-label">Mask Dice</p>
                 <details class="metric-info">
                   <summary aria-label="Mask Dice Erklärung anzeigen">ⓘ</summary>
-                  <p>Höher ist besser: gewichtet gemeinsame Fläche doppelt.</p>
+                  <p>Zeigt die Flächenübereinstimmung mit zusätzlichem Gewicht auf gemeinsame Bereiche.</p>
                 </details>
               </div>
               <p id="maskDice" class="stat-value">--</p>
