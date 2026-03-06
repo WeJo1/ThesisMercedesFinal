@@ -88,13 +88,14 @@ body {
   inset: 0;
   background-repeat: no-repeat;
   background-position: center;
+  background-size: 94%;
+  transform-origin: 50% 50%;
   transition: transform 700ms cubic-bezier(0.22, 0.61, 0.36, 1), opacity 700ms ease, filter 700ms ease;
 }
 
 .brand-icon-wheel {
   background-image: var(--mercedes-wheel);
-  background-size: 96%;
-  transform-origin: center;
+  background-size: 94%;
   will-change: transform;
   opacity: 1;
   filter: blur(0);
@@ -102,7 +103,7 @@ body {
 
 .brand-icon-star {
   background-image: var(--mercedes-star);
-  background-size: 96%;
+  background-size: 94%;
   opacity: 0;
   transform: scale(0.62) rotate(-70deg);
   filter: blur(4px);
@@ -366,6 +367,9 @@ button {
 }
 
 @keyframes rotate-wheel {
+  from {
+    transform: rotate(0deg);
+  }
   to {
     transform: rotate(360deg);
   }
