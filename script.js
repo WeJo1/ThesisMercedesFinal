@@ -18,7 +18,7 @@ const carGenPreview = document.getElementById('carGenPreview');
 const comparisonSection = document.getElementById('comparisonSection');
 const comparisonList = document.getElementById('comparisonList');
 const metricInfoBoxes = document.querySelectorAll('.metric-info');
-const brandStar = document.querySelector('.brand-star');
+const brandIcons = document.querySelector('.brand-icons');
 const topbar = document.querySelector('.topbar');
 const contentGrid = document.querySelector('.content-grid');
 
@@ -59,13 +59,13 @@ function setStatus(mode, text) {
 }
 
 function startBrandIntroAnimation() {
-  if (!brandStar) {
+  if (!brandIcons) {
     return;
   }
 
-  brandStar.classList.remove('is-star');
+  brandIcons.classList.remove('is-star');
   window.setTimeout(() => {
-    brandStar.classList.add('is-star');
+    brandIcons.classList.add('is-star');
   }, 3000);
 }
 
@@ -242,10 +242,14 @@ function updateCarOnlyPreview(data) {
 }
 
 function renderMetrics(data) {
+  const showCarOnlyMetric = carOnlyMode.checked;
+
   lpipsValue.textContent = formatMetricPair(data.lpips, data.lpips_similarity_percent);
   ssim.textContent = formatMetricPair(data.ssim, data.ssim_percent);
   deltaE.textContent = formatMetricPair(data.delta_e_ciede2000, data.delta_e_similarity_percent);
-  lpipsCar.textContent = formatMetricPair(data.lpips_car_only, data.lpips_car_only_similarity_percent);
+  lpipsCar.textContent = showCarOnlyMetric
+    ? formatMetricPair(data.lpips_car_only, data.lpips_car_only_similarity_percent)
+    : '--';
   setMetric(maskIou, data.mask_iou);
   setMetric(maskDice, data.mask_dice);
 }
@@ -279,7 +283,7 @@ function renderComparisonList(comparisons) {
         <img src="${item.ref_preview || ''}" alt="Referenz ${item.filename || ''}" />
         <img src="${item.gen_preview || ''}" alt="Generated ${item.filename || ''}" />
       </div>`
-          : '<p class="comparison-note">Vorschau für Batch-Elemente deaktiviert, um Stabilität und Geschwindigkeit zu verbessern.</p>'
+          : '<p class="comparison-note">Für dieses Paar ist keine Vorschau verfügbar.</p>'
       }
       <ul>
         <li>LPIPS: ${formatMetricPair(item.lpips, item.lpips_similarity_percent)}</li>
@@ -310,7 +314,7 @@ function renderComparisonList(comparisons) {
         setPreviewImage(genPreview, item.gen_preview);
       }
       updateCarOnlyPreview(item);
-      previewText.textContent = `Vergleich abgeschlossen für ${item.filename}.`; 
+      previewText.textContent = `Vergleich abgeschlossen für ${item.filename}.`;
     });
 
     comparisonList.append(detailsNode);
@@ -408,7 +412,7 @@ async function sendComparisonRequest(payload) {
 
       if (error instanceof TypeError) {
         throw new Error(
-          `Backend nicht erreichbar. Starte gui_server.py und prüfe Port 4173. Versuchte Endpunkte: ${apiCandidates.join(', ')}`,
+          `Server nicht erreichbar. Starte gui_server.py und prüfe Port 4173. Versuchte Endpunkte: ${apiCandidates.join(', ')}`,
         );
       }
 
@@ -430,7 +434,7 @@ async function runComparison() {
   if (!refFile || !genFile) {
     stopCalculation();
     setStatus('idle', 'Bilder fehlen');
-    previewText.textContent = 'Wähle zuerst Referenz- und Generated-Bild aus.';
+    previewText.textContent = 'Wähle zuerst Referenz- und Vergleichsbild aus.';
     return;
   }
 
@@ -441,7 +445,7 @@ async function runComparison() {
     return;
   }
 
-  startCalculation('Berechne Metriken mit Python-Backend...');
+  startCalculation('Metriken werden berechnet...');
 
   const payload = new FormData();
   payload.append('ref_image', refFile);
@@ -473,11 +477,11 @@ async function runComparison() {
     const isBatch = Boolean(data.batch_mode && data.comparison_count > 1);
     if (isBatch) {
       const previewHint = data.batch_previews_limited
-        ? ' Vorschauen wurden nur für das erste Paar geladen, um Abstürze bei großen ZIP-Dateien zu vermeiden.'
+        ? ' Vorschauen wurden nur für das erste Paar geladen.'
         : '';
-      previewText.textContent = `Vergleich abgeschlossen: ${data.comparison_count} passende Dateipaare ausgewertet.${previewHint}`;
+      previewText.textContent = `Vergleich abgeschlossen: ${data.comparison_count} Dateipaare ausgewertet.${previewHint}`;
     } else {
-      previewText.textContent = `Vergleich abgeschlossen für ${firstComparison.filename}. Ergebnisse aus image_metrics.py wurden geladen.`;
+      previewText.textContent = `Vergleich abgeschlossen für ${firstComparison.filename}.`;
     }
 
     setStatus('done', 'Fertig');
