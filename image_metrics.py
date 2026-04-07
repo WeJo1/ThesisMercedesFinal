@@ -336,23 +336,6 @@ def save_lpips_spatial_map(dist_map, path):
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
-def build_result_dataframe(results):
-    frame = pd.DataFrame(results)
-
-    for column in CSV_FLOAT_COLUMNS:
-        if column in frame.columns:
-            frame[column] = pd.to_numeric(frame[column], errors="coerce").round(6)
-
-    known_columns = [name for name in CSV_COLUMN_ORDER if name in frame.columns]
-    unknown_columns = [name for name in frame.columns if name not in CSV_COLUMN_ORDER]
-    frame = frame[known_columns + unknown_columns]
-
-    if "filename" in frame.columns:
-        frame = frame.sort_values(by="filename", kind="stable").reset_index(drop=True)
-
-    return frame
-
-
 def compute_lpips_on_content(ref, gen, content_mask, lpips_model, use_gpu=False, mask_downsample="bilinear", eps=1e-8):
     metric_mask = prepare_metric_mask(content_mask, ref, gen)
     if metric_mask is None:

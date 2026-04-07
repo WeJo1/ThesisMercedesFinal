@@ -21,8 +21,6 @@ const spatialSection = document.getElementById('spatialSection');
 const spatialMeta = document.getElementById('spatialMeta');
 const spatialMatrix = document.getElementById('spatialMatrix');
 const spatialHeatmapCanvas = document.getElementById('spatialHeatmapCanvas');
-const spatialOverlayCanvas = document.getElementById('spatialOverlayCanvas');
-const overlayOpacity = document.getElementById('overlayOpacity');
 const comparisonSection = document.getElementById('comparisonSection');
 const comparisonList = document.getElementById('comparisonList');
 const metricInfoBoxes = document.querySelectorAll('.metric-info');
@@ -244,10 +242,15 @@ function formatSpatialValue(value) {
   return numeric.toFixed(3);
 }
 
-function buildHeatmapImageData(values, minValue, maxValue) {
+function renderSpatialHeatmap(values, minValue, maxValue) {
+  const context = spatialHeatmapCanvas.getContext('2d');
+  if (!context) {
+    return;
+  }
+
   const rows = values.length;
   const cols = values[0].length;
-  const imageData = new ImageData(cols, rows);
+  const imageData = context.createImageData(cols, rows);
   const range = Math.max(maxValue - minValue, 1e-8);
 
   values.forEach((row, rowIndex) => {
@@ -264,18 +267,6 @@ function buildHeatmapImageData(values, minValue, maxValue) {
     });
   });
 
-  return imageData;
-}
-
-function renderSpatialHeatmap(values, minValue, maxValue) {
-  const context = spatialHeatmapCanvas.getContext('2d');
-  if (!context) {
-    return;
-  }
-
-  const rows = values.length;
-  const cols = values[0].length;
-  const imageData = buildHeatmapImageData(values, minValue, maxValue);
   const offscreen = document.createElement('canvas');
   offscreen.width = cols;
   offscreen.height = rows;
@@ -288,47 +279,6 @@ function renderSpatialHeatmap(values, minValue, maxValue) {
   context.clearRect(0, 0, spatialHeatmapCanvas.width, spatialHeatmapCanvas.height);
   context.imageSmoothingEnabled = false;
   context.drawImage(offscreen, 0, 0, spatialHeatmapCanvas.width, spatialHeatmapCanvas.height);
-}
-
-function loadImage(src) {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error('Bild konnte nicht geladen werden.'));
-    image.src = src;
-  });
-}
-
-async function renderSpatialOverlay(values, minValue, maxValue, genImageSrc, alphaValue) {
-  const context = spatialOverlayCanvas.getContext('2d');
-  if (!context) {
-    return;
-  }
-
-  context.clearRect(0, 0, spatialOverlayCanvas.width, spatialOverlayCanvas.height);
-  if (!genImageSrc) {
-    return;
-  }
-
-  const baseImage = await loadImage(genImageSrc);
-  const rows = values.length;
-  const cols = values[0].length;
-  const heatmapImageData = buildHeatmapImageData(values, minValue, maxValue);
-  const heatmapCanvas = document.createElement('canvas');
-  heatmapCanvas.width = cols;
-  heatmapCanvas.height = rows;
-  const heatmapContext = heatmapCanvas.getContext('2d');
-  if (!heatmapContext) {
-    return;
-  }
-  heatmapContext.putImageData(heatmapImageData, 0, 0);
-
-  context.imageSmoothingEnabled = true;
-  context.globalAlpha = 1;
-  context.drawImage(baseImage, 0, 0, spatialOverlayCanvas.width, spatialOverlayCanvas.height);
-  context.globalAlpha = alphaValue;
-  context.drawImage(heatmapCanvas, 0, 0, spatialOverlayCanvas.width, spatialOverlayCanvas.height);
-  context.globalAlpha = 1;
 }
 
 function renderSpatialMatrixTable(values) {
@@ -363,8 +313,7 @@ function renderSpatialMatrixTable(values) {
   }
 }
 
-async function updateSpatialOutput(data) {
-  lastSpatialPayload = data;
+function updateSpatialOutput(data) {
   const values = data?.lpips_spatial_map?.values;
   if (!Array.isArray(values) || values.length === 0 || !Array.isArray(values[0])) {
     spatialSection.hidden = true;
@@ -373,10 +322,6 @@ async function updateSpatialOutput(data) {
     const context = spatialHeatmapCanvas.getContext('2d');
     if (context) {
       context.clearRect(0, 0, spatialHeatmapCanvas.width, spatialHeatmapCanvas.height);
-    }
-    const overlayContext = spatialOverlayCanvas.getContext('2d');
-    if (overlayContext) {
-      overlayContext.clearRect(0, 0, spatialOverlayCanvas.width, spatialOverlayCanvas.height);
     }
     return;
   }
@@ -389,17 +334,7 @@ async function updateSpatialOutput(data) {
   spatialMeta.textContent = `Matrix: ${rows}x${cols} | min=${formatSpatialValue(minValue)} | max=${formatSpatialValue(maxValue)}`;
   renderSpatialMatrixTable(values);
   renderSpatialHeatmap(values, minValue, maxValue);
-  renderSpatialOverlay(values, minValue, maxValue, data?.gen_preview, Number(overlayOpacity.value)).catch((error) => {
-    warnBrowser('Overlay konnte nicht gerendert werden.', error.message);
-  });
   spatialSection.hidden = false;
-}
-
-function handleOverlayOpacityChange() {
-  if (!lastSpatialPayload?.lpips_spatial_map?.values) {
-    return;
-  }
-  updateSpatialOutput(lastSpatialPayload);
 }
 
 function renderMetrics(data) {
