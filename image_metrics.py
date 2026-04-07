@@ -118,11 +118,39 @@ def compute_ssim(ref, gen):
 
 
 def compute_masked_ssim(ref, gen, mask, neutral_value=0.5):
+    metric_mask = prepare_metric_mask(mask, ref, gen)
+    if metric_mask is None:
+        return compute_ssim(ref, gen)
+
     masked_ref = ref.copy()
     masked_gen = gen.copy()
-    masked_ref[~mask] = neutral_value
-    masked_gen[~mask] = neutral_value
+    masked_ref[~metric_mask] = neutral_value
+    masked_gen[~metric_mask] = neutral_value
     return compute_ssim(masked_ref, masked_gen)
+
+
+def prepare_metric_mask(mask, ref, gen):
+    if mask is None:
+        return None
+
+    expected_shape = ref.shape[:2]
+    if gen.shape[:2] != expected_shape:
+        raise ValueError(
+            f"Maskenvalidierung fehlgeschlagen: ref/gen haben unterschiedliche Formen "
+            f"({expected_shape} vs. {gen.shape[:2]})."
+        )
+
+    metric_mask = np.asarray(mask, dtype=bool)
+    if metric_mask.shape != expected_shape:
+        raise ValueError(
+            f"Maskenvalidierung fehlgeschlagen: erwartete Form {expected_shape}, "
+            f"erhalten {metric_mask.shape}."
+        )
+
+    if not np.any(metric_mask):
+        return None
+
+    return metric_mask
 
 
 def init_lpips_model(net="alex", use_gpu=False, train_mode="lin"):
@@ -240,16 +268,14 @@ def save_lpips_heatmap(dist_map, path):
 
 
 def compute_lpips_on_content(ref, gen, content_mask, lpips_model, use_gpu=False, mask_downsample="bilinear", eps=1e-8):
-    if content_mask is None:
-        return compute_lpips(ref, gen, lpips_model, use_gpu=use_gpu)
-
-    if not np.any(content_mask):
+    metric_mask = prepare_metric_mask(content_mask, ref, gen)
+    if metric_mask is None:
         return compute_lpips(ref, gen, lpips_model, use_gpu=use_gpu)
 
     return masked_lpips(
         ref,
         gen,
-        content_mask,
+        metric_mask,
         lpips_model,
         use_gpu=use_gpu,
         mask_downsample=mask_downsample,
@@ -480,6 +506,7 @@ def compute_car_only_metrics(
     roi_min_size_px=64,
     roi_square=True,
 ):
+    empty_masks = {"ref_mask": None, "gen_mask": None}
     if segmenter is None:
         debug = {"mask_area_ratio": 0.0, "bbox": None, "fallback_reason": "Car-only deaktiviert"}
         return {
@@ -487,6 +514,7 @@ def compute_car_only_metrics(
             "ssim_car_only": None,
             "car_only_paths": {"ref": None, "gen": None},
             "debug": debug,
+            "masks": empty_masks,
         }
 
     ref_mask = segment_car_mask(ref_norm, segmenter, cache_key=f"ref::{Path(ref_path).resolve()}")
@@ -531,6 +559,7 @@ def compute_car_only_metrics(
             "ssim_car_only": None,
             "car_only_paths": {"ref": None, "gen": None},
             "debug": debug,
+            "masks": {"ref_mask": ref_mask, "gen_mask": gen_mask},
         }
 
     adaptive_min_size = max(int(roi_min_size_px), int(min(ref_norm.shape[0], ref_norm.shape[1]) * 0.2))
@@ -604,6 +633,7 @@ def compute_car_only_metrics(
         "ssim_car_only": ssim_car,
         "car_only_paths": car_only_paths,
         "debug": debug,
+        "masks": {"ref_mask": ref_mask, "gen_mask": gen_mask},
     }
 
 
@@ -612,6 +642,17 @@ def compute_delta_e(ref, gen):
     gen_lab = color.rgb2lab(gen)
     delta_map = color.deltaE_ciede2000(ref_lab, gen_lab)
     return float(np.mean(delta_map))
+
+
+def compute_masked_delta_e(ref, gen, mask):
+    metric_mask = prepare_metric_mask(mask, ref, gen)
+    if metric_mask is None:
+        return compute_delta_e(ref, gen)
+
+    ref_lab = color.rgb2lab(ref)
+    gen_lab = color.rgb2lab(gen)
+    delta_map = color.deltaE_ciede2000(ref_lab, gen_lab)
+    return float(np.mean(delta_map[metric_mask]))
 
 
 def convert_metrics_to_percent(ssim_val, lpips_val, delta_e_val):
@@ -686,9 +727,24 @@ def safe_centroid(mask):
     return np.array([mean_y, mean_x], dtype=np.float32)
 
 
-def compute_geometric_metrics(ref, gen, include_hausdorff=True):
-    ref_mask = create_foreground_mask(ref)
-    gen_mask = create_foreground_mask(gen)
+def build_empty_car_mask_metrics():
+    return {
+        "mask_iou": None,
+        "mask_dice": None,
+        "mask_area_ratio": None,
+        "centroid_distance_px": None,
+        "centroid_distance_norm": None,
+        "hausdorff_px": None,
+        "hausdorff_norm": None,
+        "mask_metric_scope": "none",
+    }
+
+
+def compute_car_mask_metrics(ref_mask, gen_mask, include_hausdorff=True):
+    ref_mask = np.asarray(ref_mask, dtype=bool)
+    gen_mask = np.asarray(gen_mask, dtype=bool)
+    if ref_mask.shape != gen_mask.shape:
+        raise ValueError(f"Car-Masken müssen dieselbe Form haben ({ref_mask.shape} vs. {gen_mask.shape}).")
 
     ref_area = int(np.sum(ref_mask))
     gen_area = int(np.sum(gen_mask))
@@ -736,6 +792,7 @@ def compute_geometric_metrics(ref, gen, include_hausdorff=True):
         "centroid_distance_norm": centroid_distance_norm,
         "hausdorff_px": hausdorff_px,
         "hausdorff_norm": hausdorff_norm,
+        "mask_metric_scope": "car_mask",
     }
     return metrics
 
@@ -782,18 +839,18 @@ def evaluate_pair(
     basename = Path(ref_path).stem
     ref_norm_path, gen_norm_path = save_normalized_pair(ref_norm, gen_norm, basename, out_dir)
 
-    ssim_val = compute_ssim(ref_norm, gen_norm)
+    valid_content_mask = prepare_metric_mask(content_mask, ref_norm, gen_norm)
+    ssim_val = compute_masked_ssim(ref_norm, gen_norm, valid_content_mask, neutral_value=neutral_value)
     lpips_val = compute_lpips_on_content(
         ref_norm,
         gen_norm,
-        content_mask,
+        valid_content_mask,
         lpips_model,
         use_gpu=use_gpu,
         mask_downsample=mask_downsample,
         eps=eps,
     )
-    delta_e_val = compute_delta_e(ref_norm, gen_norm)
-    geometric = compute_geometric_metrics(ref_norm, gen_norm, include_hausdorff=include_hausdorff)
+    delta_e_val = compute_masked_delta_e(ref_norm, gen_norm, valid_content_mask)
     percent_metrics = convert_metrics_to_percent(ssim_val, lpips_val, delta_e_val)
     lpips_heatmap_path = None
     lpips_map_mean = None
@@ -806,8 +863,8 @@ def evaluate_pair(
         lpips_heatmap_path = str(heatmap_path)
 
     foreground_mask = compute_foreground_mask_union(ref_norm, gen_norm)
-    if content_mask is not None:
-        foreground_mask = foreground_mask & content_mask
+    if valid_content_mask is not None:
+        foreground_mask = foreground_mask & valid_content_mask
     lpips_foreground = masked_lpips(
         ref_norm,
         gen_norm,
@@ -845,11 +902,30 @@ def evaluate_pair(
     )
     lpips_car_only_similarity_percent = convert_lpips_to_similarity_percent(car_metrics["lpips_car_only"])
 
+    car_masks = car_metrics.get("masks", {})
+    ref_car_mask = car_masks.get("ref_mask")
+    gen_car_mask = car_masks.get("gen_mask")
+    has_valid_car_masks = ref_car_mask is not None and gen_car_mask is not None and np.any(ref_car_mask) and np.any(gen_car_mask)
+    if has_valid_car_masks:
+        geometric = compute_car_mask_metrics(ref_car_mask, gen_car_mask, include_hausdorff=include_hausdorff)
+    else:
+        geometric = build_empty_car_mask_metrics()
+
     print("------------------------------------------------------------")
     print(f"Pair: {basename}")
     print(f"  Reference original : {ref_w}x{ref_h}")
     print(f"  Generated original : {gen_w}x{gen_h}")
     print(f"  Normalized sizes   : {norm_w}x{norm_h}")
+    if valid_content_mask is not None:
+        content_area_px = int(np.sum(valid_content_mask))
+        content_area_ratio = float(content_area_px / valid_content_mask.size)
+        print(f"  Main scope         : content_mask")
+        print(f"  Content area (px)  : {content_area_px}")
+        print(f"  Content area (%)   : {content_area_ratio * 100.0:.2f}%")
+    else:
+        content_area_px = int(ref_norm.shape[0] * ref_norm.shape[1])
+        content_area_ratio = 1.0
+        print("  Main scope         : full_frame (Fallback)")
     print(f"  SSIM               : {ssim_val:.6f}")
     print(f"  SSIM (%)           : {percent_metrics['ssim_percent']:.2f}%")
     print(f"  LPIPS              : {lpips_val:.6f}")
@@ -869,6 +945,7 @@ def evaluate_pair(
             print(f"  Car-only Gen saved : {car_metrics['car_only_paths']['gen']}")
     else:
         print("  Car-only           : deaktiviert (nutze Full-Image-Logik)")
+    print(f"  Mask metric scope  : {geometric['mask_metric_scope']}")
     print(f"  Delta E (CIEDE2000): {delta_e_val:.6f}")
     print(f"  Delta E Similarity %: {percent_metrics['delta_e_similarity_percent']:.2f}%")
     print(f"  Saved ref_norm     : {ref_norm_path}")
@@ -883,6 +960,9 @@ def evaluate_pair(
         "normalized_width": norm_w,
         "normalized_height": norm_h,
         "normalization_mode": mode,
+        "main_metric_scope": "content_mask" if valid_content_mask is not None else "full_frame_fallback",
+        "content_mask_area_px": content_area_px,
+        "content_mask_area_ratio": content_area_ratio,
         "ssim": ssim_val,
         "ssim_percent": percent_metrics["ssim_percent"],
         "lpips": lpips_val,
