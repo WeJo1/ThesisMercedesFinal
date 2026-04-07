@@ -630,7 +630,14 @@ def compute_car_only_metrics(
 ):
     empty_masks = {"ref_mask": None, "gen_mask": None, "car_mask": None}
     if segmenter is None:
-        debug = {"mask_area_ratio": 0.0, "bbox": None, "fallback_reason": "Car-only deaktiviert"}
+        debug = {
+            "mask_area_ratio": 0.0,
+            "bbox": None,
+            "metric_bbox": None,
+            "ref_preview_bbox": None,
+            "gen_preview_bbox": None,
+            "fallback_reason": "Car-only deaktiviert",
+        }
         return {
             "lpips_car_only": None,
             "ssim_car_only": None,
