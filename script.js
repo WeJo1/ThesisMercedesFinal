@@ -41,9 +41,7 @@ const fallbackApiOrigins = ['http://127.0.0.1:4173', 'http://localhost:4173'];
 let isComparisonRunning = false;
 let lastSpatialPayload = null;
 
-const iconCandidates = {
-  star: ['icons/stern.svg'],
-};
+const mercedesStarSvgPath = 'icons/stern.svg';
 
 function logBrowser(message, details = null) {
   if (details === null) {
@@ -114,31 +112,8 @@ function setHeaderLoadingState(isLoading) {
   topbar.classList.toggle('is-loading', isLoading);
 }
 
-function resolveIconPath(path) {
-  return new Promise((resolve) => {
-    const testImage = new Image();
-    testImage.onload = () => resolve(path);
-    testImage.onerror = () => resolve(null);
-    testImage.src = path;
-  });
-}
-
-async function useBestAvailableIcons() {
-  const starPath = await findFirstAvailableIcon(iconCandidates.star);
-
-  if (starPath) {
-    document.documentElement.style.setProperty('--mercedes-star', `url("${starPath}")`);
-  }
-}
-
-async function findFirstAvailableIcon(candidates) {
-  for (const candidate of candidates) {
-    const validPath = await resolveIconPath(candidate);
-    if (validPath) {
-      return validPath;
-    }
-  }
-  return null;
+function enforceMercedesStarSvg() {
+  document.documentElement.style.setProperty('--mercedes-star', `url("${mercedesStarSvgPath}")`);
 }
 
 
@@ -227,6 +202,25 @@ function updatePreviewState(imgTarget, hasImage) {
   previewFigure.classList.toggle('has-image', hasImage);
 }
 
+function syncHeatmapPreviewSize() {
+  if (!spatialHeatmapCanvas || !refPreview) {
+    return;
+  }
+
+  const referenceWidth = Math.round(refPreview.clientWidth);
+  const referenceHeight = Math.round(refPreview.clientHeight);
+  if (referenceWidth <= 0 || referenceHeight <= 0) {
+    return;
+  }
+
+  spatialHeatmapCanvas.style.width = `${referenceWidth}px`;
+  spatialHeatmapCanvas.style.height = `${referenceHeight}px`;
+
+  const pixelRatio = window.devicePixelRatio || 1;
+  spatialHeatmapCanvas.width = Math.max(1, Math.round(referenceWidth * pixelRatio));
+  spatialHeatmapCanvas.height = Math.max(1, Math.round(referenceHeight * pixelRatio));
+}
+
 function showPreview(input, imgTarget) {
   const [file] = input.files;
   if (!file || isZipFile(file)) {
@@ -248,10 +242,12 @@ function setPreviewImage(imgTarget, value) {
   if (!value) {
     imgTarget.removeAttribute('src');
     updatePreviewState(imgTarget, false);
+    syncHeatmapPreviewSize();
     return;
   }
   imgTarget.src = value;
   updatePreviewState(imgTarget, true);
+  syncHeatmapPreviewSize();
 }
 
 function updateCarOnlyPreview(data) {
@@ -288,6 +284,7 @@ function getPercentileThreshold(flatValues, percentile) {
 }
 
 function renderSpatialHeatmap(values, minValue, maxValue) {
+  syncHeatmapPreviewSize();
   const context = spatialHeatmapCanvas.getContext('2d');
   if (!context) {
     return;
@@ -734,4 +731,6 @@ overlayOpacity.addEventListener('input', handleOverlayOpacityChange);
 stopCalculation();
 ensureMainBoardVisible();
 startBrandIntroAnimation();
-useBestAvailableIcons();
+enforceMercedesStarSvg();
+syncHeatmapPreviewSize();
+window.addEventListener('resize', syncHeatmapPreviewSize);
