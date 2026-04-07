@@ -21,6 +21,8 @@ const spatialSection = document.getElementById('spatialSection');
 const spatialMeta = document.getElementById('spatialMeta');
 const spatialMatrix = document.getElementById('spatialMatrix');
 const spatialHeatmapCanvas = document.getElementById('spatialHeatmapCanvas');
+const heatmapDetails = document.getElementById('heatmapDetails');
+const matrixDetails = document.getElementById('matrixDetails');
 const comparisonSection = document.getElementById('comparisonSection');
 const comparisonList = document.getElementById('comparisonList');
 const metricInfoBoxes = document.querySelectorAll('.metric-info');
@@ -308,11 +310,14 @@ function renderSpatialHeatmap(values, minValue, maxValue) {
   context.drawImage(offscreen, 0, 0, spatialHeatmapCanvas.width, spatialHeatmapCanvas.height);
 }
 
-function renderSpatialMatrixTable(values) {
+function renderSpatialMatrixTable(values, minValue, maxValue) {
   const rowCount = values.length;
   const colCount = values[0].length;
   const maxRows = Math.min(rowCount, 32);
   const maxCols = Math.min(colCount, 32);
+  const range = Math.max(maxValue - minValue, 1e-8);
+  const highThreshold = minValue + range * 0.75;
+  const veryHighThreshold = minValue + range * 0.9;
 
   const tableNode = document.createElement('table');
   tableNode.className = 'spatial-table';
@@ -322,7 +327,13 @@ function renderSpatialMatrixTable(values) {
     const rowNode = document.createElement('tr');
     for (let colIndex = 0; colIndex < maxCols; colIndex += 1) {
       const cellNode = document.createElement('td');
-      cellNode.textContent = formatSpatialValue(values[rowIndex][colIndex]);
+      const numericValue = Number(values[rowIndex][colIndex]);
+      cellNode.textContent = formatSpatialValue(numericValue);
+      if (numericValue >= veryHighThreshold) {
+        cellNode.classList.add('spatial-cell-very-high');
+      } else if (numericValue >= highThreshold) {
+        cellNode.classList.add('spatial-cell-high');
+      }
       rowNode.append(cellNode);
     }
     bodyNode.append(rowNode);
@@ -359,8 +370,14 @@ function updateSpatialOutput(data) {
   const cols = Number(data.lpips_spatial_map?.cols ?? values[0].length);
 
   spatialMeta.textContent = `Matrix: ${rows}x${cols} | min=${formatSpatialValue(minValue)} | max=${formatSpatialValue(maxValue)}`;
-  renderSpatialMatrixTable(values);
+  renderSpatialMatrixTable(values, minValue, maxValue);
   renderSpatialHeatmap(values, minValue, maxValue);
+  if (heatmapDetails) {
+    heatmapDetails.open = false;
+  }
+  if (matrixDetails) {
+    matrixDetails.open = false;
+  }
   spatialSection.hidden = false;
 }
 
