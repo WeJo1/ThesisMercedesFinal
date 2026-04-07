@@ -219,7 +219,9 @@ class MetricsHandler(SimpleHTTPRequestHandler):
         comparisons = []
         for index, row in enumerate(rows):
             should_include_previews = not compare_as_batch or index == 0
-            comparisons.append(self.build_preview_payload(row, include_previews=should_include_previews))
+            comparison_payload = self.build_preview_payload(row, include_previews=should_include_previews)
+            comparison_payload["run_dir"] = str(run_paths["run_root"])
+            comparisons.append(comparison_payload)
 
         first_comparison = comparisons[0]
 

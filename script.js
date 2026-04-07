@@ -332,7 +332,7 @@ function renderComparisonList(comparisons) {
       }
       updateCarOnlyPreview(item);
       updateHeatmapPreview(item);
-      previewText.textContent = `Vergleich abgeschlossen für ${item.filename}.`;
+      previewText.textContent = `Vergleich abgeschlossen für ${item.filename}. Heatmap sichtbar: ${Boolean(item.lpips_heatmap_preview)}. Ablage: ${item.run_dir || '--'}`;
     });
 
     comparisonList.append(detailsNode);
