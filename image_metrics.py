@@ -1,5 +1,6 @@
 import argparse
 import json
+import random
 from pathlib import Path
 
 import numpy as np
@@ -33,6 +34,7 @@ except Exception:
 SUPPORTED_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff")
 LETTERBOX_PAD_COLOR = (127, 127, 127)
 COCO_VEHICLE_CLASSES = {3, 4, 6, 8}
+SUPPORTED_LPIPS_TRAIN_MODES = ("lin", "tune", "scratch")
 
 
 def load_image(path):
@@ -40,6 +42,25 @@ def load_image(path):
         rgb = img.convert("RGB")
         arr = np.asarray(rgb, dtype=np.float32) / 255.0
     return arr
+
+
+def validate_image_for_metrics(img, image_name="image"):
+    if not isinstance(img, np.ndarray):
+        raise TypeError(f"{image_name} muss ein NumPy-Array sein.")
+
+    if img.ndim != 3 or img.shape[2] != 3:
+        raise ValueError(f"{image_name} muss die Form (H, W, 3) haben. Aktuell: {img.shape}")
+
+    if not np.issubdtype(img.dtype, np.floating):
+        raise TypeError(f"{image_name} muss ein Float-Tensor/Array sein. Aktuell: {img.dtype}")
+
+    min_val = float(np.min(img))
+    max_val = float(np.max(img))
+    if min_val < 0.0 or max_val > 1.0:
+        raise ValueError(
+            f"{image_name} enthält Werte außerhalb [0,1] (min={min_val:.4f}, max={max_val:.4f}). "
+            "Nutze load_image()/Normierung vor der Metrik-Berechnung."
+        )
 
 
 def np_to_pil_uint8(img):
@@ -96,23 +117,72 @@ def compute_ssim(ref, gen):
     return float(value)
 
 
-def init_lpips_model(net="alex", use_gpu=False):
+def compute_masked_ssim(ref, gen, mask, neutral_value=0.5):
+    masked_ref = ref.copy()
+    masked_gen = gen.copy()
+    masked_ref[~mask] = neutral_value
+    masked_gen[~mask] = neutral_value
+    return compute_ssim(masked_ref, masked_gen)
+
+
+def init_lpips_model(net="alex", use_gpu=False, train_mode="lin"):
     if lpips is None:
-        print("[WARN] Paket 'lpips' nicht gefunden. Nutze Proxy-Distanz (mittlere absolute Abweichung) statt LPIPS.")
-        return None
+        raise RuntimeError("Paket 'lpips' nicht gefunden. Installiere die Abhängigkeiten aus requirements.txt.")
 
     if torch is None:
-        print(
-            "[WARN] 'torch' konnte nicht geladen werden "
-            f"({TORCH_IMPORT_ERROR}). Nutze Proxy-Distanz (mittlere absolute Abweichung) statt LPIPS."
-        )
-        return None
+        raise RuntimeError(f"'torch' konnte nicht geladen werden ({TORCH_IMPORT_ERROR}). Installiere torch korrekt.")
 
-    model = lpips.LPIPS(net=net)
+    if train_mode != "lin":
+        raise NotImplementedError(
+            f"lpips_train_mode='{train_mode}' ist in diesem Skript nicht implementiert. "
+            "Nutze 'lin' für die offizielle Inferenz mit trainierten Linear-Layern."
+        )
+
+    # Nutze den offiziellen LPIPS-Inferenzpfad (lin):
+    # - lpips=True aktiviert die trainierten linearen Kalibrierungsschichten.
+    # - pretrained=True lädt die vortrainierten Gewichte.
+    # - spatial=True liefert zusätzlich eine räumliche Distanzkarte (Heatmap).
+    model = lpips.LPIPS(net=net, spatial=True, lpips=True, pretrained=True)
     if use_gpu and torch.cuda.is_available():
         model = model.cuda()
     model.eval()
     return model
+
+
+def verify_lpips_forward(lpips_model, net="alex", use_gpu=False):
+    if torch is None:
+        raise RuntimeError(f"'torch' ist nicht verfügbar: {TORCH_IMPORT_ERROR}")
+
+    dummy_ref = torch.zeros((1, 3, 64, 64), dtype=torch.float32)
+    dummy_gen = torch.zeros((1, 3, 64, 64), dtype=torch.float32)
+    dummy_ref = dummy_ref * 2.0 - 1.0
+    dummy_gen = dummy_gen * 2.0 - 1.0
+
+    if use_gpu and torch.cuda.is_available():
+        dummy_ref = dummy_ref.cuda()
+        dummy_gen = dummy_gen.cuda()
+
+    with torch.no_grad():
+        out = lpips_model(dummy_ref, dummy_gen)
+
+    if out.ndim < 2:
+        raise RuntimeError(f"LPIPS-Forward für net='{net}' liefert unerwartete Form: {tuple(out.shape)}")
+
+
+def configure_determinism(seed=None, deterministic=False):
+    if seed is not None:
+        np.random.seed(seed)
+        random.seed(seed)
+        if torch is not None:
+            torch.manual_seed(seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(seed)
+
+    if deterministic and torch is not None:
+        torch.use_deterministic_algorithms(True)
+        if hasattr(torch.backends, "cudnn"):
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
 
 
 def numpy_to_lpips_tensor(img):
@@ -126,9 +196,6 @@ def numpy_to_lpips_tensor(img):
 
 
 def compute_lpips(ref, gen, lpips_model, use_gpu=False):
-    if lpips_model is None:
-        return float(np.mean(np.abs(ref - gen)))
-
     ref_t = numpy_to_lpips_tensor(ref)
     gen_t = numpy_to_lpips_tensor(gen)
 
@@ -139,7 +206,37 @@ def compute_lpips(ref, gen, lpips_model, use_gpu=False):
     with torch.no_grad():
         dist = lpips_model(ref_t, gen_t)
 
-    return float(dist.item())
+    return float(torch.mean(dist).item())
+
+
+def compute_lpips_with_map(ref, gen, lpips_model, use_gpu=False):
+    ref_t = numpy_to_lpips_tensor(ref)
+    gen_t = numpy_to_lpips_tensor(gen)
+
+    if use_gpu and torch.cuda.is_available():
+        ref_t = ref_t.cuda()
+        gen_t = gen_t.cuda()
+
+    with torch.no_grad():
+        dist = lpips_model(ref_t, gen_t)
+
+    dist_value = float(torch.mean(dist).item())
+    dist_map = dist.detach().float().cpu().numpy().squeeze()
+    if dist_map.ndim == 0:
+        dist_map = np.array([[float(dist_map)]], dtype=np.float32)
+    return dist_value, dist_map
+
+
+def save_lpips_heatmap(dist_map, path):
+    dist_map = np.asarray(dist_map, dtype=np.float32)
+    map_min = float(np.min(dist_map))
+    map_max = float(np.max(dist_map))
+    if map_max > map_min:
+        normalized = (dist_map - map_min) / (map_max - map_min)
+    else:
+        normalized = np.zeros_like(dist_map, dtype=np.float32)
+    heat = (normalized * 255.0).astype(np.uint8)
+    Image.fromarray(heat, mode="L").save(path)
 
 
 def compute_lpips_on_content(ref, gen, content_mask, lpips_model, use_gpu=False, mask_downsample="bilinear", eps=1e-8):
@@ -237,7 +334,7 @@ def refine_car_mask(
     return refined_mask.astype(bool)
 
 
-def compute_mask_bbox(mask, pad_px=20):
+def compute_mask_bbox(mask, pad_px=20, min_size_px=64, make_square=True):
     ys, xs = np.where(mask)
     if len(xs) == 0:
         h, w = mask.shape
@@ -247,6 +344,48 @@ def compute_mask_bbox(mask, pad_px=20):
     y1 = min(mask.shape[0], int(np.max(ys)) + 1 + pad_px)
     x0 = max(0, int(np.min(xs)) - pad_px)
     x1 = min(mask.shape[1], int(np.max(xs)) + 1 + pad_px)
+
+    box_w = x1 - x0
+    box_h = y1 - y0
+    min_size = max(1, int(min_size_px))
+
+    if make_square:
+        target_size = max(box_w, box_h, min_size)
+        cx = (x0 + x1) / 2.0
+        cy = (y0 + y1) / 2.0
+        half = target_size / 2.0
+        x0 = int(round(cx - half))
+        x1 = int(round(cx + half))
+        y0 = int(round(cy - half))
+        y1 = int(round(cy + half))
+    else:
+        if box_w < min_size:
+            add = min_size - box_w
+            x0 -= add // 2
+            x1 += add - (add // 2)
+        if box_h < min_size:
+            add = min_size - box_h
+            y0 -= add // 2
+            y1 += add - (add // 2)
+
+    h, w = mask.shape
+    if x0 < 0:
+        x1 += -x0
+        x0 = 0
+    if y0 < 0:
+        y1 += -y0
+        y0 = 0
+    if x1 > w:
+        shift = x1 - w
+        x0 = max(0, x0 - shift)
+        x1 = w
+    if y1 > h:
+        shift = y1 - h
+        y0 = max(0, y0 - shift)
+        y1 = h
+
+    if x1 <= x0 or y1 <= y0:
+        return 0, 0, w, h
     return x0, y0, x1, y1
 
 
@@ -280,12 +419,6 @@ def downsample_mask_torch(mask_t, target_hw, mode="bilinear"):
 
 
 def masked_lpips(ref, gen, mask, lpips_model, use_gpu=False, mask_downsample="bilinear", eps=1e-8):
-    if lpips_model is None:
-        masked = mask.astype(np.float32)[..., None]
-        numerator = float(np.sum(np.abs(ref - gen) * masked))
-        denominator = float(np.sum(masked) * ref.shape[2]) + eps
-        return numerator / denominator
-
     ref_t = numpy_to_lpips_tensor(ref)
     gen_t = numpy_to_lpips_tensor(gen)
     mask_t = torch.from_numpy(mask.astype(np.float32))[None, None, :, :]
@@ -344,6 +477,8 @@ def compute_car_only_metrics(
     mask_min_object_area=500,
     mask_max_hole_area=3000,
     mask_trim_px=1,
+    roi_min_size_px=64,
+    roi_square=True,
 ):
     if segmenter is None:
         debug = {"mask_area_ratio": 0.0, "bbox": None, "fallback_reason": "Car-only deaktiviert"}
@@ -398,8 +533,17 @@ def compute_car_only_metrics(
             "debug": debug,
         }
 
-    bbox = compute_mask_bbox(mask, pad_px=pad_px)
-    debug["bbox"] = {"x0": bbox[0], "y0": bbox[1], "x1": bbox[2], "y1": bbox[3], "pad_px": pad_px}
+    adaptive_min_size = max(int(roi_min_size_px), int(min(ref_norm.shape[0], ref_norm.shape[1]) * 0.2))
+    bbox = compute_mask_bbox(mask, pad_px=pad_px, min_size_px=adaptive_min_size, make_square=roi_square)
+    debug["bbox"] = {
+        "x0": bbox[0],
+        "y0": bbox[1],
+        "x1": bbox[2],
+        "y1": bbox[3],
+        "pad_px": pad_px,
+        "min_size_px": adaptive_min_size,
+        "square": bool(roi_square),
+    }
 
     if car_mode == "neutralize_crop":
         ref_car, mask_crop = apply_neutralize_crop(ref_norm, mask, bbox, neutral_value=neutral_value)
@@ -424,7 +568,7 @@ def compute_car_only_metrics(
             mask_downsample=mask_downsample,
             eps=eps,
         )
-        ssim_car = compute_ssim(ref_car, gen_car)
+        ssim_car = compute_masked_ssim(ref_car, gen_car, mask_crop, neutral_value=neutral_value)
     else:
         raise ValueError("car_mode muss 'neutralize_crop' oder 'weighted_lpips' sein")
 
@@ -618,14 +762,21 @@ def evaluate_pair(
     mask_max_hole_area=3000,
     mask_trim_px=1,
     include_hausdorff=True,
+    lpips_heatmap_dir=None,
+    roi_min_size_px=64,
+    roi_square=True,
 ):
     ref_img = load_image(ref_path)
     gen_img = load_image(gen_path)
+    validate_image_for_metrics(ref_img, image_name="ref_img")
+    validate_image_for_metrics(gen_img, image_name="gen_img")
 
     ref_h, ref_w = ref_img.shape[:2]
     gen_h, gen_w = gen_img.shape[:2]
 
     ref_norm, gen_norm, content_mask = normalize_pair(ref_img, gen_img, mode=mode)
+    validate_image_for_metrics(ref_norm, image_name="ref_norm")
+    validate_image_for_metrics(gen_norm, image_name="gen_norm")
     norm_h, norm_w = ref_norm.shape[:2]
 
     basename = Path(ref_path).stem
@@ -644,6 +795,15 @@ def evaluate_pair(
     delta_e_val = compute_delta_e(ref_norm, gen_norm)
     geometric = compute_geometric_metrics(ref_norm, gen_norm, include_hausdorff=include_hausdorff)
     percent_metrics = convert_metrics_to_percent(ssim_val, lpips_val, delta_e_val)
+    lpips_heatmap_path = None
+    lpips_map_mean = None
+    if lpips_heatmap_dir is not None:
+        lpips_map_mean, lpips_map = compute_lpips_with_map(ref_norm, gen_norm, lpips_model, use_gpu=use_gpu)
+        heatmap_dir = Path(lpips_heatmap_dir)
+        heatmap_dir.mkdir(parents=True, exist_ok=True)
+        heatmap_path = heatmap_dir / f"{basename}_lpips_heatmap.png"
+        save_lpips_heatmap(lpips_map, heatmap_path)
+        lpips_heatmap_path = str(heatmap_path)
 
     foreground_mask = compute_foreground_mask_union(ref_norm, gen_norm)
     if content_mask is not None:
@@ -680,6 +840,8 @@ def evaluate_pair(
         mask_min_object_area=mask_min_object_area,
         mask_max_hole_area=mask_max_hole_area,
         mask_trim_px=mask_trim_px,
+        roi_min_size_px=roi_min_size_px,
+        roi_square=roi_square,
     )
     lpips_car_only_similarity_percent = convert_lpips_to_similarity_percent(car_metrics["lpips_car_only"])
 
@@ -692,6 +854,9 @@ def evaluate_pair(
     print(f"  SSIM (%)           : {percent_metrics['ssim_percent']:.2f}%")
     print(f"  LPIPS              : {lpips_val:.6f}")
     print(f"  LPIPS Similarity % : {percent_metrics['lpips_similarity_percent']:.2f}%")
+    if lpips_map_mean is not None:
+        print(f"  LPIPS map mean     : {lpips_map_mean:.6f}")
+        print(f"  LPIPS Heatmap      : {lpips_heatmap_path}")
     print(f"  LPIPS foreground   : {lpips_foreground:.6f}")
     print(f"  LPIPS foreground % : {format_percent(lpips_foreground_similarity_percent)}")
     if segmenter is not None:
@@ -721,6 +886,8 @@ def evaluate_pair(
         "ssim": ssim_val,
         "ssim_percent": percent_metrics["ssim_percent"],
         "lpips": lpips_val,
+        "lpips_map_mean": lpips_map_mean,
+        "lpips_heatmap_path": lpips_heatmap_path,
         "lpips_similarity_percent": percent_metrics["lpips_similarity_percent"],
         "lpips_foreground": lpips_foreground,
         "lpips_foreground_similarity_percent": lpips_foreground_similarity_percent,
@@ -764,6 +931,9 @@ def evaluate_folders(
     mask_max_hole_area=3000,
     mask_trim_px=1,
     include_hausdorff=True,
+    lpips_heatmap_dir=None,
+    roi_min_size_px=64,
+    roi_square=True,
 ):
     ref_dir = Path(reference_dir)
     gen_dir = Path(generated_dir)
@@ -811,6 +981,9 @@ def evaluate_folders(
             mask_max_hole_area=mask_max_hole_area,
             mask_trim_px=mask_trim_px,
             include_hausdorff=include_hausdorff,
+            lpips_heatmap_dir=lpips_heatmap_dir,
+            roi_min_size_px=roi_min_size_px,
+            roi_square=roi_square,
         )
         results.append(result)
 
@@ -858,7 +1031,11 @@ def parse_args():
     parser.add_argument("--out", default="normalized", help="Output-Ordner für normalisierte Bilder")
     parser.add_argument("--output-csv", default="image_metrics_results.csv", help="CSV-Datei für Metrikergebnisse")
     parser.add_argument("--lpips-net", default="alex", choices=["alex", "vgg", "squeeze"], help="Backbone für LPIPS")
+    parser.add_argument("--lpips-train-mode", default="lin", choices=list(SUPPORTED_LPIPS_TRAIN_MODES), help="LPIPS-Modus: lin (unterstützt), tune/scratch (nicht in diesem Skript implementiert)")
+    parser.add_argument("--lpips-heatmap-dir", default="lpips_heatmaps", help="Ausgabeordner für LPIPS-Heatmaps (setze 'none' zum Deaktivieren)")
     parser.add_argument("--use-gpu", action="store_true", help="Nutze CUDA, falls verfügbar")
+    parser.add_argument("--seed", type=int, default=None, help="Setze optionalen Zufalls-Seed für reproduzierbare Läufe")
+    parser.add_argument("--deterministic", action="store_true", help="Aktiviere deterministische Backends (langsamer, aber reproduzierbarer)")
     parser.add_argument("--enable-car-only", action="store_true", help="Aktiviere Car-only Metriken (LPIPS/SSIM)")
     parser.add_argument("--car-only", action="store_true", help="Kurzform für --enable-car-only")
     parser.add_argument("--car-mode", default="neutralize_crop", choices=["neutralize_crop", "weighted_lpips"], help="Auto-fokussierte LPIPS-Berechnung")
@@ -871,6 +1048,8 @@ def parse_args():
     parser.add_argument("--mask-min-object-area", type=int, default=500, help="Entferne sehr kleine Maskeninseln")
     parser.add_argument("--mask-max-hole-area", type=int, default=3000, help="Fülle kleine Löcher in der Car-Maske")
     parser.add_argument("--mask-trim-px", type=int, default=1, help="Schneide Maskenrand um X Pixel ein für sauberere Konturen")
+    parser.add_argument("--roi-min-size-px", type=int, default=64, help="Minimale Kantenlänge der Car-ROI in Pixel")
+    parser.add_argument("--roi-square", action="store_true", help="Erzwinge quadratische Car-ROI für stabilere Vergleiche")
     parser.add_argument("--eps", type=float, default=1e-8, help="Epsilon für weighted LPIPS")
     parser.add_argument("--mask-score-threshold", type=float, default=0.5, help="Score-Schwelle für Vehicle-Segmentierung")
     parser.add_argument("--mask-threshold", type=float, default=0.5, help="Pixel-Schwelle der Segmentierungsmaske [0..1]")
@@ -888,6 +1067,8 @@ def parse_args():
     parser.add_argument("--generated-dir", default="generated", help="Ordner mit Generated-Bildern")
 
     args = parser.parse_args()
+    if isinstance(args.lpips_heatmap_dir, str) and args.lpips_heatmap_dir.strip().lower() == "none":
+        args.lpips_heatmap_dir = None
 
     use_car_specific_option = any(
         [
@@ -901,6 +1082,8 @@ def parse_args():
             args.mask_min_object_area != 500,
             args.mask_max_hole_area != 3000,
             args.mask_trim_px != 1,
+            args.roi_min_size_px != 64,
+            args.roi_square,
             args.eps != 1e-8,
             args.mask_score_threshold != 0.5,
             args.mask_threshold != 0.5,
@@ -914,16 +1097,25 @@ def parse_args():
 
 def main():
     args = parse_args()
+    configure_determinism(seed=args.seed, deterministic=args.deterministic)
 
     print("============================================================")
     print("[INFO] Starte Bildmetrik-Berechnung")
     print(f"[INFO] Mode            : {args.mode}")
     print(f"[INFO] Normalized out  : {args.out}")
     print(f"[INFO] Output CSV      : {args.output_csv}")
+    print(f"[INFO] LPIPS Net       : {args.lpips_net}")
+    print(f"[INFO] LPIPS TrainMode : {args.lpips_train_mode}")
+    print(f"[INFO] LPIPS Heatmaps  : {args.lpips_heatmap_dir}")
+    print(f"[INFO] Seed            : {args.seed}")
+    print(f"[INFO] Deterministisch : {args.deterministic}")
+    print(f"[INFO] ROI min-size px : {args.roi_min_size_px}")
+    print(f"[INFO] ROI square      : {args.roi_square}")
     print(f"[INFO] Car-only aktiv  : {args.enable_car_only}")
     print("============================================================")
 
-    lpips_model = init_lpips_model(net=args.lpips_net, use_gpu=args.use_gpu)
+    lpips_model = init_lpips_model(net=args.lpips_net, use_gpu=args.use_gpu, train_mode=args.lpips_train_mode)
+    verify_lpips_forward(lpips_model, net=args.lpips_net, use_gpu=args.use_gpu)
     segmenter = None
     if args.enable_car_only:
         print("[INFO] Car-only wird aktiviert. Einfacher Aufruf: python image_metrics.py --car-only")
@@ -963,6 +1155,9 @@ def main():
             debug_dir=args.debug_dir,
             car_only_dir=args.car_only_dir if args.enable_car_only else None,
             include_hausdorff=not args.skip_hausdorff,
+            lpips_heatmap_dir=args.lpips_heatmap_dir,
+            roi_min_size_px=args.roi_min_size_px,
+            roi_square=args.roi_square,
         )
         pd.DataFrame([result]).to_csv(args.output_csv, index=False, float_format="%.6f")
         print(f"[INFO] Einzelvergleich gespeichert: {args.output_csv}")
@@ -991,6 +1186,9 @@ def main():
         debug_dir=args.debug_dir,
         car_only_dir=args.car_only_dir if args.enable_car_only else None,
         include_hausdorff=not args.skip_hausdorff,
+        lpips_heatmap_dir=args.lpips_heatmap_dir,
+        roi_min_size_px=args.roi_min_size_px,
+        roi_square=args.roi_square,
     )
 
 
