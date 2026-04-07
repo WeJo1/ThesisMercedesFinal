@@ -607,16 +607,14 @@ button {
 }
 
 .spatial-table td.spatial-cell-high {
-  background: rgba(255, 178, 58, 0.5);
-  color: #fff3d8;
-  font-weight: 600;
+  background: rgba(255, 196, 58, 0.24);
+  color: #ffecc2;
 }
 
 .spatial-table td.spatial-cell-very-high {
-  background: rgba(255, 84, 84, 0.62);
-  color: #fff1f1;
+  background: rgba(255, 96, 96, 0.32);
+  color: #ffe5e5;
   font-weight: 700;
-  box-shadow: inset 0 0 0 1px rgba(255, 224, 224, 0.38);
 }
 
 .spatial-canvas {
