@@ -145,7 +145,7 @@
                 <p class="stat-label">LPIPS (Wert + %)</p>
                 <details class="metric-info">
                   <summary aria-label="LPIPS Erklärung anzeigen">ⓘ</summary>
-                  <p>Je kleiner der Wert, desto ähnlicher sind die Bilder.</p>
+                  <p>Zeigt die perzeptuelle Abweichung im gültigen Bildinhalt. Gepaddete Randbereiche werden ignoriert.</p>
                 </details>
               </div>
               <p id="lpips" class="stat-value">--</p>
@@ -155,7 +155,7 @@
                 <p class="stat-label">SSIM (Wert + %)</p>
                 <details class="metric-info">
                   <summary aria-label="SSIM Erklärung anzeigen">ⓘ</summary>
-                  <p>Zeigt, wie gut Formen und Konturen übereinstimmen.</p>
+                  <p>Zeigt die strukturelle Ähnlichkeit im gültigen Bildinhalt. Letterbox-Ränder werden nicht mitbewertet.</p>
                 </details>
               </div>
               <p id="ssim" class="stat-value">--</p>
@@ -165,7 +165,7 @@
                 <p class="stat-label">ΔE CIEDE2000 (Wert + %)</p>
                 <details class="metric-info">
                   <summary aria-label="DeltaE Erklärung anzeigen">ⓘ</summary>
-                  <p>Zeigt, wie stark sich die Farben sichtbar unterscheiden.</p>
+                  <p>Zeigt die sichtbare Farbabweichung im gültigen Bildinhalt. Gepaddete Randbereiche werden ignoriert.</p>
                 </details>
               </div>
               <p id="deltaE" class="stat-value">--</p>
@@ -185,7 +185,7 @@
                 <p class="stat-label">Mask IoU</p>
                 <details class="metric-info">
                   <summary aria-label="Mask IoU Erklärung anzeigen">ⓘ</summary>
-                  <p>Zeigt, wie gut sich die erkannten Fahrzeugflächen überdecken.</p>
+                  <p>Zeigt die Überdeckung der segmentierten Fahrzeugflächen zwischen Referenz- und Vergleichsbild. Nur verfügbar, wenn Car-only/Fahrzeugsegmentierung erfolgreich war.</p>
                 </details>
               </div>
               <p id="maskIou" class="stat-value">--</p>
@@ -195,7 +195,7 @@
                 <p class="stat-label">Mask Dice</p>
                 <details class="metric-info">
                   <summary aria-label="Mask Dice Erklärung anzeigen">ⓘ</summary>
-                  <p>Zeigt die Flächenübereinstimmung mit zusätzlichem Gewicht auf gemeinsame Bereiche.</p>
+                  <p>Zeigt die Flächenübereinstimmung der segmentierten Fahrzeugmasken mit stärkerem Gewicht auf gemeinsame Bereiche. Nur verfügbar, wenn Car-only/Fahrzeugsegmentierung erfolgreich war.</p>
                 </details>
               </div>
               <p id="maskDice" class="stat-value">--</p>
