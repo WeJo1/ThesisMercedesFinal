@@ -513,6 +513,65 @@ button {
   margin-bottom: 0;
 }
 
+.spatial-section {
+  border: 1px solid rgba(170, 193, 220, 0.3);
+  border-radius: 0.8rem;
+  padding: 0.8rem;
+  margin-bottom: 1rem;
+  background: rgba(12, 20, 31, 0.92);
+}
+
+.spatial-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.7rem;
+}
+
+.spatial-card {
+  margin: 0;
+  border: 1px solid rgba(170, 193, 220, 0.3);
+  border-radius: 0.7rem;
+  padding: 0.6rem;
+  background: rgba(8, 15, 24, 0.72);
+}
+
+.spatial-card h3 {
+  margin: 0 0 0.35rem;
+  font-size: 0.86rem;
+}
+
+.spatial-meta {
+  margin: 0 0 0.55rem;
+  font-size: 0.78rem;
+  color: #b5c8dd;
+}
+
+.spatial-matrix {
+  overflow: auto;
+  max-height: 18rem;
+}
+
+.spatial-table {
+  border-collapse: collapse;
+  font-size: 0.67rem;
+}
+
+.spatial-table td {
+  border: 1px solid rgba(170, 193, 220, 0.2);
+  padding: 0.12rem 0.22rem;
+  text-align: right;
+  color: #d7e7f7;
+}
+
+.spatial-canvas {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  image-rendering: pixelated;
+  border: 1px solid rgba(170, 193, 220, 0.3);
+  border-radius: 0.45rem;
+  background: rgba(4, 7, 12, 0.92);
+}
+
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -651,7 +710,8 @@ button {
 @media (max-width: 560px) {
   .stats-grid,
   .image-preview-grid,
-  .comparison-mini-grid {
+  .comparison-mini-grid,
+  .spatial-grid {
     grid-template-columns: 1fr;
   }
 }
