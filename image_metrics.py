@@ -35,6 +35,71 @@ SUPPORTED_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff
 LETTERBOX_PAD_COLOR = (127, 127, 127)
 COCO_VEHICLE_CLASSES = {3, 4, 6, 8}
 SUPPORTED_LPIPS_TRAIN_MODES = ("lin", "tune", "scratch")
+CSV_COLUMN_ORDER = [
+    "filename",
+    "reference_width",
+    "reference_height",
+    "generated_width",
+    "generated_height",
+    "normalized_width",
+    "normalized_height",
+    "normalization_mode",
+    "main_metric_scope",
+    "content_mask_area_px",
+    "content_mask_area_ratio",
+    "ssim",
+    "ssim_percent",
+    "lpips",
+    "lpips_similarity_percent",
+    "lpips_map_mean",
+    "lpips_foreground",
+    "lpips_foreground_similarity_percent",
+    "delta_e_ciede2000",
+    "delta_e_similarity_percent",
+    "lpips_car_only",
+    "lpips_car_only_similarity_percent",
+    "ssim_car_only",
+    "mask_metric_scope",
+    "mask_iou",
+    "mask_dice",
+    "mask_area_ratio",
+    "centroid_distance_px",
+    "centroid_distance_norm",
+    "hausdorff_px",
+    "hausdorff_norm",
+    "car_mask_area_ratio",
+    "car_bbox",
+    "car_fallback_reason",
+    "ref_norm_path",
+    "gen_norm_path",
+    "car_only_ref_path",
+    "car_only_gen_path",
+    "lpips_spatial_path",
+]
+
+CSV_FLOAT_COLUMNS = [
+    "content_mask_area_ratio",
+    "ssim",
+    "ssim_percent",
+    "lpips",
+    "lpips_similarity_percent",
+    "lpips_map_mean",
+    "lpips_foreground",
+    "lpips_foreground_similarity_percent",
+    "delta_e_ciede2000",
+    "delta_e_similarity_percent",
+    "lpips_car_only",
+    "lpips_car_only_similarity_percent",
+    "ssim_car_only",
+    "mask_iou",
+    "mask_dice",
+    "mask_area_ratio",
+    "centroid_distance_px",
+    "centroid_distance_norm",
+    "hausdorff_px",
+    "hausdorff_norm",
+    "car_mask_area_ratio",
+]
 
 
 def load_image(path):
@@ -255,16 +320,37 @@ def compute_lpips_with_map(ref, gen, lpips_model, use_gpu=False):
     return dist_value, dist_map
 
 
-def save_lpips_heatmap(dist_map, path):
+def save_lpips_spatial_map(dist_map, path):
     dist_map = np.asarray(dist_map, dtype=np.float32)
-    map_min = float(np.min(dist_map))
-    map_max = float(np.max(dist_map))
-    if map_max > map_min:
-        normalized = (dist_map - map_min) / (map_max - map_min)
-    else:
-        normalized = np.zeros_like(dist_map, dtype=np.float32)
-    heat = (normalized * 255.0).astype(np.uint8)
-    Image.fromarray(heat, mode="L").save(path)
+    if dist_map.ndim == 1:
+        dist_map = dist_map[np.newaxis, :]
+    elif dist_map.ndim == 0:
+        dist_map = dist_map.reshape(1, 1)
+    payload = {
+        "rows": int(dist_map.shape[0]),
+        "cols": int(dist_map.shape[1]),
+        "min": float(np.min(dist_map)),
+        "max": float(np.max(dist_map)),
+        "values": dist_map.tolist(),
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def build_result_dataframe(results):
+    frame = pd.DataFrame(results)
+
+    for column in CSV_FLOAT_COLUMNS:
+        if column in frame.columns:
+            frame[column] = pd.to_numeric(frame[column], errors="coerce").round(6)
+
+    known_columns = [name for name in CSV_COLUMN_ORDER if name in frame.columns]
+    unknown_columns = [name for name in frame.columns if name not in CSV_COLUMN_ORDER]
+    frame = frame[known_columns + unknown_columns]
+
+    if "filename" in frame.columns:
+        frame = frame.sort_values(by="filename", kind="stable").reset_index(drop=True)
+
+    return frame
 
 
 def compute_lpips_on_content(ref, gen, content_mask, lpips_model, use_gpu=False, mask_downsample="bilinear", eps=1e-8):
@@ -852,15 +938,15 @@ def evaluate_pair(
     )
     delta_e_val = compute_masked_delta_e(ref_norm, gen_norm, valid_content_mask)
     percent_metrics = convert_metrics_to_percent(ssim_val, lpips_val, delta_e_val)
-    lpips_heatmap_path = None
+    lpips_spatial_path = None
     lpips_map_mean = None
     if lpips_heatmap_dir is not None:
         lpips_map_mean, lpips_map = compute_lpips_with_map(ref_norm, gen_norm, lpips_model, use_gpu=use_gpu)
         heatmap_dir = Path(lpips_heatmap_dir)
         heatmap_dir.mkdir(parents=True, exist_ok=True)
-        heatmap_path = heatmap_dir / f"{basename}_lpips_heatmap.png"
-        save_lpips_heatmap(lpips_map, heatmap_path)
-        lpips_heatmap_path = str(heatmap_path)
+        spatial_path = heatmap_dir / f"{basename}_lpips_spatial.json"
+        save_lpips_spatial_map(lpips_map, spatial_path)
+        lpips_spatial_path = str(spatial_path)
 
     foreground_mask = compute_foreground_mask_union(ref_norm, gen_norm)
     if valid_content_mask is not None:
@@ -932,7 +1018,7 @@ def evaluate_pair(
     print(f"  LPIPS Similarity % : {percent_metrics['lpips_similarity_percent']:.2f}%")
     if lpips_map_mean is not None:
         print(f"  LPIPS map mean     : {lpips_map_mean:.6f}")
-        print(f"  LPIPS Heatmap      : {lpips_heatmap_path}")
+        print(f"  LPIPS Spatial map  : {lpips_spatial_path}")
     print(f"  LPIPS foreground   : {lpips_foreground:.6f}")
     print(f"  LPIPS foreground % : {format_percent(lpips_foreground_similarity_percent)}")
     if segmenter is not None:
@@ -967,7 +1053,7 @@ def evaluate_pair(
         "ssim_percent": percent_metrics["ssim_percent"],
         "lpips": lpips_val,
         "lpips_map_mean": lpips_map_mean,
-        "lpips_heatmap_path": lpips_heatmap_path,
+        "lpips_spatial_path": lpips_spatial_path,
         "lpips_similarity_percent": percent_metrics["lpips_similarity_percent"],
         "lpips_foreground": lpips_foreground,
         "lpips_foreground_similarity_percent": lpips_foreground_similarity_percent,
@@ -1070,8 +1156,8 @@ def evaluate_folders(
     if not results:
         raise RuntimeError("Keine auswertbaren Bildpaare gefunden.")
 
-    df = pd.DataFrame(results)
-    df.to_csv(output_csv, index=False, float_format="%.6f")
+    df = build_result_dataframe(results)
+    df.to_csv(output_csv, index=False, float_format="%.6f", na_rep="")
 
     print("============================================================")
     print(f"[INFO] Ergebnisse gespeichert: {output_csv}")
@@ -1239,7 +1325,7 @@ def main():
             roi_min_size_px=args.roi_min_size_px,
             roi_square=args.roi_square,
         )
-        pd.DataFrame([result]).to_csv(args.output_csv, index=False, float_format="%.6f")
+        build_result_dataframe([result]).to_csv(args.output_csv, index=False, float_format="%.6f", na_rep="")
         print(f"[INFO] Einzelvergleich gespeichert: {args.output_csv}")
         return
 

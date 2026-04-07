@@ -17,8 +17,12 @@ const genPreview = document.getElementById('genPreview');
 const carOnlyPreviewSection = document.getElementById('carOnlyPreviewSection');
 const carRefPreview = document.getElementById('carRefPreview');
 const carGenPreview = document.getElementById('carGenPreview');
-const heatmapPreviewSection = document.getElementById('heatmapPreviewSection');
-const lpipsHeatmapPreview = document.getElementById('lpipsHeatmapPreview');
+const spatialSection = document.getElementById('spatialSection');
+const spatialMeta = document.getElementById('spatialMeta');
+const spatialMatrix = document.getElementById('spatialMatrix');
+const spatialHeatmapCanvas = document.getElementById('spatialHeatmapCanvas');
+const spatialOverlayCanvas = document.getElementById('spatialOverlayCanvas');
+const overlayOpacity = document.getElementById('overlayOpacity');
 const comparisonSection = document.getElementById('comparisonSection');
 const comparisonList = document.getElementById('comparisonList');
 const metricInfoBoxes = document.querySelectorAll('.metric-info');
@@ -32,13 +36,13 @@ const deltaE = document.getElementById('deltaE');
 const lpipsCar = document.getElementById('lpipsCar');
 const maskIou = document.getElementById('maskIou');
 const maskDice = document.getElementById('maskDice');
-const carOnlyEnabled = document.getElementById('carOnlyEnabled');
 
 const fallbackApiOrigins = ['http://127.0.0.1:4173', 'http://localhost:4173'];
 let isComparisonRunning = false;
+let lastSpatialPayload = null;
 
 const iconCandidates = {
-  star: ['icons/stern.png?v=2', 'icons/stern.png'],
+  star: ['icons/stern.svg?v=2', 'icons/stern.svg', 'icons/stern.png?v=2', 'icons/stern.png'],
 };
 
 function logBrowser(message, details = null) {
@@ -232,16 +236,170 @@ function updateCarOnlyPreview(data) {
   carOnlyPreviewSection.hidden = false;
 }
 
-function updateHeatmapPreview(data) {
-  const hasHeatmapPreview = Boolean(data?.lpips_heatmap_preview);
-  if (!hasHeatmapPreview) {
-    heatmapPreviewSection.hidden = true;
-    setPreviewImage(lpipsHeatmapPreview, null);
+function formatSpatialValue(value) {
+  const numeric = Number(value);
+  if (Number.isNaN(numeric)) {
+    return '--';
+  }
+  return numeric.toFixed(3);
+}
+
+function buildHeatmapImageData(values, minValue, maxValue) {
+  const rows = values.length;
+  const cols = values[0].length;
+  const imageData = new ImageData(cols, rows);
+  const range = Math.max(maxValue - minValue, 1e-8);
+
+  values.forEach((row, rowIndex) => {
+    row.forEach((cellValue, colIndex) => {
+      const normalized = Math.min(Math.max((Number(cellValue) - minValue) / range, 0), 1);
+      const r = Math.round(255 * normalized);
+      const g = Math.round(255 * (1 - Math.abs(normalized - 0.5) * 2));
+      const b = Math.round(255 * (1 - normalized));
+      const idx = (rowIndex * cols + colIndex) * 4;
+      imageData.data[idx] = r;
+      imageData.data[idx + 1] = g;
+      imageData.data[idx + 2] = b;
+      imageData.data[idx + 3] = 255;
+    });
+  });
+
+  return imageData;
+}
+
+function renderSpatialHeatmap(values, minValue, maxValue) {
+  const context = spatialHeatmapCanvas.getContext('2d');
+  if (!context) {
     return;
   }
 
-  setPreviewImage(lpipsHeatmapPreview, data.lpips_heatmap_preview);
-  heatmapPreviewSection.hidden = false;
+  const rows = values.length;
+  const cols = values[0].length;
+  const imageData = buildHeatmapImageData(values, minValue, maxValue);
+  const offscreen = document.createElement('canvas');
+  offscreen.width = cols;
+  offscreen.height = rows;
+  const offscreenContext = offscreen.getContext('2d');
+  if (!offscreenContext) {
+    return;
+  }
+  offscreenContext.putImageData(imageData, 0, 0);
+
+  context.clearRect(0, 0, spatialHeatmapCanvas.width, spatialHeatmapCanvas.height);
+  context.imageSmoothingEnabled = false;
+  context.drawImage(offscreen, 0, 0, spatialHeatmapCanvas.width, spatialHeatmapCanvas.height);
+}
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('Bild konnte nicht geladen werden.'));
+    image.src = src;
+  });
+}
+
+async function renderSpatialOverlay(values, minValue, maxValue, genImageSrc, alphaValue) {
+  const context = spatialOverlayCanvas.getContext('2d');
+  if (!context) {
+    return;
+  }
+
+  context.clearRect(0, 0, spatialOverlayCanvas.width, spatialOverlayCanvas.height);
+  if (!genImageSrc) {
+    return;
+  }
+
+  const baseImage = await loadImage(genImageSrc);
+  const rows = values.length;
+  const cols = values[0].length;
+  const heatmapImageData = buildHeatmapImageData(values, minValue, maxValue);
+  const heatmapCanvas = document.createElement('canvas');
+  heatmapCanvas.width = cols;
+  heatmapCanvas.height = rows;
+  const heatmapContext = heatmapCanvas.getContext('2d');
+  if (!heatmapContext) {
+    return;
+  }
+  heatmapContext.putImageData(heatmapImageData, 0, 0);
+
+  context.imageSmoothingEnabled = true;
+  context.globalAlpha = 1;
+  context.drawImage(baseImage, 0, 0, spatialOverlayCanvas.width, spatialOverlayCanvas.height);
+  context.globalAlpha = alphaValue;
+  context.drawImage(heatmapCanvas, 0, 0, spatialOverlayCanvas.width, spatialOverlayCanvas.height);
+  context.globalAlpha = 1;
+}
+
+function renderSpatialMatrixTable(values) {
+  const rowCount = values.length;
+  const colCount = values[0].length;
+  const maxRows = Math.min(rowCount, 32);
+  const maxCols = Math.min(colCount, 32);
+
+  const tableNode = document.createElement('table');
+  tableNode.className = 'spatial-table';
+  const bodyNode = document.createElement('tbody');
+
+  for (let rowIndex = 0; rowIndex < maxRows; rowIndex += 1) {
+    const rowNode = document.createElement('tr');
+    for (let colIndex = 0; colIndex < maxCols; colIndex += 1) {
+      const cellNode = document.createElement('td');
+      cellNode.textContent = formatSpatialValue(values[rowIndex][colIndex]);
+      rowNode.append(cellNode);
+    }
+    bodyNode.append(rowNode);
+  }
+
+  tableNode.append(bodyNode);
+  spatialMatrix.innerHTML = '';
+  spatialMatrix.append(tableNode);
+
+  if (rowCount > maxRows || colCount > maxCols) {
+    const noteNode = document.createElement('p');
+    noteNode.className = 'comparison-note';
+    noteNode.textContent = `Anzeige gekürzt auf ${maxRows}x${maxCols} von ${rowCount}x${colCount}.`;
+    spatialMatrix.append(noteNode);
+  }
+}
+
+async function updateSpatialOutput(data) {
+  lastSpatialPayload = data;
+  const values = data?.lpips_spatial_map?.values;
+  if (!Array.isArray(values) || values.length === 0 || !Array.isArray(values[0])) {
+    spatialSection.hidden = true;
+    spatialMeta.textContent = '--';
+    spatialMatrix.innerHTML = '';
+    const context = spatialHeatmapCanvas.getContext('2d');
+    if (context) {
+      context.clearRect(0, 0, spatialHeatmapCanvas.width, spatialHeatmapCanvas.height);
+    }
+    const overlayContext = spatialOverlayCanvas.getContext('2d');
+    if (overlayContext) {
+      overlayContext.clearRect(0, 0, spatialOverlayCanvas.width, spatialOverlayCanvas.height);
+    }
+    return;
+  }
+
+  const minValue = Number(data.lpips_spatial_map?.min ?? Math.min(...values.flat()));
+  const maxValue = Number(data.lpips_spatial_map?.max ?? Math.max(...values.flat()));
+  const rows = Number(data.lpips_spatial_map?.rows ?? values.length);
+  const cols = Number(data.lpips_spatial_map?.cols ?? values[0].length);
+
+  spatialMeta.textContent = `Matrix: ${rows}x${cols} | min=${formatSpatialValue(minValue)} | max=${formatSpatialValue(maxValue)}`;
+  renderSpatialMatrixTable(values);
+  renderSpatialHeatmap(values, minValue, maxValue);
+  renderSpatialOverlay(values, minValue, maxValue, data?.gen_preview, Number(overlayOpacity.value)).catch((error) => {
+    warnBrowser('Overlay konnte nicht gerendert werden.', error.message);
+  });
+  spatialSection.hidden = false;
+}
+
+function handleOverlayOpacityChange() {
+  if (!lastSpatialPayload?.lpips_spatial_map?.values) {
+    return;
+  }
+  updateSpatialOutput(lastSpatialPayload);
 }
 
 function renderMetrics(data) {
@@ -255,7 +413,6 @@ function renderMetrics(data) {
   lpipsCar.textContent = hasCarOnlyMetric
     ? formatMetricPair(data.lpips_car_only, data.lpips_car_only_similarity_percent)
     : '--';
-  carOnlyEnabled.textContent = hasCarOnlyMetric ? 'true' : 'false';
   if (hasCarMaskMetrics) {
     setMetric(maskIou, data.mask_iou);
     setMetric(maskDice, data.mask_dice);
@@ -305,7 +462,6 @@ function renderComparisonList(comparisons) {
         <li>LPIPS: ${formatMetricPair(item.lpips, item.lpips_similarity_percent)}</li>
         <li>SSIM: ${formatMetricPair(item.ssim, item.ssim_percent)}</li>
         <li>ΔE CIEDE2000: ${formatMetricPair(item.delta_e_ciede2000, item.delta_e_similarity_percent)}</li>
-        <li>Car-only aktiv: ${item.car_only_enabled ? 'true' : 'false'}</li>
       </ul>
     `;
     detailsNode.append(contentNode);
@@ -331,8 +487,8 @@ function renderComparisonList(comparisons) {
         setPreviewImage(genPreview, item.gen_preview);
       }
       updateCarOnlyPreview(item);
-      updateHeatmapPreview(item);
-      previewText.textContent = `Vergleich abgeschlossen für ${item.filename}. Heatmap sichtbar: ${Boolean(item.lpips_heatmap_preview)}. Ablage: ${item.run_dir || '--'}`;
+      updateSpatialOutput(item);
+      previewText.textContent = `Vergleich abgeschlossen für ${item.filename}. LPIPS-Spatialdaten sichtbar: ${Boolean(item.lpips_spatial_map)}. Ablage: ${item.run_dir || '--'}`;
     });
 
     comparisonList.append(detailsNode);
@@ -494,7 +650,7 @@ async function runComparison() {
     setPreviewImage(refPreview, firstComparison.ref_preview);
     setPreviewImage(genPreview, firstComparison.gen_preview);
     updateCarOnlyPreview(firstComparison);
-    updateHeatmapPreview(firstComparison);
+    updateSpatialOutput(firstComparison);
     renderComparisonList(comparisons);
 
     const isBatch = Boolean(data.batch_mode && data.comparison_count > 1);
@@ -502,9 +658,9 @@ async function runComparison() {
       const previewHint = data.batch_previews_limited
         ? ' Vorschauen wurden nur für das erste Paar geladen.'
         : '';
-      previewText.textContent = `Vergleich abgeschlossen: ${data.comparison_count} Dateipaare ausgewertet.${previewHint} Heatmap sichtbar: ${Boolean(firstComparison.lpips_heatmap_preview)}. Ablage: ${data.run_dir}`;
+      previewText.textContent = `Vergleich abgeschlossen: ${data.comparison_count} Dateipaare ausgewertet.${previewHint} LPIPS-Spatialdaten sichtbar: ${Boolean(firstComparison.lpips_spatial_map)}. Ablage: ${data.run_dir}`;
     } else {
-      previewText.textContent = `Vergleich abgeschlossen für ${firstComparison.filename}. Heatmap sichtbar: ${Boolean(firstComparison.lpips_heatmap_preview)}. Ablage: ${data.run_dir}`;
+      previewText.textContent = `Vergleich abgeschlossen für ${firstComparison.filename}. LPIPS-Spatialdaten sichtbar: ${Boolean(firstComparison.lpips_spatial_map)}. Ablage: ${data.run_dir}`;
     }
 
     setStatus('done', 'Fertig');
@@ -512,7 +668,7 @@ async function runComparison() {
   } catch (error) {
     setStatus('idle', 'Fehler');
     updateCarOnlyPreview(null);
-    updateHeatmapPreview(null);
+    updateSpatialOutput(null);
     comparisonSection.hidden = true;
     comparisonList.innerHTML = '';
     previewText.textContent = `Fehler: ${error.message}`;
@@ -531,15 +687,16 @@ function resetInterface() {
   carOnlyMode.checked = false;
   carMode.value = 'neutralize_crop';
   maskSource.value = 'ref';
+  overlayOpacity.value = '0.55';
 
   refPreview.removeAttribute('src');
   genPreview.removeAttribute('src');
   updateCarOnlyPreview(null);
-  updateHeatmapPreview(null);
+  updateSpatialOutput(null);
   comparisonSection.hidden = true;
   comparisonList.innerHTML = '';
 
-  [lpipsValue, ssim, deltaE, lpipsCar, maskIou, maskDice, carOnlyEnabled].forEach((node) => {
+  [lpipsValue, ssim, deltaE, lpipsCar, maskIou, maskDice].forEach((node) => {
     node.textContent = node.id.includes('Similarity') ? '-- %' : '--';
   });
 
@@ -573,6 +730,7 @@ refImage.addEventListener('change', () => showPreview(refImage, refPreview));
 genImage.addEventListener('change', () => showPreview(genImage, genPreview));
 runModel.addEventListener('click', runComparison);
 resetForm.addEventListener('click', resetInterface);
+overlayOpacity.addEventListener('input', handleOverlayOpacityChange);
 
 [refPreview, genPreview, carRefPreview, carGenPreview].forEach((imgNode) => {
   updatePreviewState(imgNode, Boolean(imgNode.getAttribute('src')));
@@ -580,4 +738,5 @@ resetForm.addEventListener('click', resetInterface);
 
 stopCalculation();
 ensureMainBoardVisible();
-useBestAvailableIcons().finally(startBrandIntroAnimation);
+startBrandIntroAnimation();
+useBestAvailableIcons();

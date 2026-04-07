@@ -51,7 +51,7 @@
 
           <div class="toggle-row">
             <input id="enableHeatmap" type="checkbox" checked />
-            <label for="enableHeatmap">LPIPS Heatmap erzeugen</label>
+            <label for="enableHeatmap">LPIPS Spatial-Matrix erzeugen</label>
           </div>
 
           <div class="toggle-row">
@@ -129,13 +129,22 @@
             </div>
           </section>
 
-          <section id="heatmapPreviewSection" class="car-preview-section" hidden>
-            <p class="preview-title">LPIPS Heatmap (spatial)</p>
-            <div class="image-preview-grid">
-              <figure class="preview-figure">
-                <figcaption>Distanzkarte</figcaption>
-                <img id="lpipsHeatmapPreview" alt="LPIPS Heatmap Vorschau" />
-              </figure>
+          <section id="spatialSection" class="spatial-section" hidden>
+            <p class="preview-title">LPIPS Spatial-Matrix (spatial=true)</p>
+            <div class="spatial-grid">
+              <article class="spatial-card">
+                <h3>Matrixwerte</h3>
+                <p id="spatialMeta" class="spatial-meta">--</p>
+                <div id="spatialMatrix" class="spatial-matrix"></div>
+              </article>
+              <article class="spatial-card">
+                <h3>Heatmap</h3>
+                <canvas id="spatialHeatmapCanvas" class="spatial-canvas" width="280" height="280"></canvas>
+                <h3>Heatmap auf Vergleichsbild</h3>
+                <label for="overlayOpacity" class="overlay-label">Overlay-Deckkraft</label>
+                <input id="overlayOpacity" type="range" min="0" max="1" step="0.05" value="0.55" />
+                <canvas id="spatialOverlayCanvas" class="spatial-canvas" width="280" height="280"></canvas>
+              </article>
             </div>
           </section>
 
@@ -199,16 +208,6 @@
                 </details>
               </div>
               <p id="maskDice" class="stat-value">--</p>
-            </article>
-            <article class="metric-card">
-              <div class="stat-label-row">
-                <p class="stat-label">Car-only aktiv</p>
-                <details class="metric-info">
-                  <summary aria-label="Car-only aktiv Erklärung anzeigen">ⓘ</summary>
-                  <p>Zeigt, ob für dieses Paar Car-only Metriken tatsächlich berechnet wurden.</p>
-                </details>
-              </div>
-              <p id="carOnlyEnabled" class="stat-value">--</p>
             </article>
           </div>
         </section>
