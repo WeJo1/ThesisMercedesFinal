@@ -40,7 +40,7 @@ let isComparisonRunning = false;
 let lastSpatialPayload = null;
 
 const iconCandidates = {
-  star: ['icons/stern.svg?v=2', 'icons/stern.svg', 'icons/stern.png?v=2', 'icons/stern.png'],
+  star: ['icons/stern.png?v=2', 'icons/stern.png'],
 };
 
 function logBrowser(message, details = null) {
@@ -68,7 +68,32 @@ function startBrandIntroAnimation() {
   if (!brandIcons) {
     return;
   }
-  brandIcons.classList.add('is-star');
+
+  if (brandIcons.classList.contains('is-intro-done')) {
+    return;
+  }
+
+  brandIcons.classList.add('is-intro');
+
+  const markIntroAsDone = () => {
+    brandIcons.classList.remove('is-intro');
+    brandIcons.classList.add('is-intro-done');
+  };
+
+  brandIcons.addEventListener('animationend', markIntroAsDone, { once: true });
+}
+
+function setBrandLoadingSpin(isLoading) {
+  if (!brandIcons) {
+    return;
+  }
+
+  if (isLoading) {
+    brandIcons.classList.remove('is-intro');
+    brandIcons.classList.add('is-intro-done');
+  }
+
+  brandIcons.classList.toggle('is-loading-spin', isLoading);
 }
 
 function ensureMainBoardVisible() {
@@ -125,6 +150,7 @@ function startCalculation(message) {
   isComparisonRunning = true;
   setStatus('running', 'Vergleiche');
   setHeaderLoadingState(true);
+  setBrandLoadingSpin(true);
   setLoadingState(true);
   previewText.textContent = message;
 }
@@ -132,6 +158,7 @@ function startCalculation(message) {
 function stopCalculation() {
   isComparisonRunning = false;
   setHeaderLoadingState(false);
+  setBrandLoadingSpin(false);
   setLoadingState(false);
 }
 
