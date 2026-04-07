@@ -204,12 +204,8 @@ function showPreview(input, imgTarget) {
     return;
   }
 
-  const reader = new FileReader();
-  reader.onload = () => {
-    imgTarget.src = String(reader.result);
-    updatePreviewState(imgTarget, true);
-  };
-  reader.readAsDataURL(file);
+  imgTarget.removeAttribute('src');
+  updatePreviewState(imgTarget, false);
 }
 
 function setPreviewImage(imgTarget, value) {

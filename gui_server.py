@@ -233,6 +233,7 @@ class MetricsHandler(SimpleHTTPRequestHandler):
         }
 
     def store_upload_asset(self, file_field, tmp_path, prefix):
+        tmp_path.mkdir(parents=True, exist_ok=True)
         original_name = Path(file_field.filename).name
         suffix = Path(original_name).suffix.lower()
 
