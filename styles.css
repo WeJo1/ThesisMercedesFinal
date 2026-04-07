@@ -577,6 +577,11 @@ button {
   font-size: 0.86rem;
 }
 
+.spatial-card-heatmap {
+  max-width: 240px;
+  margin-inline: auto;
+}
+
 .spatial-meta {
   margin: 0 0 0.55rem;
   font-size: 0.78rem;

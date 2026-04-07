@@ -355,6 +355,28 @@ def save_lpips_spatial_map(dist_map, path):
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
+def apply_mask_to_lpips_map(dist_map, mask):
+    spatial_map = np.asarray(dist_map, dtype=np.float32)
+    spatial_mask = np.asarray(mask, dtype=bool)
+
+    if spatial_map.ndim != 2 or spatial_mask.ndim != 2:
+        return spatial_map
+
+    map_h, map_w = spatial_map.shape
+    if spatial_mask.shape != (map_h, map_w):
+        resized_mask = cv2.resize(spatial_mask.astype(np.uint8), (map_w, map_h), interpolation=cv2.INTER_NEAREST)
+        spatial_mask = resized_mask.astype(bool)
+
+    if not np.any(spatial_mask):
+        return spatial_map
+
+    masked_map = spatial_map.copy()
+    inside_values = masked_map[spatial_mask]
+    fill_value = float(np.min(inside_values))
+    masked_map[~spatial_mask] = fill_value
+    return masked_map
+
+
 def compute_lpips_on_content(ref, gen, content_mask, lpips_model, use_gpu=False, mask_downsample="bilinear", eps=1e-8):
     metric_mask = prepare_metric_mask(content_mask, ref, gen)
     if metric_mask is None:
@@ -594,7 +616,7 @@ def compute_car_only_metrics(
     roi_min_size_px=64,
     roi_square=True,
 ):
-    empty_masks = {"ref_mask": None, "gen_mask": None}
+    empty_masks = {"ref_mask": None, "gen_mask": None, "car_mask": None}
     if segmenter is None:
         debug = {"mask_area_ratio": 0.0, "bbox": None, "fallback_reason": "Car-only deaktiviert"}
         return {
@@ -647,7 +669,7 @@ def compute_car_only_metrics(
             "ssim_car_only": None,
             "car_only_paths": {"ref": None, "gen": None},
             "debug": debug,
-            "masks": {"ref_mask": ref_mask, "gen_mask": gen_mask},
+            "masks": {"ref_mask": ref_mask, "gen_mask": gen_mask, "car_mask": None},
         }
 
     adaptive_min_size = max(int(roi_min_size_px), int(min(ref_norm.shape[0], ref_norm.shape[1]) * 0.2))
@@ -721,7 +743,7 @@ def compute_car_only_metrics(
         "ssim_car_only": ssim_car,
         "car_only_paths": car_only_paths,
         "debug": debug,
-        "masks": {"ref_mask": ref_mask, "gen_mask": gen_mask},
+        "masks": {"ref_mask": ref_mask, "gen_mask": gen_mask, "car_mask": mask},
     }
 
 
@@ -993,6 +1015,13 @@ def evaluate_pair(
     car_masks = car_metrics.get("masks", {})
     ref_car_mask = car_masks.get("ref_mask")
     gen_car_mask = car_masks.get("gen_mask")
+    car_focus_mask = car_masks.get("car_mask")
+
+    if lpips_heatmap_dir is not None and lpips_spatial_path and lpips_map_mean is not None and car_focus_mask is not None:
+        lpips_map = apply_mask_to_lpips_map(lpips_map, car_focus_mask)
+        lpips_map_mean = float(np.mean(lpips_map))
+        save_lpips_spatial_map(lpips_map, Path(lpips_spatial_path))
+
     has_valid_car_masks = ref_car_mask is not None and gen_car_mask is not None and np.any(ref_car_mask) and np.any(gen_car_mask)
     if has_valid_car_masks:
         geometric = compute_car_mask_metrics(ref_car_mask, gen_car_mask, include_hausdorff=include_hausdorff)

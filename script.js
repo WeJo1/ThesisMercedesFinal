@@ -42,7 +42,7 @@ let isComparisonRunning = false;
 let lastSpatialPayload = null;
 
 const iconCandidates = {
-  star: ['icons/stern.png?v=2', 'icons/stern.png'],
+  star: ['icons/stern.svg'],
 };
 
 function logBrowser(message, details = null) {
@@ -230,16 +230,21 @@ function updatePreviewState(imgTarget, hasImage) {
 function showPreview(input, imgTarget) {
   const [file] = input.files;
   if (!file || isZipFile(file)) {
-    imgTarget.removeAttribute('src');
-    updatePreviewState(imgTarget, false);
+    setPreviewImage(imgTarget, null);
     return;
   }
-
-  imgTarget.removeAttribute('src');
-  updatePreviewState(imgTarget, false);
+  const previewUrl = URL.createObjectURL(file);
+  imgTarget.dataset.objectUrl = previewUrl;
+  setPreviewImage(imgTarget, previewUrl);
 }
 
 function setPreviewImage(imgTarget, value) {
+  const previousObjectUrl = imgTarget.dataset.objectUrl;
+  if (previousObjectUrl && previousObjectUrl !== value) {
+    URL.revokeObjectURL(previousObjectUrl);
+    delete imgTarget.dataset.objectUrl;
+  }
+
   if (!value) {
     imgTarget.removeAttribute('src');
     updatePreviewState(imgTarget, false);
@@ -269,6 +274,17 @@ function formatSpatialValue(value) {
     return '--';
   }
   return numeric.toFixed(3);
+}
+
+function getPercentileThreshold(flatValues, percentile) {
+  if (!Array.isArray(flatValues) || flatValues.length === 0) {
+    return Number.NaN;
+  }
+
+  const sortedValues = [...flatValues].sort((a, b) => a - b);
+  const clampedPercentile = Math.min(Math.max(percentile, 0), 1);
+  const index = Math.floor((sortedValues.length - 1) * clampedPercentile);
+  return sortedValues[index];
 }
 
 function renderSpatialHeatmap(values, minValue, maxValue) {
