@@ -74,6 +74,9 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             "car_only_ref_preview": None,
             "car_only_gen_preview": None,
             "lpips_spatial_map": None,
+            "car_metric_bbox": row.get("car_metric_bbox"),
+            "car_ref_preview_bbox": row.get("car_ref_preview_bbox"),
+            "car_gen_preview_bbox": row.get("car_gen_preview_bbox"),
         }
 
         if include_previews:
