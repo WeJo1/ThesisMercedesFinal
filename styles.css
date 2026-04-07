@@ -391,6 +391,8 @@ button {
 #previewText {
   margin-bottom: 0;
   line-height: 1.45;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .comparison-section {
@@ -534,23 +536,50 @@ button {
   background: rgba(12, 20, 31, 0.92);
 }
 
-.spatial-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+.spatial-stack {
+  display: flex;
+  flex-direction: column;
   gap: 0.7rem;
+}
+
+.spatial-panel {
+  margin: 0;
+  border: 1px solid rgba(170, 193, 220, 0.3);
+  border-radius: 0.7rem;
+  background: rgba(8, 15, 24, 0.72);
+  padding: 0.55rem;
+}
+
+.spatial-panel > summary {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #d8e6f5;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.spatial-panel[open] > summary {
+  margin-bottom: 0.55rem;
 }
 
 .spatial-card {
   margin: 0;
-  border: 1px solid rgba(170, 193, 220, 0.3);
-  border-radius: 0.7rem;
+  border: 1px solid rgba(170, 193, 220, 0.22);
+  border-radius: 0.55rem;
   padding: 0.6rem;
-  background: rgba(8, 15, 24, 0.72);
+  background: rgba(6, 12, 20, 0.86);
 }
 
 .spatial-card h3 {
   margin: 0 0 0.35rem;
   font-size: 0.86rem;
+}
+
+.spatial-card-heatmap {
+  width: min(100%, 420px);
+  margin-inline: auto;
 }
 
 .spatial-meta {
@@ -561,7 +590,8 @@ button {
 
 .spatial-matrix {
   overflow: auto;
-  max-height: 18rem;
+  max-height: 26rem;
+  width: 100%;
 }
 
 .spatial-table {
@@ -576,9 +606,22 @@ button {
   color: #d7e7f7;
 }
 
+.spatial-table td.spatial-cell-high {
+  background: rgba(255, 178, 58, 0.5);
+  color: #fff3d8;
+  font-weight: 600;
+}
+
+.spatial-table td.spatial-cell-very-high {
+  background: rgba(255, 84, 84, 0.62);
+  color: #fff1f1;
+  font-weight: 700;
+  box-shadow: inset 0 0 0 1px rgba(255, 224, 224, 0.38);
+}
+
 .spatial-canvas {
   width: 100%;
-  aspect-ratio: 1 / 1;
+  aspect-ratio: 4 / 3;
   image-rendering: pixelated;
   border: 1px solid rgba(170, 193, 220, 0.3);
   border-radius: 0.45rem;
@@ -723,8 +766,7 @@ button {
 @media (max-width: 560px) {
   .stats-grid,
   .image-preview-grid,
-  .comparison-mini-grid,
-  .spatial-grid {
+  .comparison-mini-grid {
     grid-template-columns: 1fr;
   }
 }
