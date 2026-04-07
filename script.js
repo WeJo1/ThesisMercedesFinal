@@ -15,6 +15,8 @@ const genPreview = document.getElementById('genPreview');
 const carOnlyPreviewSection = document.getElementById('carOnlyPreviewSection');
 const carRefPreview = document.getElementById('carRefPreview');
 const carGenPreview = document.getElementById('carGenPreview');
+const heatmapPreviewSection = document.getElementById('heatmapPreviewSection');
+const lpipsHeatmapPreview = document.getElementById('lpipsHeatmapPreview');
 const comparisonSection = document.getElementById('comparisonSection');
 const comparisonList = document.getElementById('comparisonList');
 const metricInfoBoxes = document.querySelectorAll('.metric-info');
@@ -244,6 +246,18 @@ function updateCarOnlyPreview(data) {
   carOnlyPreviewSection.hidden = false;
 }
 
+function updateHeatmapPreview(data) {
+  const hasHeatmapPreview = Boolean(data?.lpips_heatmap_preview);
+  if (!hasHeatmapPreview) {
+    heatmapPreviewSection.hidden = true;
+    setPreviewImage(lpipsHeatmapPreview, null);
+    return;
+  }
+
+  setPreviewImage(lpipsHeatmapPreview, data.lpips_heatmap_preview);
+  heatmapPreviewSection.hidden = false;
+}
+
 function renderMetrics(data) {
   const showCarOnlyMetric = carOnlyMode.checked;
 
@@ -317,6 +331,7 @@ function renderComparisonList(comparisons) {
         setPreviewImage(genPreview, item.gen_preview);
       }
       updateCarOnlyPreview(item);
+      updateHeatmapPreview(item);
       previewText.textContent = `Vergleich abgeschlossen für ${item.filename}.`;
     });
 
@@ -475,6 +490,7 @@ async function runComparison() {
     setPreviewImage(refPreview, firstComparison.ref_preview);
     setPreviewImage(genPreview, firstComparison.gen_preview);
     updateCarOnlyPreview(firstComparison);
+    updateHeatmapPreview(firstComparison);
     renderComparisonList(comparisons);
 
     const isBatch = Boolean(data.batch_mode && data.comparison_count > 1);
@@ -492,6 +508,7 @@ async function runComparison() {
   } catch (error) {
     setStatus('idle', 'Fehler');
     updateCarOnlyPreview(null);
+    updateHeatmapPreview(null);
     comparisonSection.hidden = true;
     comparisonList.innerHTML = '';
     previewText.textContent = `Fehler: ${error.message}`;
@@ -512,6 +529,7 @@ function resetInterface() {
   refPreview.removeAttribute('src');
   genPreview.removeAttribute('src');
   updateCarOnlyPreview(null);
+  updateHeatmapPreview(null);
   comparisonSection.hidden = true;
   comparisonList.innerHTML = '';
 
