@@ -46,7 +46,7 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             "csv_path": run_root / "result.csv",
             "norm_dir": run_root / "normalized",
             "car_only_dir": run_root / "car_only",
-            "heatmap_dir": run_root / "lpips_heatmaps",
+            "spatial_dir": run_root / "lpips_spatial",
             "uploads_dir": run_root / "uploads",
         }
 
@@ -73,7 +73,7 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             "gen_preview": None,
             "car_only_ref_preview": None,
             "car_only_gen_preview": None,
-            "lpips_heatmap_preview": None,
+            "lpips_spatial_map": None,
         }
 
         if include_previews:
@@ -81,7 +81,7 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             payload["gen_preview"] = self.image_file_to_data_url(row.get("gen_norm_path"))
             payload["car_only_ref_preview"] = self.image_file_to_data_url(row.get("car_only_ref_path"))
             payload["car_only_gen_preview"] = self.image_file_to_data_url(row.get("car_only_gen_path"))
-            payload["lpips_heatmap_preview"] = self.image_file_to_data_url(row.get("lpips_heatmap_path"))
+            payload["lpips_spatial_map"] = self.read_lpips_spatial_map(row.get("lpips_spatial_path"))
 
         return payload
 
@@ -169,7 +169,7 @@ class MetricsHandler(SimpleHTTPRequestHandler):
         ]
 
         if payload["enable_heatmap"]:
-            command.extend(["--lpips-heatmap-dir", str(run_paths["heatmap_dir"])])
+            command.extend(["--lpips-heatmap-dir", str(run_paths["spatial_dir"])])
         else:
             command.extend(["--lpips-heatmap-dir", "none"])
 
@@ -330,6 +330,21 @@ class MetricsHandler(SimpleHTTPRequestHandler):
         raw = path.read_bytes()
         encoded = base64.b64encode(raw).decode("ascii")
         return f"data:{mime};base64,{encoded}"
+
+    def read_lpips_spatial_map(self, file_path):
+        if not file_path:
+            return None
+
+        path = Path(file_path)
+        if not path.is_absolute():
+            path = BASE_DIR / path
+        if not path.exists() or not path.is_file():
+            return None
+
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return None
 
     def send_json(self, status_code, payload):
         body = json.dumps(payload).encode("utf-8")

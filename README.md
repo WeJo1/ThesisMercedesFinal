@@ -136,8 +136,8 @@ Nutze diese Parameter je nach Bedarf:
 - Gepaddete Letterbox-Ränder werden bei den Hauptmetriken ignoriert, damit der Vergleich methodisch stabil bleibt.
 - `--lpips-net {alex|vgg|squeeze}` – wähle LPIPS-Backbone
 - `--lpips-train-mode {lin|tune|scratch}` – nutze aktuell `lin` (tune/scratch sind im Skript bewusst nicht implementiert)
-- LPIPS läuft mit `spatial=True` und erzeugt standardmäßig Heatmaps
-- `--lpips-heatmap-dir <ordner>` – setze Zielordner für LPIPS-Heatmaps (`none` deaktiviert)
+- LPIPS läuft mit `spatial=True` und erzeugt standardmäßig eine räumliche Distanzmatrix
+- `--lpips-heatmap-dir <ordner>` – setze Zielordner für LPIPS-Spatial-JSON-Dateien (`none` deaktiviert)
 - `--use-gpu` – nutze CUDA, wenn verfügbar
 - `--seed <int>` – setze einen festen Seed für reproduzierbare Läufe
 - `--deterministic` – aktiviere deterministische Backends (langsamer, aber stabiler reproduzierbar)
@@ -170,7 +170,7 @@ Nutze diese Faustregel:
 
 Was bedeutet `lin` konkret?
 - Lade das offizielle LPIPS-Inferenzmodell mit trainierten linearen Kalibrierungsschichten.
-- Nutze `spatial=True`, damit zusätzlich eine Distanzkarte/Heatmap entsteht.
+- Nutze `spatial=True`, damit zusätzlich eine Distanzmatrix entsteht.
 - Nutze den gewählten Backbone (`alex`, `vgg`, `squeeze`) nur als Feature-Extraktor im LPIPS-Setup.
 
 Was ist **nicht** enthalten?
