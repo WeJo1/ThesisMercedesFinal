@@ -28,6 +28,7 @@ class MetricsHandler(SimpleHTTPRequestHandler):
         payload = {
             "filename": row.get("filename"),
             "lpips": row.get("lpips"),
+            "lpips_map_mean": row.get("lpips_map_mean"),
             "lpips_similarity_percent": row.get("lpips_similarity_percent"),
             "ssim": row.get("ssim"),
             "ssim_percent": row.get("ssim_percent"),
@@ -41,6 +42,7 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             "gen_preview": None,
             "car_only_ref_preview": None,
             "car_only_gen_preview": None,
+            "lpips_heatmap_preview": None,
         }
 
         if include_previews:
@@ -48,6 +50,7 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             payload["gen_preview"] = self.image_file_to_data_url(row.get("gen_norm_path"))
             payload["car_only_ref_preview"] = self.image_file_to_data_url(row.get("car_only_ref_path"))
             payload["car_only_gen_preview"] = self.image_file_to_data_url(row.get("car_only_gen_path"))
+            payload["lpips_heatmap_preview"] = self.image_file_to_data_url(row.get("lpips_heatmap_path"))
 
         return payload
 
