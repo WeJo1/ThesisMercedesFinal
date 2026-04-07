@@ -66,6 +66,8 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             "lpips_car_only_similarity_percent": row.get("lpips_car_only_similarity_percent"),
             "mask_iou": row.get("mask_iou"),
             "mask_dice": row.get("mask_dice"),
+            "mask_metric_scope": row.get("mask_metric_scope", "none"),
+            "mask_metrics_available": row.get("mask_metric_scope") == "car_mask",
             "car_only_enabled": has_car_only_value,
             "ref_preview": None,
             "gen_preview": None,
@@ -217,7 +219,9 @@ class MetricsHandler(SimpleHTTPRequestHandler):
         comparisons = []
         for index, row in enumerate(rows):
             should_include_previews = not compare_as_batch or index == 0
-            comparisons.append(self.build_preview_payload(row, include_previews=should_include_previews))
+            comparison_payload = self.build_preview_payload(row, include_previews=should_include_previews)
+            comparison_payload["run_dir"] = str(run_paths["run_root"])
+            comparisons.append(comparison_payload)
 
         first_comparison = comparisons[0]
 
