@@ -17,8 +17,10 @@ const genPreview = document.getElementById('genPreview');
 const carOnlyPreviewSection = document.getElementById('carOnlyPreviewSection');
 const carRefPreview = document.getElementById('carRefPreview');
 const carGenPreview = document.getElementById('carGenPreview');
-const heatmapPreviewSection = document.getElementById('heatmapPreviewSection');
-const lpipsHeatmapPreview = document.getElementById('lpipsHeatmapPreview');
+const spatialSection = document.getElementById('spatialSection');
+const spatialMeta = document.getElementById('spatialMeta');
+const spatialMatrix = document.getElementById('spatialMatrix');
+const spatialHeatmapCanvas = document.getElementById('spatialHeatmapCanvas');
 const comparisonSection = document.getElementById('comparisonSection');
 const comparisonList = document.getElementById('comparisonList');
 const metricInfoBoxes = document.querySelectorAll('.metric-info');
@@ -232,16 +234,107 @@ function updateCarOnlyPreview(data) {
   carOnlyPreviewSection.hidden = false;
 }
 
-function updateHeatmapPreview(data) {
-  const hasHeatmapPreview = Boolean(data?.lpips_heatmap_preview);
-  if (!hasHeatmapPreview) {
-    heatmapPreviewSection.hidden = true;
-    setPreviewImage(lpipsHeatmapPreview, null);
+function formatSpatialValue(value) {
+  const numeric = Number(value);
+  if (Number.isNaN(numeric)) {
+    return '--';
+  }
+  return numeric.toFixed(3);
+}
+
+function renderSpatialHeatmap(values, minValue, maxValue) {
+  const context = spatialHeatmapCanvas.getContext('2d');
+  if (!context) {
     return;
   }
 
-  setPreviewImage(lpipsHeatmapPreview, data.lpips_heatmap_preview);
-  heatmapPreviewSection.hidden = false;
+  const rows = values.length;
+  const cols = values[0].length;
+  const imageData = context.createImageData(cols, rows);
+  const range = Math.max(maxValue - minValue, 1e-8);
+
+  values.forEach((row, rowIndex) => {
+    row.forEach((cellValue, colIndex) => {
+      const normalized = Math.min(Math.max((Number(cellValue) - minValue) / range, 0), 1);
+      const r = Math.round(255 * normalized);
+      const g = Math.round(255 * (1 - Math.abs(normalized - 0.5) * 2));
+      const b = Math.round(255 * (1 - normalized));
+      const idx = (rowIndex * cols + colIndex) * 4;
+      imageData.data[idx] = r;
+      imageData.data[idx + 1] = g;
+      imageData.data[idx + 2] = b;
+      imageData.data[idx + 3] = 255;
+    });
+  });
+
+  const offscreen = document.createElement('canvas');
+  offscreen.width = cols;
+  offscreen.height = rows;
+  const offscreenContext = offscreen.getContext('2d');
+  if (!offscreenContext) {
+    return;
+  }
+  offscreenContext.putImageData(imageData, 0, 0);
+
+  context.clearRect(0, 0, spatialHeatmapCanvas.width, spatialHeatmapCanvas.height);
+  context.imageSmoothingEnabled = false;
+  context.drawImage(offscreen, 0, 0, spatialHeatmapCanvas.width, spatialHeatmapCanvas.height);
+}
+
+function renderSpatialMatrixTable(values) {
+  const rowCount = values.length;
+  const colCount = values[0].length;
+  const maxRows = Math.min(rowCount, 32);
+  const maxCols = Math.min(colCount, 32);
+
+  const tableNode = document.createElement('table');
+  tableNode.className = 'spatial-table';
+  const bodyNode = document.createElement('tbody');
+
+  for (let rowIndex = 0; rowIndex < maxRows; rowIndex += 1) {
+    const rowNode = document.createElement('tr');
+    for (let colIndex = 0; colIndex < maxCols; colIndex += 1) {
+      const cellNode = document.createElement('td');
+      cellNode.textContent = formatSpatialValue(values[rowIndex][colIndex]);
+      rowNode.append(cellNode);
+    }
+    bodyNode.append(rowNode);
+  }
+
+  tableNode.append(bodyNode);
+  spatialMatrix.innerHTML = '';
+  spatialMatrix.append(tableNode);
+
+  if (rowCount > maxRows || colCount > maxCols) {
+    const noteNode = document.createElement('p');
+    noteNode.className = 'comparison-note';
+    noteNode.textContent = `Anzeige gekürzt auf ${maxRows}x${maxCols} von ${rowCount}x${colCount}.`;
+    spatialMatrix.append(noteNode);
+  }
+}
+
+function updateSpatialOutput(data) {
+  const values = data?.lpips_spatial_map?.values;
+  if (!Array.isArray(values) || values.length === 0 || !Array.isArray(values[0])) {
+    spatialSection.hidden = true;
+    spatialMeta.textContent = '--';
+    spatialMatrix.innerHTML = '';
+    const context = spatialHeatmapCanvas.getContext('2d');
+    if (context) {
+      context.clearRect(0, 0, spatialHeatmapCanvas.width, spatialHeatmapCanvas.height);
+    }
+    return;
+  }
+
+  const minValue = Number(data.lpips_spatial_map?.min ?? Math.min(...values.flat()));
+  const maxValue = Number(data.lpips_spatial_map?.max ?? Math.max(...values.flat()));
+  const rows = Number(data.lpips_spatial_map?.rows ?? values.length);
+  const cols = Number(data.lpips_spatial_map?.cols ?? values[0].length);
+
+  spatialMeta.textContent = `Matrix: ${rows}x${cols} | min=${formatSpatialValue(minValue)} | max=${formatSpatialValue(maxValue)}`;
+  renderSpatialMatrixTable(values);
+  renderSpatialHeatmap(values, minValue, maxValue);
+  spatialSection.hidden = false;
 }
 
 function renderMetrics(data) {
@@ -331,8 +424,8 @@ function renderComparisonList(comparisons) {
         setPreviewImage(genPreview, item.gen_preview);
       }
       updateCarOnlyPreview(item);
-      updateHeatmapPreview(item);
-      previewText.textContent = `Vergleich abgeschlossen für ${item.filename}. Heatmap sichtbar: ${Boolean(item.lpips_heatmap_preview)}. Ablage: ${item.run_dir || '--'}`;
+      updateSpatialOutput(item);
+      previewText.textContent = `Vergleich abgeschlossen für ${item.filename}. LPIPS-Spatialdaten sichtbar: ${Boolean(item.lpips_spatial_map)}. Ablage: ${item.run_dir || '--'}`;
     });
 
     comparisonList.append(detailsNode);
@@ -494,7 +587,7 @@ async function runComparison() {
     setPreviewImage(refPreview, firstComparison.ref_preview);
     setPreviewImage(genPreview, firstComparison.gen_preview);
     updateCarOnlyPreview(firstComparison);
-    updateHeatmapPreview(firstComparison);
+    updateSpatialOutput(firstComparison);
     renderComparisonList(comparisons);
 
     const isBatch = Boolean(data.batch_mode && data.comparison_count > 1);
@@ -502,9 +595,9 @@ async function runComparison() {
       const previewHint = data.batch_previews_limited
         ? ' Vorschauen wurden nur für das erste Paar geladen.'
         : '';
-      previewText.textContent = `Vergleich abgeschlossen: ${data.comparison_count} Dateipaare ausgewertet.${previewHint} Heatmap sichtbar: ${Boolean(firstComparison.lpips_heatmap_preview)}. Ablage: ${data.run_dir}`;
+      previewText.textContent = `Vergleich abgeschlossen: ${data.comparison_count} Dateipaare ausgewertet.${previewHint} LPIPS-Spatialdaten sichtbar: ${Boolean(firstComparison.lpips_spatial_map)}. Ablage: ${data.run_dir}`;
     } else {
-      previewText.textContent = `Vergleich abgeschlossen für ${firstComparison.filename}. Heatmap sichtbar: ${Boolean(firstComparison.lpips_heatmap_preview)}. Ablage: ${data.run_dir}`;
+      previewText.textContent = `Vergleich abgeschlossen für ${firstComparison.filename}. LPIPS-Spatialdaten sichtbar: ${Boolean(firstComparison.lpips_spatial_map)}. Ablage: ${data.run_dir}`;
     }
 
     setStatus('done', 'Fertig');
@@ -512,7 +605,7 @@ async function runComparison() {
   } catch (error) {
     setStatus('idle', 'Fehler');
     updateCarOnlyPreview(null);
-    updateHeatmapPreview(null);
+    updateSpatialOutput(null);
     comparisonSection.hidden = true;
     comparisonList.innerHTML = '';
     previewText.textContent = `Fehler: ${error.message}`;
@@ -535,7 +628,7 @@ function resetInterface() {
   refPreview.removeAttribute('src');
   genPreview.removeAttribute('src');
   updateCarOnlyPreview(null);
-  updateHeatmapPreview(null);
+  updateSpatialOutput(null);
   comparisonSection.hidden = true;
   comparisonList.innerHTML = '';
 
