@@ -131,16 +131,22 @@
 
           <section id="spatialSection" class="spatial-section" hidden>
             <p class="preview-title">LPIPS Spatial-Matrix (spatial=true)</p>
-            <div class="spatial-grid">
-              <article class="spatial-card">
-                <h3>Matrixwerte</h3>
-                <p id="spatialMeta" class="spatial-meta">--</p>
-                <div id="spatialMatrix" class="spatial-matrix"></div>
-              </article>
-              <article class="spatial-card">
-                <h3>Heatmap</h3>
-                <canvas id="spatialHeatmapCanvas" class="spatial-canvas" width="280" height="280"></canvas>
-              </article>
+            <div class="spatial-stack">
+              <details id="heatmapDetails" class="spatial-panel">
+                <summary>Heatmap anzeigen</summary>
+                <article class="spatial-card">
+                  <h3>Heatmap</h3>
+                  <canvas id="spatialHeatmapCanvas" class="spatial-canvas" width="280" height="280"></canvas>
+                </article>
+              </details>
+              <details id="matrixDetails" class="spatial-panel">
+                <summary>Spatial-Matrix anzeigen</summary>
+                <article class="spatial-card">
+                  <h3>Matrixwerte</h3>
+                  <p id="spatialMeta" class="spatial-meta">--</p>
+                  <div id="spatialMatrix" class="spatial-matrix"></div>
+                </article>
+              </details>
             </div>
           </section>
 
