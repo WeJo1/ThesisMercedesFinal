@@ -35,6 +35,71 @@ SUPPORTED_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff
 LETTERBOX_PAD_COLOR = (127, 127, 127)
 COCO_VEHICLE_CLASSES = {3, 4, 6, 8}
 SUPPORTED_LPIPS_TRAIN_MODES = ("lin", "tune", "scratch")
+CSV_COLUMN_ORDER = [
+    "filename",
+    "reference_width",
+    "reference_height",
+    "generated_width",
+    "generated_height",
+    "normalized_width",
+    "normalized_height",
+    "normalization_mode",
+    "main_metric_scope",
+    "content_mask_area_px",
+    "content_mask_area_ratio",
+    "ssim",
+    "ssim_percent",
+    "lpips",
+    "lpips_similarity_percent",
+    "lpips_map_mean",
+    "lpips_foreground",
+    "lpips_foreground_similarity_percent",
+    "delta_e_ciede2000",
+    "delta_e_similarity_percent",
+    "lpips_car_only",
+    "lpips_car_only_similarity_percent",
+    "ssim_car_only",
+    "mask_metric_scope",
+    "mask_iou",
+    "mask_dice",
+    "mask_area_ratio",
+    "centroid_distance_px",
+    "centroid_distance_norm",
+    "hausdorff_px",
+    "hausdorff_norm",
+    "car_mask_area_ratio",
+    "car_bbox",
+    "car_fallback_reason",
+    "ref_norm_path",
+    "gen_norm_path",
+    "car_only_ref_path",
+    "car_only_gen_path",
+    "lpips_spatial_path",
+]
+
+CSV_FLOAT_COLUMNS = [
+    "content_mask_area_ratio",
+    "ssim",
+    "ssim_percent",
+    "lpips",
+    "lpips_similarity_percent",
+    "lpips_map_mean",
+    "lpips_foreground",
+    "lpips_foreground_similarity_percent",
+    "delta_e_ciede2000",
+    "delta_e_similarity_percent",
+    "lpips_car_only",
+    "lpips_car_only_similarity_percent",
+    "ssim_car_only",
+    "mask_iou",
+    "mask_dice",
+    "mask_area_ratio",
+    "centroid_distance_px",
+    "centroid_distance_norm",
+    "hausdorff_px",
+    "hausdorff_norm",
+    "car_mask_area_ratio",
+]
 
 
 def load_image(path):
@@ -1074,8 +1139,8 @@ def evaluate_folders(
     if not results:
         raise RuntimeError("Keine auswertbaren Bildpaare gefunden.")
 
-    df = pd.DataFrame(results)
-    df.to_csv(output_csv, index=False, float_format="%.6f")
+    df = build_result_dataframe(results)
+    df.to_csv(output_csv, index=False, float_format="%.6f", na_rep="")
 
     print("============================================================")
     print(f"[INFO] Ergebnisse gespeichert: {output_csv}")
@@ -1243,7 +1308,7 @@ def main():
             roi_min_size_px=args.roi_min_size_px,
             roi_square=args.roi_square,
         )
-        pd.DataFrame([result]).to_csv(args.output_csv, index=False, float_format="%.6f")
+        build_result_dataframe([result]).to_csv(args.output_csv, index=False, float_format="%.6f", na_rep="")
         print(f"[INFO] Einzelvergleich gespeichert: {args.output_csv}")
         return
 

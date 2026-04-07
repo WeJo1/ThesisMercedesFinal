@@ -34,13 +34,13 @@ const deltaE = document.getElementById('deltaE');
 const lpipsCar = document.getElementById('lpipsCar');
 const maskIou = document.getElementById('maskIou');
 const maskDice = document.getElementById('maskDice');
-const carOnlyEnabled = document.getElementById('carOnlyEnabled');
 
 const fallbackApiOrigins = ['http://127.0.0.1:4173', 'http://localhost:4173'];
 let isComparisonRunning = false;
+let lastSpatialPayload = null;
 
 const iconCandidates = {
-  star: ['icons/stern.png?v=2', 'icons/stern.png'],
+  star: ['icons/stern.svg?v=2', 'icons/stern.svg', 'icons/stern.png?v=2', 'icons/stern.png'],
 };
 
 function logBrowser(message, details = null) {
@@ -348,7 +348,6 @@ function renderMetrics(data) {
   lpipsCar.textContent = hasCarOnlyMetric
     ? formatMetricPair(data.lpips_car_only, data.lpips_car_only_similarity_percent)
     : '--';
-  carOnlyEnabled.textContent = hasCarOnlyMetric ? 'true' : 'false';
   if (hasCarMaskMetrics) {
     setMetric(maskIou, data.mask_iou);
     setMetric(maskDice, data.mask_dice);
@@ -398,7 +397,6 @@ function renderComparisonList(comparisons) {
         <li>LPIPS: ${formatMetricPair(item.lpips, item.lpips_similarity_percent)}</li>
         <li>SSIM: ${formatMetricPair(item.ssim, item.ssim_percent)}</li>
         <li>ΔE CIEDE2000: ${formatMetricPair(item.delta_e_ciede2000, item.delta_e_similarity_percent)}</li>
-        <li>Car-only aktiv: ${item.car_only_enabled ? 'true' : 'false'}</li>
       </ul>
     `;
     detailsNode.append(contentNode);
@@ -624,6 +622,7 @@ function resetInterface() {
   carOnlyMode.checked = false;
   carMode.value = 'neutralize_crop';
   maskSource.value = 'ref';
+  overlayOpacity.value = '0.55';
 
   refPreview.removeAttribute('src');
   genPreview.removeAttribute('src');
@@ -632,7 +631,7 @@ function resetInterface() {
   comparisonSection.hidden = true;
   comparisonList.innerHTML = '';
 
-  [lpipsValue, ssim, deltaE, lpipsCar, maskIou, maskDice, carOnlyEnabled].forEach((node) => {
+  [lpipsValue, ssim, deltaE, lpipsCar, maskIou, maskDice].forEach((node) => {
     node.textContent = node.id.includes('Similarity') ? '-- %' : '--';
   });
 
@@ -666,6 +665,7 @@ refImage.addEventListener('change', () => showPreview(refImage, refPreview));
 genImage.addEventListener('change', () => showPreview(genImage, genPreview));
 runModel.addEventListener('click', runComparison);
 resetForm.addEventListener('click', resetInterface);
+overlayOpacity.addEventListener('input', handleOverlayOpacityChange);
 
 [refPreview, genPreview, carRefPreview, carGenPreview].forEach((imgNode) => {
   updatePreviewState(imgNode, Boolean(imgNode.getAttribute('src')));
@@ -673,4 +673,5 @@ resetForm.addEventListener('click', resetInterface);
 
 stopCalculation();
 ensureMainBoardVisible();
-useBestAvailableIcons().finally(startBrandIntroAnimation);
+startBrandIntroAnimation();
+useBestAvailableIcons();

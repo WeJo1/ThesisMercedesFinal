@@ -1,5 +1,5 @@
 :root {
-  --mercedes-star: url("icons/stern.png");
+  --mercedes-star: url("icons/stern.svg");
   --bg-start: #05070b;
   --bg-end: #0a0f17;
   --panel: linear-gradient(165deg, rgba(6, 10, 18, 0.97) 0%, rgba(11, 18, 28, 0.94) 100%);
@@ -89,7 +89,7 @@ body {
   background-position: center;
   background-size: 100%;
   transform-origin: 50% 50%;
-  transition: opacity 700ms ease, filter 700ms ease;
+  transition: opacity 1200ms ease, filter 1200ms ease;
 }
 
 .brand-icon-star {
@@ -102,11 +102,11 @@ body {
 }
 
 .brand-icons.is-star .brand-icon-star {
-  animation: star-rotate-slow-fast-slow 5s infinite;
+  animation: star-rotate-smooth 9s infinite ease-in-out;
 }
 
 .topbar.is-loading .brand-icon-star {
-  animation-duration: 2.2s;
+  animation-duration: 6.5s;
 }
 
 .eyebrow {
@@ -323,21 +323,15 @@ button {
   margin-bottom: 1rem;
 }
 
-@keyframes star-rotate-slow-fast-slow {
+@keyframes star-rotate-smooth {
   0% {
     transform: rotate(0deg);
-    animation-timing-function: cubic-bezier(0.42, 0, 1, 1);
   }
-  30% {
-    transform: rotate(110deg);
-    animation-timing-function: cubic-bezier(0, 0, 0.2, 1);
-  }
-  70% {
-    transform: rotate(910deg);
-    animation-timing-function: cubic-bezier(0.42, 0, 1, 1);
+  50% {
+    transform: rotate(180deg);
   }
   100% {
-    transform: rotate(1080deg);
+    transform: rotate(360deg);
   }
 }
 
