@@ -118,6 +118,7 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             csv_path = tmp_path / "result.csv"
             norm_dir = tmp_path / "normalized"
             car_only_dir = tmp_path / "car_only"
+            heatmap_dir = tmp_path / "lpips_heatmaps"
 
             ref_asset = self.store_upload_asset(payload["ref_image"], tmp_path, "ref")
             gen_asset = self.store_upload_asset(payload["gen_image"], tmp_path, "gen")
@@ -134,6 +135,8 @@ class MetricsHandler(SimpleHTTPRequestHandler):
                 str(csv_path),
                 "--out",
                 str(norm_dir),
+                "--lpips-heatmap-dir",
+                str(heatmap_dir),
                 "--lpips-net",
                 payload["lpips_net"],
             ]
@@ -272,6 +275,8 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             return None
 
         path = Path(file_path)
+        if not path.is_absolute():
+            path = BASE_DIR / path
         if not path.exists() or not path.is_file():
             return None
 
