@@ -11,7 +11,6 @@
       <header class="topbar">
         <div class="brand">
           <div class="brand-icons" aria-hidden="true">
-            <span class="brand-icon brand-icon-wheel"></span>
             <span class="brand-icon brand-icon-star"></span>
           </div>
           <div>
@@ -41,6 +40,18 @@
               <option value="vgg">vgg</option>
               <option value="squeeze">squeeze</option>
             </select>
+          </div>
+
+          <div class="field-row">
+            <label for="lpipsTrainMode">LPIPS Train-Mode</label>
+            <select id="lpipsTrainMode">
+              <option value="lin">lin</option>
+            </select>
+          </div>
+
+          <div class="toggle-row">
+            <input id="enableHeatmap" type="checkbox" checked />
+            <label for="enableHeatmap">LPIPS Heatmap erzeugen</label>
           </div>
 
           <div class="toggle-row">
@@ -188,6 +199,16 @@
                 </details>
               </div>
               <p id="maskDice" class="stat-value">--</p>
+            </article>
+            <article class="metric-card">
+              <div class="stat-label-row">
+                <p class="stat-label">Car-only aktiv</p>
+                <details class="metric-info">
+                  <summary aria-label="Car-only aktiv Erklärung anzeigen">ⓘ</summary>
+                  <p>Zeigt, ob für dieses Paar Car-only Metriken tatsächlich berechnet wurden.</p>
+                </details>
+              </div>
+              <p id="carOnlyEnabled" class="stat-value">--</p>
             </article>
           </div>
         </section>
