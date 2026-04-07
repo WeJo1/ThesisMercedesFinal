@@ -99,14 +99,21 @@ body {
   transform: scale(1) rotate(0deg);
   filter: blur(0);
   will-change: transform;
+  backface-visibility: hidden;
+  transform-style: preserve-3d;
+  animation: none;
 }
 
-.brand-icons.is-star .brand-icon-star {
-  animation: star-rotate-smooth 9s infinite ease-in-out;
+.brand-icons.is-intro .brand-icon-star {
+  animation: star-intro-spin 2400ms cubic-bezier(0.24, 0.78, 0.18, 1) 1 forwards;
 }
 
-.topbar.is-loading .brand-icon-star {
-  animation-duration: 6.5s;
+.brand-icons.is-intro-done .brand-icon-star {
+  transform: scale(1) rotate(360deg);
+}
+
+.brand-icons.is-loading-spin .brand-icon-star {
+  animation: star-loading-spin 7s linear infinite;
 }
 
 .eyebrow {
@@ -128,7 +135,7 @@ h1 {
 
 .content-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(280px, 1fr) minmax(0, 2fr);
   gap: 1.2rem;
 }
 
@@ -323,15 +330,27 @@ button {
   margin-bottom: 1rem;
 }
 
-@keyframes star-rotate-smooth {
+@keyframes star-intro-spin {
   0% {
-    transform: rotate(0deg);
+    transform: translateZ(0) rotate(0deg);
   }
-  50% {
-    transform: rotate(180deg);
+  24% {
+    transform: translateZ(0) rotate(34deg);
+  }
+  58% {
+    transform: translateZ(0) rotate(268deg);
   }
   100% {
-    transform: rotate(360deg);
+    transform: translateZ(0) rotate(360deg);
+  }
+}
+
+@keyframes star-loading-spin {
+  0% {
+    transform: translateZ(0) rotate(0deg);
+  }
+  100% {
+    transform: translateZ(0) rotate(360deg);
   }
 }
 

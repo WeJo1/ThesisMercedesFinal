@@ -102,6 +102,25 @@ CSV_FLOAT_COLUMNS = [
 ]
 
 
+def build_result_dataframe(results):
+    if not results:
+        raise ValueError("results darf nicht leer sein.")
+
+    df = pd.DataFrame(results)
+
+    for column in CSV_COLUMN_ORDER:
+        if column not in df.columns:
+            df[column] = None
+
+    df = df.loc[:, CSV_COLUMN_ORDER]
+
+    for column in CSV_FLOAT_COLUMNS:
+        if column in df.columns:
+            df[column] = pd.to_numeric(df[column], errors="coerce")
+
+    return df
+
+
 def load_image(path):
     with Image.open(path) as img:
         rgb = img.convert("RGB")
