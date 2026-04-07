@@ -592,6 +592,18 @@ def save_mask_image(mask, path):
     Image.fromarray(mask_img, mode="L").save(path)
 
 
+def bbox_to_debug_dict(bbox, pad_px, min_size_px, square):
+    return {
+        "x0": bbox[0],
+        "y0": bbox[1],
+        "x1": bbox[2],
+        "y1": bbox[3],
+        "pad_px": int(pad_px),
+        "min_size_px": int(min_size_px),
+        "square": bool(square),
+    }
+
+
 def compute_car_only_metrics(
     ref_norm,
     gen_norm,
@@ -654,6 +666,9 @@ def compute_car_only_metrics(
     debug = {
         "mask_area_ratio": area_ratio,
         "bbox": None,
+        "metric_bbox": None,
+        "ref_preview_bbox": None,
+        "gen_preview_bbox": None,
         "fallback_reason": None,
         "mask_refine": {
             "grow_px": mask_grow_px,
@@ -673,31 +688,31 @@ def compute_car_only_metrics(
         }
 
     adaptive_min_size = max(int(roi_min_size_px), int(min(ref_norm.shape[0], ref_norm.shape[1]) * 0.2))
-    bbox = compute_mask_bbox(mask, pad_px=pad_px, min_size_px=adaptive_min_size, make_square=roi_square)
-    debug["bbox"] = {
-        "x0": bbox[0],
-        "y0": bbox[1],
-        "x1": bbox[2],
-        "y1": bbox[3],
-        "pad_px": pad_px,
-        "min_size_px": adaptive_min_size,
-        "square": bool(roi_square),
-    }
+    metric_bbox = compute_mask_bbox(mask, pad_px=pad_px, min_size_px=adaptive_min_size, make_square=roi_square)
+    debug["metric_bbox"] = bbox_to_debug_dict(metric_bbox, pad_px, adaptive_min_size, roi_square)
+    debug["bbox"] = debug["metric_bbox"]
+
+    ref_preview_mask = ref_mask.astype(bool)
+    gen_preview_mask = gen_mask.astype(bool)
+    ref_preview_bbox = compute_mask_bbox(ref_preview_mask, pad_px=pad_px, min_size_px=adaptive_min_size, make_square=roi_square)
+    gen_preview_bbox = compute_mask_bbox(gen_preview_mask, pad_px=pad_px, min_size_px=adaptive_min_size, make_square=roi_square)
+    debug["ref_preview_bbox"] = bbox_to_debug_dict(ref_preview_bbox, pad_px, adaptive_min_size, roi_square)
+    debug["gen_preview_bbox"] = bbox_to_debug_dict(gen_preview_bbox, pad_px, adaptive_min_size, roi_square)
 
     if car_mode == "neutralize_crop":
-        ref_car, mask_crop = apply_neutralize_crop(ref_norm, mask, bbox, neutral_value=neutral_value)
-        gen_car, _ = apply_neutralize_crop(gen_norm, mask, bbox, neutral_value=neutral_value)
-        ref_preview, _ = apply_masked_car_crop(ref_norm, mask, bbox)
-        gen_preview, _ = apply_masked_car_crop(gen_norm, mask, bbox)
+        ref_car, mask_crop = apply_neutralize_crop(ref_norm, mask, metric_bbox, neutral_value=neutral_value)
+        gen_car, _ = apply_neutralize_crop(gen_norm, mask, metric_bbox, neutral_value=neutral_value)
+        ref_preview, _ = apply_masked_car_crop(ref_norm, ref_preview_mask, ref_preview_bbox)
+        gen_preview, _ = apply_masked_car_crop(gen_norm, gen_preview_mask, gen_preview_bbox)
         lpips_car = compute_lpips(ref_car, gen_car, lpips_model, use_gpu=use_gpu)
         ssim_car = compute_ssim(ref_car, gen_car)
     elif car_mode == "weighted_lpips":
-        x0, y0, x1, y1 = bbox
+        x0, y0, x1, y1 = metric_bbox
         ref_car = ref_norm[y0:y1, x0:x1, :]
         gen_car = gen_norm[y0:y1, x0:x1, :]
         mask_crop = mask[y0:y1, x0:x1]
-        ref_preview, _ = apply_masked_car_crop(ref_norm, mask, bbox)
-        gen_preview, _ = apply_masked_car_crop(gen_norm, mask, bbox)
+        ref_preview, _ = apply_masked_car_crop(ref_norm, ref_preview_mask, ref_preview_bbox)
+        gen_preview, _ = apply_masked_car_crop(gen_norm, gen_preview_mask, gen_preview_bbox)
         lpips_car = masked_lpips(
             ref_car,
             gen_car,
@@ -1054,7 +1069,9 @@ def evaluate_pair(
     print(f"  LPIPS foreground % : {format_percent(lpips_foreground_similarity_percent)}")
     if segmenter is not None:
         print(f"  Mask area (%)      : {car_metrics['debug']['mask_area_ratio'] * 100.0:.2f}%")
-        print(f"  BBox (car)         : {car_metrics['debug']['bbox']}")
+        print(f"  BBox (Metrik)      : {car_metrics['debug']['metric_bbox']}")
+        print(f"  BBox (Preview Ref) : {car_metrics['debug']['ref_preview_bbox']}")
+        print(f"  BBox (Preview Gen) : {car_metrics['debug']['gen_preview_bbox']}")
         print(f"  LPIPS car-only     : {car_metrics['lpips_car_only']}")
         print(f"  LPIPS car-only (%) : {format_percent(lpips_car_only_similarity_percent)}")
         if car_metrics.get("car_only_paths", {}).get("ref"):
@@ -1097,6 +1114,9 @@ def evaluate_pair(
         "ssim_car_only": car_metrics["ssim_car_only"],
         "car_mask_area_ratio": car_metrics["debug"]["mask_area_ratio"],
         "car_bbox": json.dumps(car_metrics["debug"]["bbox"]) if car_metrics["debug"]["bbox"] else None,
+        "car_metric_bbox": json.dumps(car_metrics["debug"]["metric_bbox"]) if car_metrics["debug"]["metric_bbox"] else None,
+        "car_ref_preview_bbox": json.dumps(car_metrics["debug"]["ref_preview_bbox"]) if car_metrics["debug"]["ref_preview_bbox"] else None,
+        "car_gen_preview_bbox": json.dumps(car_metrics["debug"]["gen_preview_bbox"]) if car_metrics["debug"]["gen_preview_bbox"] else None,
         "car_fallback_reason": car_metrics["debug"]["fallback_reason"],
         "car_only_ref_path": car_metrics["car_only_paths"]["ref"] if car_metrics.get("car_only_paths") else None,
         "car_only_gen_path": car_metrics["car_only_paths"]["gen"] if car_metrics.get("car_only_paths") else None,
