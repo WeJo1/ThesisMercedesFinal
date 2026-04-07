@@ -246,6 +246,8 @@ function updateHeatmapPreview(data) {
 
 function renderMetrics(data) {
   const hasCarOnlyMetric = Boolean(data?.car_only_enabled);
+  const maskMetricScope = data?.mask_metric_scope || 'none';
+  const hasCarMaskMetrics = Boolean(data?.mask_metrics_available) && maskMetricScope === 'car_mask';
 
   lpipsValue.textContent = formatMetricPair(data.lpips, data.lpips_similarity_percent);
   ssim.textContent = formatMetricPair(data.ssim, data.ssim_percent);
@@ -254,8 +256,18 @@ function renderMetrics(data) {
     ? formatMetricPair(data.lpips_car_only, data.lpips_car_only_similarity_percent)
     : '--';
   carOnlyEnabled.textContent = hasCarOnlyMetric ? 'true' : 'false';
-  setMetric(maskIou, data.mask_iou);
-  setMetric(maskDice, data.mask_dice);
+  if (hasCarMaskMetrics) {
+    setMetric(maskIou, data.mask_iou);
+    setMetric(maskDice, data.mask_dice);
+    maskIou.removeAttribute('title');
+    maskDice.removeAttribute('title');
+    return;
+  }
+
+  maskIou.textContent = '--';
+  maskDice.textContent = '--';
+  maskIou.title = 'Nur verfügbar, wenn Car-only/Fahrzeugsegmentierung erfolgreich war.';
+  maskDice.title = 'Nur verfügbar, wenn Car-only/Fahrzeugsegmentierung erfolgreich war.';
 }
 
 function renderComparisonList(comparisons) {

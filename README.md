@@ -131,6 +131,9 @@ python3 image_metrics.py --car-only
 Nutze diese Parameter je nach Bedarf:
 
 - `--mode letterbox` – normalisiere Bildgrößen (Default: `letterbox`)
+- Die Letterbox-Normalisierung erzeugt eine `content_mask` (gültige Bildfläche ohne gepaddete Ränder).
+- Hauptmetriken (`SSIM`, `LPIPS`, `ΔE CIEDE2000`) nutzen diese `content_mask` konsistent als Vergleichsfläche.
+- Gepaddete Letterbox-Ränder werden bei den Hauptmetriken ignoriert, damit der Vergleich methodisch stabil bleibt.
 - `--lpips-net {alex|vgg|squeeze}` – wähle LPIPS-Backbone
 - `--lpips-train-mode {lin|tune|scratch}` – nutze aktuell `lin` (tune/scratch sind im Skript bewusst nicht implementiert)
 - LPIPS läuft mit `spatial=True` und erzeugt standardmäßig Heatmaps
@@ -144,6 +147,8 @@ Nutze diese Parameter je nach Bedarf:
 - `--mask-threshold <wert>` – setze Pixel-Schwelle der Segmentierungsmaske
 - `--roi-min-size-px <wert>` – halte die Car-ROI mindestens auf dieser Kantenlänge
 - `--roi-square` – erzwinge quadratische ROI für robustere LPIPS/SSIM-Vergleiche
+- `mask_iou` und `mask_dice` basieren auf segmentierten Fahrzeugmasken (Referenz vs. Generated), nicht auf allgemeinen Vordergrundmasken.
+- Ohne erfolgreiche Fahrzeugsegmentierung (oder ohne `--enable-car-only`) bleiben `mask_iou` und `mask_dice` leer (`None`/`--`).
 
 ## 8) Ergebnisse prüfen
 
