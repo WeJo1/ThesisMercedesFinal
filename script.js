@@ -1,6 +1,8 @@
 const refImage = document.getElementById('refImage');
 const genImage = document.getElementById('genImage');
 const lpipsNet = document.getElementById('lpipsNet');
+const lpipsTrainMode = document.getElementById('lpipsTrainMode');
+const enableHeatmap = document.getElementById('enableHeatmap');
 const carOnlyMode = document.getElementById('carOnlyMode');
 const carMode = document.getElementById('carMode');
 const maskSource = document.getElementById('maskSource');
@@ -30,12 +32,12 @@ const deltaE = document.getElementById('deltaE');
 const lpipsCar = document.getElementById('lpipsCar');
 const maskIou = document.getElementById('maskIou');
 const maskDice = document.getElementById('maskDice');
+const carOnlyEnabled = document.getElementById('carOnlyEnabled');
 
 const fallbackApiOrigins = ['http://127.0.0.1:4173', 'http://localhost:4173'];
 let isComparisonRunning = false;
 
 const iconCandidates = {
-  wheel: ['icons/felge.png?v=2', 'icons/felge.png'],
   star: ['icons/stern.png?v=2', 'icons/stern.png'],
 };
 
@@ -64,14 +66,7 @@ function startBrandIntroAnimation() {
   if (!brandIcons) {
     return;
   }
-
-  brandIcons.classList.remove('is-wheel', 'is-star');
-  brandIcons.classList.add('is-intro');
-
-  window.setTimeout(() => {
-    brandIcons.classList.remove('is-intro', 'is-wheel');
-    brandIcons.classList.add('is-star');
-  }, 5000);
+  brandIcons.classList.add('is-star');
 }
 
 function ensureMainBoardVisible() {
@@ -100,12 +95,7 @@ function resolveIconPath(path) {
 }
 
 async function useBestAvailableIcons() {
-  const wheelPath = await findFirstAvailableIcon(iconCandidates.wheel);
   const starPath = await findFirstAvailableIcon(iconCandidates.star);
-
-  if (wheelPath) {
-    document.documentElement.style.setProperty('--mercedes-wheel', `url("${wheelPath}")`);
-  }
 
   if (starPath) {
     document.documentElement.style.setProperty('--mercedes-star', `url("${starPath}")`);
@@ -259,14 +249,15 @@ function updateHeatmapPreview(data) {
 }
 
 function renderMetrics(data) {
-  const showCarOnlyMetric = carOnlyMode.checked;
+  const hasCarOnlyMetric = Boolean(data?.car_only_enabled);
 
   lpipsValue.textContent = formatMetricPair(data.lpips, data.lpips_similarity_percent);
   ssim.textContent = formatMetricPair(data.ssim, data.ssim_percent);
   deltaE.textContent = formatMetricPair(data.delta_e_ciede2000, data.delta_e_similarity_percent);
-  lpipsCar.textContent = showCarOnlyMetric
+  lpipsCar.textContent = hasCarOnlyMetric
     ? formatMetricPair(data.lpips_car_only, data.lpips_car_only_similarity_percent)
     : '--';
+  carOnlyEnabled.textContent = hasCarOnlyMetric ? 'true' : 'false';
   setMetric(maskIou, data.mask_iou);
   setMetric(maskDice, data.mask_dice);
 }
@@ -306,6 +297,7 @@ function renderComparisonList(comparisons) {
         <li>LPIPS: ${formatMetricPair(item.lpips, item.lpips_similarity_percent)}</li>
         <li>SSIM: ${formatMetricPair(item.ssim, item.ssim_percent)}</li>
         <li>ΔE CIEDE2000: ${formatMetricPair(item.delta_e_ciede2000, item.delta_e_similarity_percent)}</li>
+        <li>Car-only aktiv: ${item.car_only_enabled ? 'true' : 'false'}</li>
       </ul>
     `;
     detailsNode.append(contentNode);
@@ -469,6 +461,8 @@ async function runComparison() {
   payload.append('ref_image', refFile);
   payload.append('gen_image', genFile);
   payload.append('lpips_net', lpipsNet.value);
+  payload.append('lpips_train_mode', lpipsTrainMode.value);
+  payload.append('enable_heatmap', String(enableHeatmap.checked));
   payload.append('enable_car_only', String(carOnlyMode.checked));
   payload.append('car_mode', carMode.value);
   payload.append('mask_source', maskSource.value);
@@ -478,6 +472,8 @@ async function runComparison() {
       refFile: refFile.name,
       genFile: genFile.name,
       lpipsNet: lpipsNet.value,
+      lpipsTrainMode: lpipsTrainMode.value,
+      enableHeatmap: enableHeatmap.checked,
       enableCarOnly: carOnlyMode.checked,
       carMode: carMode.value,
       maskSource: maskSource.value,
@@ -498,9 +494,9 @@ async function runComparison() {
       const previewHint = data.batch_previews_limited
         ? ' Vorschauen wurden nur für das erste Paar geladen.'
         : '';
-      previewText.textContent = `Vergleich abgeschlossen: ${data.comparison_count} Dateipaare ausgewertet.${previewHint}`;
+      previewText.textContent = `Vergleich abgeschlossen: ${data.comparison_count} Dateipaare ausgewertet.${previewHint} Heatmap sichtbar: ${Boolean(firstComparison.lpips_heatmap_preview)}. Ablage: ${data.run_dir}`;
     } else {
-      previewText.textContent = `Vergleich abgeschlossen für ${firstComparison.filename}.`;
+      previewText.textContent = `Vergleich abgeschlossen für ${firstComparison.filename}. Heatmap sichtbar: ${Boolean(firstComparison.lpips_heatmap_preview)}. Ablage: ${data.run_dir}`;
     }
 
     setStatus('done', 'Fertig');
@@ -522,6 +518,8 @@ function resetInterface() {
   refImage.value = '';
   genImage.value = '';
   lpipsNet.value = 'alex';
+  lpipsTrainMode.value = 'lin';
+  enableHeatmap.checked = true;
   carOnlyMode.checked = false;
   carMode.value = 'neutralize_crop';
   maskSource.value = 'ref';
@@ -533,7 +531,7 @@ function resetInterface() {
   comparisonSection.hidden = true;
   comparisonList.innerHTML = '';
 
-  [lpipsValue, ssim, deltaE, lpipsCar, maskIou, maskDice].forEach((node) => {
+  [lpipsValue, ssim, deltaE, lpipsCar, maskIou, maskDice, carOnlyEnabled].forEach((node) => {
     node.textContent = node.id.includes('Similarity') ? '-- %' : '--';
   });
 

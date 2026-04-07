@@ -1,5 +1,4 @@
 :root {
-  --mercedes-wheel: url("icons/felge.png");
   --mercedes-star: url("icons/stern.png");
   --bg-start: #05070b;
   --bg-end: #0a0f17;
@@ -93,65 +92,21 @@ body {
   transition: opacity 700ms ease, filter 700ms ease;
 }
 
-.brand-icon-wheel {
-  background-image: var(--mercedes-wheel);
-  background-size: 106%;
-  will-change: transform;
-  transform: translateZ(0);
-  backface-visibility: hidden;
-  opacity: 1;
-  filter: blur(0);
-}
-
 .brand-icon-star {
   background-image: var(--mercedes-star);
   background-size: 94%;
-  opacity: 0;
-  transform: scale(0.62) rotate(-70deg);
-  filter: blur(4px);
-}
-
-.brand-icons.is-wheel .brand-icon-wheel {
-  animation: rotate-wheel 2.1s linear infinite;
   opacity: 1;
   transform: scale(1) rotate(0deg);
   filter: blur(0);
-}
-
-.brand-icons.is-intro .brand-icon-wheel {
-  animation: wheel-morph-linear 5s linear both;
-}
-
-.brand-icons.is-intro .brand-icon-star {
-  animation: star-morph-linear 5s linear both;
+  will-change: transform;
 }
 
 .brand-icons.is-star .brand-icon-star {
-  opacity: 1;
-  transform: scale(1) rotate(0deg);
-  filter: blur(0);
-}
-
-.brand-icons.is-star .brand-icon-wheel {
-  animation: none;
-  opacity: 0;
-  transform: scale(0.78) rotate(40deg);
-  filter: blur(2px);
-}
-
-.brand-icons:not(.is-wheel):not(.is-star):not(.is-intro) .brand-icon-wheel {
-  opacity: 0;
-  animation: none;
-}
-
-.topbar.is-loading .brand-icon-wheel {
-  animation: rotate-wheel 1.2s linear infinite;
-  opacity: 1;
+  animation: star-rotate-slow-fast-slow 5s infinite;
 }
 
 .topbar.is-loading .brand-icon-star {
-  opacity: 0;
-  animation: none;
+  animation-duration: 2.2s;
 }
 
 .eyebrow {
@@ -368,64 +323,21 @@ button {
   margin-bottom: 1rem;
 }
 
-@keyframes rotate-wheel {
-  from {
-    transform: translateZ(0) rotate(0deg);
-  }
-  to {
-    transform: translateZ(0) rotate(360deg);
-  }
-}
-
-@keyframes wheel-morph-linear {
+@keyframes star-rotate-slow-fast-slow {
   0% {
-    opacity: 1;
-    filter: blur(0);
-    transform: scale(1) rotate(0deg);
+    transform: rotate(0deg);
+    animation-timing-function: cubic-bezier(0.42, 0, 1, 1);
   }
-  18% {
-    opacity: 1;
-    filter: blur(0);
-    transform: scale(1) rotate(0deg);
+  30% {
+    transform: rotate(110deg);
+    animation-timing-function: cubic-bezier(0, 0, 0.2, 1);
   }
-  44% {
-    opacity: 1;
-    filter: blur(0);
-    transform: scale(1) rotate(160deg);
-  }
-  72% {
-    opacity: 1;
-    filter: blur(0);
-    transform: scale(1) rotate(620deg);
-  }
-  86% {
-    opacity: 0.95;
-    filter: blur(0.4px);
-    transform: scale(0.98) rotate(1040deg);
+  70% {
+    transform: rotate(910deg);
+    animation-timing-function: cubic-bezier(0.42, 0, 1, 1);
   }
   100% {
-    opacity: 0;
-    filter: blur(1.2px);
-    transform: scale(0.9) rotate(1260deg);
-  }
-}
-
-@keyframes star-morph-linear {
-  0%,
-  72% {
-    opacity: 0;
-    filter: blur(5px);
-    transform: scale(0.86) rotate(-120deg);
-  }
-  84% {
-    opacity: 0.98;
-    filter: blur(0.4px);
-    transform: scale(1.01) rotate(-24deg);
-  }
-  100% {
-    opacity: 1;
-    filter: blur(0);
-    transform: scale(1) rotate(0deg);
+    transform: rotate(1080deg);
   }
 }
 
@@ -565,7 +477,7 @@ button {
 }
 
 .image-preview-grid .preview-figure:nth-child(2)::after {
-  background-image: var(--mercedes-wheel);
+  background-image: var(--mercedes-star);
 }
 
 .image-preview-grid .preview-figure.has-image::after {

@@ -3,11 +3,11 @@ import csv
 import io
 import json
 import os
+import re
 import socket
 import shutil
 import subprocess
 import sys
-import tempfile
 import zipfile
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -21,10 +21,38 @@ SUPPORTED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", 
 MAX_ZIP_IMAGE_COUNT = 250
 MAX_ZIP_TOTAL_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
 MAX_ZIP_SINGLE_IMAGE_BYTES = 25 * 1024 * 1024
+RUNS_DIR = BASE_DIR / "runs"
 
 
 class MetricsHandler(SimpleHTTPRequestHandler):
+    def sanitize_token(self, value, fallback):
+        clean = re.sub(r"[^a-zA-Z0-9_.-]+", "_", value or "").strip("._")
+        return clean or fallback
+
+    def create_run_paths(self, payload):
+        ref_name = self.sanitize_token(Path(payload["ref_image"].filename).stem, "ref")
+        gen_name = self.sanitize_token(Path(payload["gen_image"].filename).stem, "gen")
+        run_name = f"{ref_name}_vs_{gen_name}"
+
+        run_root = RUNS_DIR / run_name
+        counter = 1
+        while run_root.exists():
+            counter += 1
+            run_root = RUNS_DIR / f"{run_name}_{counter}"
+
+        run_root.mkdir(parents=True, exist_ok=True)
+        return {
+            "run_root": run_root,
+            "csv_path": run_root / "result.csv",
+            "norm_dir": run_root / "normalized",
+            "car_only_dir": run_root / "car_only",
+            "heatmap_dir": run_root / "lpips_heatmaps",
+            "uploads_dir": run_root / "uploads",
+        }
+
     def build_preview_payload(self, row, include_previews=True):
+        lpips_car_only = row.get("lpips_car_only")
+        has_car_only_value = lpips_car_only not in (None, "", "None", "nan")
         payload = {
             "filename": row.get("filename"),
             "lpips": row.get("lpips"),
@@ -38,6 +66,7 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             "lpips_car_only_similarity_percent": row.get("lpips_car_only_similarity_percent"),
             "mask_iou": row.get("mask_iou"),
             "mask_dice": row.get("mask_dice"),
+            "car_only_enabled": has_car_only_value,
             "ref_preview": None,
             "gen_preview": None,
             "car_only_ref_preview": None,
@@ -107,99 +136,101 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             "ref_image": ref_image,
             "gen_image": gen_image,
             "lpips_net": form.getfirst("lpips_net", "alex"),
+            "lpips_train_mode": form.getfirst("lpips_train_mode", "lin"),
+            "enable_heatmap": form.getfirst("enable_heatmap", "true") == "true",
             "enable_car_only": form.getfirst("enable_car_only", "false") == "true",
             "car_mode": form.getfirst("car_mode", "neutralize_crop"),
             "mask_source": form.getfirst("mask_source", "ref"),
         }
 
     def run_image_metrics(self, payload):
-        with tempfile.TemporaryDirectory(prefix="metrics_gui_") as tmp_dir:
-            tmp_path = Path(tmp_dir)
-            csv_path = tmp_path / "result.csv"
-            norm_dir = tmp_path / "normalized"
-            car_only_dir = tmp_path / "car_only"
-            heatmap_dir = tmp_path / "lpips_heatmaps"
+        run_paths = self.create_run_paths(payload)
+        ref_asset = self.store_upload_asset(payload["ref_image"], run_paths["uploads_dir"], "ref")
+        gen_asset = self.store_upload_asset(payload["gen_image"], run_paths["uploads_dir"], "gen")
 
-            ref_asset = self.store_upload_asset(payload["ref_image"], tmp_path, "ref")
-            gen_asset = self.store_upload_asset(payload["gen_image"], tmp_path, "gen")
+        if ref_asset["kind"] != gen_asset["kind"]:
+            raise ValueError("Lade entweder zwei Einzelbilder oder zwei ZIP-Dateien hoch.")
 
-            if ref_asset["kind"] != gen_asset["kind"]:
-                raise ValueError("Lade entweder zwei Einzelbilder oder zwei ZIP-Dateien hoch.")
+        compare_as_batch = ref_asset["kind"] == "directory" and gen_asset["kind"] == "directory"
 
-            compare_as_batch = ref_asset["kind"] == "directory" and gen_asset["kind"] == "directory"
+        command = [
+            sys.executable,
+            str(BASE_DIR / "image_metrics.py"),
+            "--output-csv",
+            str(run_paths["csv_path"]),
+            "--out",
+            str(run_paths["norm_dir"]),
+            "--lpips-net",
+            payload["lpips_net"],
+            "--lpips-train-mode",
+            payload["lpips_train_mode"],
+        ]
 
-            command = [
-                sys.executable,
-                str(BASE_DIR / "image_metrics.py"),
-                "--output-csv",
-                str(csv_path),
-                "--out",
-                str(norm_dir),
-                "--lpips-heatmap-dir",
-                str(heatmap_dir),
-                "--lpips-net",
-                payload["lpips_net"],
-            ]
+        if payload["enable_heatmap"]:
+            command.extend(["--lpips-heatmap-dir", str(run_paths["heatmap_dir"])])
+        else:
+            command.extend(["--lpips-heatmap-dir", "none"])
 
-            if compare_as_batch:
-                command.extend(
-                    [
-                        "--reference-dir",
-                        str(ref_asset["path"]),
-                        "--generated-dir",
-                        str(gen_asset["path"]),
-                        "--skip-hausdorff",
-                    ]
-                )
-            else:
-                command.extend(
-                    [
-                        "--ref",
-                        str(ref_asset["path"]),
-                        "--gen",
-                        str(gen_asset["path"]),
-                    ]
-                )
+        if compare_as_batch:
+            command.extend(
+                [
+                    "--reference-dir",
+                    str(ref_asset["path"]),
+                    "--generated-dir",
+                    str(gen_asset["path"]),
+                    "--skip-hausdorff",
+                ]
+            )
+        else:
+            command.extend(
+                [
+                    "--ref",
+                    str(ref_asset["path"]),
+                    "--gen",
+                    str(gen_asset["path"]),
+                ]
+            )
 
-            if payload["enable_car_only"]:
-                command.extend(
-                    [
-                        "--enable-car-only",
-                        "--car-mode",
-                        payload["car_mode"],
-                        "--mask-source",
-                        payload["mask_source"],
-                        "--car-only-dir",
-                        str(car_only_dir),
-                    ]
-                )
+        if payload["enable_car_only"]:
+            command.extend(
+                [
+                    "--enable-car-only",
+                    "--car-mode",
+                    payload["car_mode"],
+                    "--mask-source",
+                    payload["mask_source"],
+                    "--car-only-dir",
+                    str(run_paths["car_only_dir"]),
+                ]
+            )
 
-            process = subprocess.run(command, cwd=BASE_DIR, capture_output=True, text=True)
-            if process.returncode != 0:
-                raise RuntimeError(process.stderr.strip() or process.stdout.strip() or "image_metrics.py fehlgeschlagen")
+        process = subprocess.run(command, cwd=BASE_DIR, capture_output=True, text=True)
+        if process.returncode != 0:
+            raise RuntimeError(process.stderr.strip() or process.stdout.strip() or "image_metrics.py fehlgeschlagen")
 
-            with csv_path.open("r", encoding="utf-8") as csv_file:
-                rows = list(csv.DictReader(csv_file))
+        with run_paths["csv_path"].open("r", encoding="utf-8") as csv_file:
+            rows = list(csv.DictReader(csv_file))
 
-            if not rows:
-                raise RuntimeError("Keine Metriken im CSV gefunden")
+        if not rows:
+            raise RuntimeError("Keine Metriken im CSV gefunden")
 
-            comparisons = []
-            for index, row in enumerate(rows):
-                should_include_previews = not compare_as_batch or index == 0
-                comparisons.append(self.build_preview_payload(row, include_previews=should_include_previews))
+        comparisons = []
+        for index, row in enumerate(rows):
+            should_include_previews = not compare_as_batch or index == 0
+            comparisons.append(self.build_preview_payload(row, include_previews=should_include_previews))
 
-            first_comparison = comparisons[0]
+        first_comparison = comparisons[0]
 
-            return {
-                **first_comparison,
-                "ref_upload": ref_asset["origin"],
-                "gen_upload": gen_asset["origin"],
-                "comparisons": comparisons,
-                "comparison_count": len(comparisons),
-                "batch_mode": compare_as_batch,
-                "batch_previews_limited": compare_as_batch and len(comparisons) > 1,
-            }
+        return {
+            **first_comparison,
+            "ref_upload": ref_asset["origin"],
+            "gen_upload": gen_asset["origin"],
+            "comparisons": comparisons,
+            "comparison_count": len(comparisons),
+            "batch_mode": compare_as_batch,
+            "batch_previews_limited": compare_as_batch and len(comparisons) > 1,
+            "run_dir": str(run_paths["run_root"]),
+        }
 
     def store_upload_asset(self, file_field, tmp_path, prefix):
         original_name = Path(file_field.filename).name
