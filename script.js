@@ -21,6 +21,8 @@ const spatialSection = document.getElementById('spatialSection');
 const spatialMeta = document.getElementById('spatialMeta');
 const spatialMatrix = document.getElementById('spatialMatrix');
 const spatialHeatmapCanvas = document.getElementById('spatialHeatmapCanvas');
+const heatmapDetails = document.getElementById('heatmapDetails');
+const matrixDetails = document.getElementById('matrixDetails');
 const comparisonSection = document.getElementById('comparisonSection');
 const comparisonList = document.getElementById('comparisonList');
 const metricInfoBoxes = document.querySelectorAll('.metric-info');
@@ -40,7 +42,7 @@ let isComparisonRunning = false;
 let lastSpatialPayload = null;
 
 const iconCandidates = {
-  star: ['icons/stern.png?v=2', 'icons/stern.png'],
+  star: ['icons/stern.svg'],
 };
 
 function logBrowser(message, details = null) {
@@ -228,16 +230,21 @@ function updatePreviewState(imgTarget, hasImage) {
 function showPreview(input, imgTarget) {
   const [file] = input.files;
   if (!file || isZipFile(file)) {
-    imgTarget.removeAttribute('src');
-    updatePreviewState(imgTarget, false);
+    setPreviewImage(imgTarget, null);
     return;
   }
-
-  imgTarget.removeAttribute('src');
-  updatePreviewState(imgTarget, false);
+  const previewUrl = URL.createObjectURL(file);
+  imgTarget.dataset.objectUrl = previewUrl;
+  setPreviewImage(imgTarget, previewUrl);
 }
 
 function setPreviewImage(imgTarget, value) {
+  const previousObjectUrl = imgTarget.dataset.objectUrl;
+  if (previousObjectUrl && previousObjectUrl !== value) {
+    URL.revokeObjectURL(previousObjectUrl);
+    delete imgTarget.dataset.objectUrl;
+  }
+
   if (!value) {
     imgTarget.removeAttribute('src');
     updatePreviewState(imgTarget, false);
@@ -267,6 +274,17 @@ function formatSpatialValue(value) {
     return '--';
   }
   return numeric.toFixed(3);
+}
+
+function getPercentileThreshold(flatValues, percentile) {
+  if (!Array.isArray(flatValues) || flatValues.length === 0) {
+    return Number.NaN;
+  }
+
+  const sortedValues = [...flatValues].sort((a, b) => a - b);
+  const clampedPercentile = Math.min(Math.max(percentile, 0), 1);
+  const index = Math.floor((sortedValues.length - 1) * clampedPercentile);
+  return sortedValues[index];
 }
 
 function renderSpatialHeatmap(values, minValue, maxValue) {
@@ -308,11 +326,16 @@ function renderSpatialHeatmap(values, minValue, maxValue) {
   context.drawImage(offscreen, 0, 0, spatialHeatmapCanvas.width, spatialHeatmapCanvas.height);
 }
 
-function renderSpatialMatrixTable(values) {
+function renderSpatialMatrixTable(values, minValue, maxValue) {
   const rowCount = values.length;
   const colCount = values[0].length;
   const maxRows = Math.min(rowCount, 32);
   const maxCols = Math.min(colCount, 32);
+  const flatValues = values.flat().map((value) => Number(value)).filter((value) => Number.isFinite(value));
+  const percentileHigh = getPercentileThreshold(flatValues, 0.85);
+  const percentileVeryHigh = getPercentileThreshold(flatValues, 0.95);
+  const highThreshold = Number.isFinite(percentileHigh) ? percentileHigh : minValue;
+  const veryHighThreshold = Number.isFinite(percentileVeryHigh) ? percentileVeryHigh : maxValue;
 
   const tableNode = document.createElement('table');
   tableNode.className = 'spatial-table';
@@ -322,7 +345,14 @@ function renderSpatialMatrixTable(values) {
     const rowNode = document.createElement('tr');
     for (let colIndex = 0; colIndex < maxCols; colIndex += 1) {
       const cellNode = document.createElement('td');
-      cellNode.textContent = formatSpatialValue(values[rowIndex][colIndex]);
+      const numericValue = Number(values[rowIndex][colIndex]);
+      cellNode.textContent = formatSpatialValue(numericValue);
+      cellNode.title = `Wert: ${formatSpatialValue(numericValue)}`;
+      if (numericValue >= veryHighThreshold) {
+        cellNode.classList.add('spatial-cell-very-high');
+      } else if (numericValue >= highThreshold) {
+        cellNode.classList.add('spatial-cell-high');
+      }
       rowNode.append(cellNode);
     }
     bodyNode.append(rowNode);
@@ -358,9 +388,15 @@ function updateSpatialOutput(data) {
   const rows = Number(data.lpips_spatial_map?.rows ?? values.length);
   const cols = Number(data.lpips_spatial_map?.cols ?? values[0].length);
 
-  spatialMeta.textContent = `Matrix: ${rows}x${cols} | min=${formatSpatialValue(minValue)} | max=${formatSpatialValue(maxValue)}`;
-  renderSpatialMatrixTable(values);
+  spatialMeta.textContent = `Matrix: ${rows}x${cols} | min=${formatSpatialValue(minValue)} | max=${formatSpatialValue(maxValue)} | Markierung: hoch=oberste 15 %, sehr hoch=oberste 5 %`;
+  renderSpatialMatrixTable(values, minValue, maxValue);
   renderSpatialHeatmap(values, minValue, maxValue);
+  if (heatmapDetails) {
+    heatmapDetails.open = false;
+  }
+  if (matrixDetails) {
+    matrixDetails.open = false;
+  }
   spatialSection.hidden = false;
 }
 
