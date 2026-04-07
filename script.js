@@ -331,11 +331,9 @@ function renderSpatialMatrixTable(values, minValue, maxValue) {
   const colCount = values[0].length;
   const maxRows = Math.min(rowCount, 32);
   const maxCols = Math.min(colCount, 32);
-  const flatValues = values.flat().map((value) => Number(value)).filter((value) => Number.isFinite(value));
-  const percentileHigh = getPercentileThreshold(flatValues, 0.85);
-  const percentileVeryHigh = getPercentileThreshold(flatValues, 0.95);
-  const highThreshold = Number.isFinite(percentileHigh) ? percentileHigh : minValue;
-  const veryHighThreshold = Number.isFinite(percentileVeryHigh) ? percentileVeryHigh : maxValue;
+  const range = Math.max(maxValue - minValue, 1e-8);
+  const highThreshold = minValue + range * 0.75;
+  const veryHighThreshold = minValue + range * 0.9;
 
   const tableNode = document.createElement('table');
   tableNode.className = 'spatial-table';
@@ -347,7 +345,6 @@ function renderSpatialMatrixTable(values, minValue, maxValue) {
       const cellNode = document.createElement('td');
       const numericValue = Number(values[rowIndex][colIndex]);
       cellNode.textContent = formatSpatialValue(numericValue);
-      cellNode.title = `Wert: ${formatSpatialValue(numericValue)}`;
       if (numericValue >= veryHighThreshold) {
         cellNode.classList.add('spatial-cell-very-high');
       } else if (numericValue >= highThreshold) {
@@ -388,7 +385,7 @@ function updateSpatialOutput(data) {
   const rows = Number(data.lpips_spatial_map?.rows ?? values.length);
   const cols = Number(data.lpips_spatial_map?.cols ?? values[0].length);
 
-  spatialMeta.textContent = `Matrix: ${rows}x${cols} | min=${formatSpatialValue(minValue)} | max=${formatSpatialValue(maxValue)} | Markierung: hoch=oberste 15 %, sehr hoch=oberste 5 %`;
+  spatialMeta.textContent = `Matrix: ${rows}x${cols} | min=${formatSpatialValue(minValue)} | max=${formatSpatialValue(maxValue)}`;
   renderSpatialMatrixTable(values, minValue, maxValue);
   renderSpatialHeatmap(values, minValue, maxValue);
   if (heatmapDetails) {
