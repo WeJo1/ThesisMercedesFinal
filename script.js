@@ -950,7 +950,10 @@ function renderComparisonList(comparisons) {
       }
       updateCarOnlyPreview(item);
       updateSpatialOutput(item);
-      previewText.textContent = `Vergleich abgeschlossen für ${item.filename}. LPIPS-Spatialdaten sichtbar: ${Boolean(item.lpips_spatial_map)}. Ablage: ${item.run_dir || '--'}`;
+      previewText.textContent = createCompletionMessage({
+        filename: item.filename,
+        runDir: item.run_dir,
+      });
     });
 
     comparisonList.append(detailsNode);
@@ -1000,6 +1003,20 @@ function getApiCandidates() {
   });
 
   return [...new Set(candidates)];
+}
+
+function createCompletionMessage({ filename, comparisonCount, isBatch, batchPreviewsLimited, runDir }) {
+  const normalizedFilename = filename || 'ausgewähltes Paar';
+  const storageHint = runDir ? ` Ergebnisse liegen unter: ${runDir}.` : '';
+
+  if (isBatch) {
+    const previewHint = batchPreviewsLimited
+      ? ' Lade weitere Paare über die Liste links.'
+      : '';
+    return `Vergleich abgeschlossen. Werte ${comparisonCount} Dateipaare aus.${previewHint}${storageHint}`;
+  }
+
+  return `Vergleich abgeschlossen für ${normalizedFilename}.${storageHint}`;
 }
 
 async function sendComparisonRequest(payload) {
@@ -1114,14 +1131,13 @@ async function runComparison() {
     renderComparisonList(comparisons);
 
     const isBatch = Boolean(data.batch_mode && data.comparison_count > 1);
-    if (isBatch) {
-      const previewHint = data.batch_previews_limited
-        ? ' Vorschauen wurden nur für das erste Paar geladen.'
-        : '';
-      previewText.textContent = `Vergleich abgeschlossen: ${data.comparison_count} Dateipaare ausgewertet.${previewHint} LPIPS-Spatialdaten sichtbar: ${Boolean(firstComparison.lpips_spatial_map)}. Ablage: ${data.run_dir}`;
-    } else {
-      previewText.textContent = `Vergleich abgeschlossen für ${firstComparison.filename}. LPIPS-Spatialdaten sichtbar: ${Boolean(firstComparison.lpips_spatial_map)}. Ablage: ${data.run_dir}`;
-    }
+    previewText.textContent = createCompletionMessage({
+      filename: firstComparison.filename,
+      comparisonCount: data.comparison_count,
+      isBatch,
+      batchPreviewsLimited: Boolean(data.batch_previews_limited),
+      runDir: data.run_dir,
+    });
 
     setStatus('done', 'Fertig');
     logBrowser('Zeige Vergleichsergebnis', data);
