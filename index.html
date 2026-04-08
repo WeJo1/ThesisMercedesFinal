@@ -127,21 +127,15 @@
             <div class="spatial-stack">
               <details id="heatmapDetails" class="spatial-panel spatial-panel-heatmap">
                 <summary>Heatmap anzeigen</summary>
-                <article class="spatial-card">
-                  <h3>Heatmap</h3>
-                  <canvas id="spatialHeatmapCanvas" class="spatial-canvas" width="320" height="240"></canvas>
-                  <p id="spatialMeta" class="spatial-meta">--</p>
-                </article>
+                <div class="spatial-heatmap-layout">
+                  <article class="spatial-card spatial-heatmap-card">
+                    <h3>Heatmap</h3>
+                    <canvas id="spatialHeatmapCanvas" class="spatial-canvas" width="320" height="240"></canvas>
+                    <p id="spatialMeta" class="spatial-meta">--</p>
+                  </article>
+                  <section id="spatialLocalInspector" class="spatial-card spatial-local-inspector" hidden></section>
+                </div>
               </details>
-              <section class="spatial-panel spatial-panel-summary">
-                <article class="spatial-card">
-                  <h3>Kompakte Analyse</h3>
-                  <div id="spatialSummary" class="spatial-summary"></div>
-                  <p class="spatial-panel-note">Fokus: hohe LPIPS-Bereiche als schnelle technische Diagnose.</p>
-                  <div id="spatialHotspots" class="spatial-hotspots"></div>
-                  <div id="spatialLocalInspector" class="spatial-local-inspector"></div>
-                </article>
-              </section>
               <details id="aggregatedDetails" class="spatial-panel spatial-panel-aggregated">
                 <summary>Aggregierte Matrix</summary>
                 <article class="spatial-card">
@@ -150,6 +144,19 @@
                   <div id="spatialAggregated" class="spatial-aggregated"></div>
                 </article>
               </details>
+              <section class="spatial-panel spatial-panel-summary">
+                <article class="spatial-card">
+                  <h3>Kompakte Analyse</h3>
+                  <div id="spatialSummary" class="spatial-summary"></div>
+                </article>
+              </section>
+              <section class="spatial-panel spatial-panel-hotspots">
+                <article class="spatial-card">
+                  <h3>Hotspots</h3>
+                  <p class="spatial-panel-note">Fokus: hohe LPIPS-Bereiche als schnelle technische Diagnose.</p>
+                  <div id="spatialHotspots" class="spatial-hotspots"></div>
+                </article>
+              </section>
               <details id="matrixDetails" class="spatial-panel spatial-panel-matrix">
                 <summary>Exakte Vollmatrix (potenziell langsam)</summary>
                 <article class="spatial-card">
