@@ -27,6 +27,7 @@ const spatialMatrixNotice = document.getElementById('spatialMatrixNotice');
 const spatialHeatmapCanvas = document.getElementById('spatialHeatmapCanvas');
 const heatmapDetails = document.getElementById('heatmapDetails');
 const aggregatedDetails = document.getElementById('aggregatedDetails');
+const compactAnalysisDetails = document.getElementById('compactAnalysisDetails');
 const matrixDetails = document.getElementById('matrixDetails');
 const comparisonSection = document.getElementById('comparisonSection');
 const comparisonList = document.getElementById('comparisonList');
@@ -72,6 +73,7 @@ function isSpatialDomReady() {
     spatialSection
     && heatmapDetails
     && aggregatedDetails
+    && compactAnalysisDetails
     && matrixDetails
     && spatialMeta
     && spatialSummary
@@ -722,6 +724,9 @@ function resetSpatialOutput() {
   if (aggregatedDetails) {
     aggregatedDetails.open = false;
   }
+  if (compactAnalysisDetails) {
+    compactAnalysisDetails.open = true;
+  }
   if (heatmapDetails) {
     heatmapDetails.open = true;
   }
@@ -814,6 +819,9 @@ function updateSpatialOutput(data) {
   }
   if (aggregatedDetails) {
     aggregatedDetails.open = false;
+  }
+  if (compactAnalysisDetails) {
+    compactAnalysisDetails.open = true;
   }
   if (matrixDetails) {
     matrixDetails.open = false;
