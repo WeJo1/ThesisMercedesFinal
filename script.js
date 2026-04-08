@@ -482,34 +482,73 @@ function buildAggregatedSpatialGrid(values, targetRows = 12, targetCols = 12, mo
   };
 }
 
-function buildSpatialAnalysis(values) {
+function sanitizeOverlayMask(rawMask, rows, cols) {
+  if (!Array.isArray(rawMask) || rawMask.length !== rows) {
+    return null;
+  }
+  const normalizedMask = [];
+  for (let rowIndex = 0; rowIndex < rows; rowIndex += 1) {
+    const row = rawMask[rowIndex];
+    if (!Array.isArray(row) || row.length !== cols) {
+      return null;
+    }
+    normalizedMask.push(row.map((cell) => Number(cell) > 0));
+  }
+  return normalizedMask;
+}
+
+function flattenValuesByMask(values, overlayMask) {
+  const selectedValues = [];
+  for (let rowIndex = 0; rowIndex < values.length; rowIndex += 1) {
+    for (let colIndex = 0; colIndex < values[rowIndex].length; colIndex += 1) {
+      if (overlayMask && !overlayMask[rowIndex][colIndex]) {
+        continue;
+      }
+      const numericValue = Number(values[rowIndex][colIndex]);
+      if (Number.isFinite(numericValue)) {
+        selectedValues.push(numericValue);
+      }
+    }
+  }
+  return selectedValues;
+}
+
+function buildSpatialAnalysis(values, overlayMaskPayload = null, maskMode = null) {
   if (!Array.isArray(values) || values.length === 0 || !Array.isArray(values[0])) {
     return null;
   }
   const normalizedValues = values.map((row) => row.map((cellValue) => Number(cellValue)));
   const rows = normalizedValues.length;
   const cols = normalizedValues[0].length;
-  const flatValues = [];
-  normalizedValues.forEach((row) => {
-    row.forEach((cellValue) => {
-      if (Number.isFinite(cellValue)) {
-        flatValues.push(cellValue);
-      }
-    });
-  });
+  const flatValues = flattenValuesByMask(normalizedValues, null);
+  const overlayMask = sanitizeOverlayMask(overlayMaskPayload, rows, cols);
+  const maskedValues = flattenValuesByMask(normalizedValues, overlayMask);
+  const valuesForScaling = maskedValues.length > 0 ? maskedValues : flatValues;
 
   const stats = computeSpatialStats(flatValues);
+  const scalingStats = computeSpatialStats(valuesForScaling);
   if (!stats) {
+    return null;
+  }
+  if (!scalingStats) {
     return null;
   }
 
   const min = stats.min;
   const max = stats.max;
+  const sortedScaleValues = [...valuesForScaling].sort((a, b) => a - b);
+  const p05 = getPercentileValue(sortedScaleValues, 0.05);
+  const p95 = getPercentileValue(sortedScaleValues, 0.95);
   const hotspotEntries = computeHotspots(normalizedValues, spatialHotspotLimit, max);
   const aggregatedGrid = buildAggregatedSpatialGrid(normalizedValues, 12, 12, 'mean');
+  const overlayMaskCoverage = overlayMask
+    ? (maskedValues.length / Math.max(rows * cols, 1)) * 100
+    : null;
 
   return {
     values: normalizedValues,
+    overlayMask,
+    maskMode: overlayMask ? (maskMode || 'overlay') : null,
     rows,
     cols,
     min,
@@ -519,10 +558,14 @@ function buildSpatialAnalysis(values) {
     p90: stats.p90,
     p95: stats.p95,
     p99: stats.p99,
+    scaleP05: p05,
+    scaleP95: p95,
     range: stats.range,
     flatValues,
     hotspotEntries,
     aggregatedGrid,
+    scaleValueCount: valuesForScaling.length,
+    overlayMaskCoverage,
     thresholdStats: {
       aboveP95Share: stats.aboveP95Share,
       aboveP99Share: stats.aboveP99Share,
@@ -533,8 +576,8 @@ function buildSpatialAnalysis(values) {
 
 function getHeatmapColor(normalized) {
   const gradientStops = [
-    [0, 39, 15, 90],
-    [0.18, 64, 68, 171],
+    [0, 82, 64, 132],
+    [0.18, 78, 96, 186],
     [0.36, 65, 182, 196],
     [0.54, 111, 222, 122],
     [0.72, 249, 221, 67],
@@ -560,7 +603,7 @@ function getHeatmapColor(normalized) {
   return [r, g, b];
 }
 
-function renderSpatialHeatmap(values, minValue, maxValue) {
+function renderSpatialHeatmap(values, lowerBound, upperBound, overlayMask = null) {
   syncHeatmapPreviewSize();
   const context = spatialHeatmapCanvas.getContext('2d');
   if (!context) {
@@ -573,20 +616,29 @@ function renderSpatialHeatmap(values, minValue, maxValue) {
   const rows = values.length;
   const cols = values[0].length;
   const imageData = context.createImageData(cols, rows);
-  const range = Math.max(maxValue - minValue, 1e-8);
+  const range = Math.max(upperBound - lowerBound, 1e-8);
 
   values.forEach((row, rowIndex) => {
     row.forEach((cellValue, colIndex) => {
       const numericValue = Number(cellValue);
+      const isMaskedIn = !overlayMask || Boolean(overlayMask[rowIndex]?.[colIndex]);
       const normalized = Number.isFinite(numericValue)
-        ? Math.min(Math.max((numericValue - minValue) / range, 0), 1)
+        ? Math.min(Math.max((numericValue - lowerBound) / range, 0), 1)
         : 0;
       const [r, g, b] = getHeatmapColor(normalized);
       const idx = (rowIndex * cols + colIndex) * 4;
       imageData.data[idx] = r;
       imageData.data[idx + 1] = g;
       imageData.data[idx + 2] = b;
-      imageData.data[idx + 3] = 255;
+      if (overlayMask && !isMaskedIn) {
+        const gray = Math.round((r + g + b) / 3);
+        imageData.data[idx] = gray;
+        imageData.data[idx + 1] = gray;
+        imageData.data[idx + 2] = gray;
+        imageData.data[idx + 3] = 72;
+      } else {
+        imageData.data[idx + 3] = 255;
+      }
     });
   });
 
@@ -838,15 +890,21 @@ function updateSpatialOutput(data) {
   }
 
   const values = data?.lpips_spatial_map?.values;
-  const analysis = buildSpatialAnalysis(values);
+  const overlayMask = data?.lpips_spatial_map?.overlay_mask;
+  const maskMode = data?.lpips_spatial_map?.mask_mode;
+  const analysis = buildSpatialAnalysis(values, overlayMask, maskMode);
   if (!analysis) {
     resetSpatialOutput();
     return;
   }
 
   lastSpatialPayload = analysis;
-  spatialMeta.textContent = `Matrix: ${analysis.rows}x${analysis.cols} | min=${formatSpatialValue(analysis.min)} | max=${formatSpatialValue(analysis.max)} | mean=${formatSpatialValue(analysis.mean)}`;
-  renderSpatialHeatmap(analysis.values, analysis.min, analysis.max);
+  const maskActive = Boolean(analysis.overlayMask);
+  const maskCoverage = maskActive && Number.isFinite(analysis.overlayMaskCoverage)
+    ? `${analysis.overlayMaskCoverage.toFixed(2)}%`
+    : '--';
+  spatialMeta.textContent = `Matrix: ${analysis.rows}x${analysis.cols} | raw min=${formatSpatialValue(analysis.min)} | raw max=${formatSpatialValue(analysis.max)} | mean=${formatSpatialValue(analysis.mean)} | p05=${formatSpatialValue(analysis.scaleP05)} | p95=${formatSpatialValue(analysis.scaleP95)} | overlay_mask=${maskActive ? `aktiv (${analysis.maskMode || 'overlay'})` : 'inaktiv'} | mask_area=${maskCoverage}`;
+  renderSpatialHeatmap(analysis.values, analysis.scaleP05, analysis.scaleP95, analysis.overlayMask);
   renderSpatialSummary(analysis);
   renderSpatialHotspots(analysis);
   renderAggregatedSpatialGrid(analysis);
