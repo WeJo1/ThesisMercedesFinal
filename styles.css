@@ -536,20 +536,19 @@ button {
   background: rgba(12, 20, 31, 0.92);
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  align-items: flex-start;
 }
 
 .spatial-section .preview-title {
-  width: min(100%, var(--spatial-target-width, 100%));
-  text-align: center;
+  width: 100%;
+  text-align: left;
 }
 
 .spatial-stack {
   display: flex;
   flex-direction: column;
   gap: 0.7rem;
-  width: min(100%, var(--spatial-target-width, 100%));
-  margin-left: auto;
+  width: 100%;
 }
 
 .spatial-panel {
@@ -572,6 +571,17 @@ button {
 
 .spatial-panel[open] > summary {
   margin-bottom: 0.55rem;
+}
+
+.spatial-panel-heatmap[open] .spatial-card {
+  width: min(100%, var(--spatial-target-width, 100%));
+  margin-left: auto;
+  margin-right: 0;
+  text-align: center;
+}
+
+.spatial-panel-matrix[open] .spatial-card {
+  width: 100%;
 }
 
 .spatial-card {
