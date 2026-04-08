@@ -70,6 +70,9 @@ function warnBrowser(message, details = null) {
 function isSpatialDomReady() {
   return Boolean(
     spatialSection
+    && heatmapDetails
+    && aggregatedDetails
+    && matrixDetails
     && spatialMeta
     && spatialSummary
     && spatialHotspots

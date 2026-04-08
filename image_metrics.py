@@ -358,7 +358,11 @@ def apply_mask_to_lpips_map(dist_map, mask):
 
     map_h, map_w = spatial_map.shape
     if spatial_mask.shape != (map_h, map_w):
-        resized_mask = cv2.resize(spatial_mask.astype(np.uint8), (map_w, map_h), interpolation=cv2.INTER_NEAREST)
+        mask_image = Image.fromarray(spatial_mask.astype(np.uint8) * 255, mode="L")
+        resized_mask = np.asarray(
+            mask_image.resize((map_w, map_h), resample=Image.Resampling.NEAREST),
+            dtype=np.uint8,
+        )
         spatial_mask = resized_mask.astype(bool)
 
     if not np.any(spatial_mask):
