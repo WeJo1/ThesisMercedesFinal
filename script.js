@@ -1,7 +1,6 @@
 const refImage = document.getElementById('refImage');
 const genImage = document.getElementById('genImage');
 const lpipsNet = document.getElementById('lpipsNet');
-const lpipsTrainMode = document.getElementById('lpipsTrainMode');
 const enableHeatmap = document.getElementById('enableHeatmap');
 const carOnlyMode = document.getElementById('carOnlyMode');
 const carMode = document.getElementById('carMode');
@@ -66,6 +65,20 @@ function warnBrowser(message, details = null) {
     return;
   }
   console.warn(`[CompareGUI] ${message}`, details);
+}
+
+function isSpatialDomReady() {
+  return Boolean(
+    spatialSection
+    && spatialMeta
+    && spatialSummary
+    && spatialHotspots
+    && spatialAggregated
+    && spatialLocalInspector
+    && spatialMatrixNotice
+    && spatialMatrix
+    && spatialHeatmapCanvas,
+  );
 }
 
 function setStatus(mode, text) {
@@ -690,6 +703,12 @@ function renderLocalSpatialInspector(analysis, centerRow, centerCol) {
 }
 
 function resetSpatialOutput() {
+  if (!isSpatialDomReady()) {
+    warnBrowser('Spatial-Ausgabe kann nicht zurückgesetzt werden: DOM-Container fehlen.');
+    lastSpatialPayload = null;
+    return;
+  }
+
   spatialSection.hidden = true;
   spatialMeta.textContent = '--';
   spatialSummary.innerHTML = '';
@@ -771,6 +790,11 @@ function attachSpatialDetailListeners() {
 }
 
 function updateSpatialOutput(data) {
+  if (!isSpatialDomReady()) {
+    warnBrowser('Spatial-Ausgabe übersprungen: DOM-Container fehlen oder sind veraltet.');
+    return;
+  }
+
   const values = data?.lpips_spatial_map?.values;
   const analysis = buildSpatialAnalysis(values, data?.lpips_spatial_map?.min, data?.lpips_spatial_map?.max);
   if (!analysis) {
@@ -1022,7 +1046,6 @@ async function runComparison() {
   payload.append('ref_image', refFile);
   payload.append('gen_image', genFile);
   payload.append('lpips_net', lpipsNet.value);
-  payload.append('lpips_train_mode', lpipsTrainMode.value);
   payload.append('enable_heatmap', String(enableHeatmap.checked));
   payload.append('enable_car_only', String(carOnlyMode.checked));
   payload.append('car_mode', carMode.value);
@@ -1033,7 +1056,6 @@ async function runComparison() {
       refFile: refFile.name,
       genFile: genFile.name,
       lpipsNet: lpipsNet.value,
-      lpipsTrainMode: lpipsTrainMode.value,
       enableHeatmap: enableHeatmap.checked,
       enableCarOnly: carOnlyMode.checked,
       carMode: carMode.value,
@@ -1079,12 +1101,10 @@ function resetInterface() {
   refImage.value = '';
   genImage.value = '';
   lpipsNet.value = 'alex';
-  lpipsTrainMode.value = 'lin';
   enableHeatmap.checked = true;
   carOnlyMode.checked = false;
   carMode.value = 'neutralize_crop';
   maskSource.value = 'ref';
-  overlayOpacity.value = '0.55';
 
   refPreview.removeAttribute('src');
   genPreview.removeAttribute('src');
@@ -1127,7 +1147,6 @@ refImage.addEventListener('change', () => showPreview(refImage, refPreview));
 genImage.addEventListener('change', () => showPreview(genImage, genPreview));
 runModel.addEventListener('click', runComparison);
 resetForm.addEventListener('click', resetInterface);
-overlayOpacity.addEventListener('input', handleOverlayOpacityChange);
 attachSpatialDetailListeners();
 
 [refPreview, genPreview, carRefPreview, carGenPreview].forEach((imgNode) => {

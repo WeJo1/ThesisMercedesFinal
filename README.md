@@ -135,7 +135,7 @@ Nutze diese Parameter je nach Bedarf:
 - Hauptmetriken (`SSIM`, `LPIPS`, `ΔE CIEDE2000`) nutzen diese `content_mask` konsistent als Vergleichsfläche.
 - Gepaddete Letterbox-Ränder werden bei den Hauptmetriken ignoriert, damit der Vergleich methodisch stabil bleibt.
 - `--lpips-net {alex|vgg|squeeze}` – wähle LPIPS-Backbone
-- `--lpips-train-mode {lin|tune|scratch}` – nutze aktuell `lin` (tune/scratch sind im Skript bewusst nicht implementiert)
+- LPIPS nutzt in diesem Tool immer das offizielle vortrainierte Inferenzmodell mit trainierten linearen Kalibrierungsschichten. Es gibt keinen frei wählbaren Trainingsmodus.
 - LPIPS läuft mit `spatial=True` und erzeugt standardmäßig eine räumliche Distanzmatrix
 - `--lpips-heatmap-dir <ordner>` – setze Zielordner für LPIPS-Spatial-JSON-Dateien (`none` deaktiviert)
 - `--use-gpu` – nutze CUDA, wenn verfügbar
@@ -162,24 +162,16 @@ print(pd.read_csv('image_metrics_results.csv').head())
 PY
 ```
 
-## 9) LPIPS-Modus `lin` verständlich erklärt
+## 9) LPIPS im Tool korrekt einordnen
 
-Nutze diese Faustregel:
-- **Vorherige Situation im Skript:** Es gab keine explizite Trennung zwischen den Konzepten `lin`, `tune`, `scratch`. Dadurch konnte der Eindruck entstehen, dass alle drei Modi direkt implementiert sind.
-- **Aktuelle Situation im Skript:** Erlaube bewusst nur `lin` für die Inferenz in diesem Tool. Wenn `tune` oder `scratch` gewählt wird, stoppe den Lauf mit klarer Fehlermeldung.
-
-Was bedeutet `lin` konkret?
-- Lade das offizielle LPIPS-Inferenzmodell mit trainierten linearen Kalibrierungsschichten.
-- Nutze `spatial=True`, damit zusätzlich eine Distanzmatrix entsteht.
-- Nutze den gewählten Backbone (`alex`, `vgg`, `squeeze`) nur als Feature-Extraktor im LPIPS-Setup.
-
-Was ist **nicht** enthalten?
-- Kein eigenes Nachtrainieren (`tune`) im Skript.
-- Kein Training von Grund auf (`scratch`) im Skript.
-
-Merke:
-- Wenn du nur Bildpaare bewerten willst, nutze `--lpips-train-mode lin`.
-- Wenn du wirklich trainieren willst (`tune`/`scratch`), implementiere dafür einen separaten Trainings-Workflow.
+Nutze diese Leitlinie:
+- Dieses Tool verwendet immer das offizielle vortrainierte LPIPS-Inferenzmodell.
+- `lpips=True` aktiviert die trainierten linearen Kalibrierungsschichten des offiziellen LPIPS-Setups.
+- `pretrained=True` lädt die vortrainierten Gewichte.
+- `spatial=True` erzeugt zusätzlich eine räumliche Distanzmatrix für Heatmap/Analyse.
+- Dieses Tool trainiert keine LPIPS-Gewichte nach.
+- `tune` und `scratch` sind kein Teil des Nutzungsflusses dieses Tools.
+- Wenn du echtes Training brauchst, implementiere einen separaten Trainings-Workflow mit Trainingsdaten, Zielsignal und Trainingsschleife.
 
 ## 10) Typischer Ablauf (kurz)
 
