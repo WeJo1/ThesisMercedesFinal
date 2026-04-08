@@ -480,7 +480,7 @@ function buildAggregatedSpatialGrid(values, targetRows = 12, targetCols = 12, mo
   };
 }
 
-function buildSpatialAnalysis(values, explicitMin, explicitMax) {
+function buildSpatialAnalysis(values) {
   if (!Array.isArray(values) || values.length === 0 || !Array.isArray(values[0])) {
     return null;
   }
@@ -501,8 +501,8 @@ function buildSpatialAnalysis(values, explicitMin, explicitMax) {
     return null;
   }
 
-  const min = Number.isFinite(Number(explicitMin)) ? Number(explicitMin) : stats.min;
-  const max = Number.isFinite(Number(explicitMax)) ? Number(explicitMax) : stats.max;
+  const min = stats.min;
+  const max = stats.max;
   const hotspotEntries = computeHotspots(values, spatialHotspotLimit, max);
   const aggregatedGrid = buildAggregatedSpatialGrid(values, 12, 12, 'mean');
 
@@ -799,7 +799,7 @@ function updateSpatialOutput(data) {
   }
 
   const values = data?.lpips_spatial_map?.values;
-  const analysis = buildSpatialAnalysis(values, data?.lpips_spatial_map?.min, data?.lpips_spatial_map?.max);
+  const analysis = buildSpatialAnalysis(values);
   if (!analysis) {
     resetSpatialOutput();
     return;
