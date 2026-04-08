@@ -34,7 +34,6 @@ except Exception:
 SUPPORTED_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff")
 LETTERBOX_PAD_COLOR = (127, 127, 127)
 COCO_VEHICLE_CLASSES = {3, 4, 6, 8}
-SUPPORTED_LPIPS_TRAIN_MODES = ("lin", "tune", "scratch")
 CSV_COLUMN_ORDER = [
     "filename",
     "reference_width",
@@ -237,23 +236,18 @@ def prepare_metric_mask(mask, ref, gen):
     return metric_mask
 
 
-def init_lpips_model(net="alex", use_gpu=False, train_mode="lin"):
+def init_lpips_model(net="alex", use_gpu=False):
     if lpips is None:
         raise RuntimeError("Paket 'lpips' nicht gefunden. Installiere die Abhängigkeiten aus requirements.txt.")
 
     if torch is None:
         raise RuntimeError(f"'torch' konnte nicht geladen werden ({TORCH_IMPORT_ERROR}). Installiere torch korrekt.")
 
-    if train_mode != "lin":
-        raise NotImplementedError(
-            f"lpips_train_mode='{train_mode}' ist in diesem Skript nicht implementiert. "
-            "Nutze 'lin' für die offizielle Inferenz mit trainierten Linear-Layern."
-        )
-
-    # Nutze den offiziellen LPIPS-Inferenzpfad (lin):
+    # Nutze immer den offiziellen LPIPS-Inferenzpfad (lin):
     # - lpips=True aktiviert die trainierten linearen Kalibrierungsschichten.
     # - pretrained=True lädt die vortrainierten Gewichte.
     # - spatial=True liefert zusätzlich eine räumliche Distanzkarte (Heatmap).
+    # Dieses Tool trainiert keine LPIPS-Gewichte nach.
     model = lpips.LPIPS(net=net, spatial=True, lpips=True, pretrained=True)
     if use_gpu and torch.cuda.is_available():
         model = model.cuda()
@@ -1255,7 +1249,6 @@ def parse_args():
     parser.add_argument("--out", default="normalized", help="Output-Ordner für normalisierte Bilder")
     parser.add_argument("--output-csv", default="image_metrics_results.csv", help="CSV-Datei für Metrikergebnisse")
     parser.add_argument("--lpips-net", default="alex", choices=["alex", "vgg", "squeeze"], help="Backbone für LPIPS")
-    parser.add_argument("--lpips-train-mode", default="lin", choices=list(SUPPORTED_LPIPS_TRAIN_MODES), help="LPIPS-Modus: lin (unterstützt), tune/scratch (nicht in diesem Skript implementiert)")
     parser.add_argument("--lpips-heatmap-dir", default="lpips_heatmaps", help="Ausgabeordner für LPIPS-Heatmaps (setze 'none' zum Deaktivieren)")
     parser.add_argument("--use-gpu", action="store_true", help="Nutze CUDA, falls verfügbar")
     parser.add_argument("--seed", type=int, default=None, help="Setze optionalen Zufalls-Seed für reproduzierbare Läufe")
@@ -1329,7 +1322,7 @@ def main():
     print(f"[INFO] Normalized out  : {args.out}")
     print(f"[INFO] Output CSV      : {args.output_csv}")
     print(f"[INFO] LPIPS Net       : {args.lpips_net}")
-    print(f"[INFO] LPIPS TrainMode : {args.lpips_train_mode}")
+    print("[INFO] LPIPS Setup     : offizielles vortrainiertes Inferenzmodell (lin, kein Training im Tool)")
     print(f"[INFO] LPIPS Heatmaps  : {args.lpips_heatmap_dir}")
     print(f"[INFO] Seed            : {args.seed}")
     print(f"[INFO] Deterministisch : {args.deterministic}")
@@ -1338,7 +1331,7 @@ def main():
     print(f"[INFO] Car-only aktiv  : {args.enable_car_only}")
     print("============================================================")
 
-    lpips_model = init_lpips_model(net=args.lpips_net, use_gpu=args.use_gpu, train_mode=args.lpips_train_mode)
+    lpips_model = init_lpips_model(net=args.lpips_net, use_gpu=args.use_gpu)
     verify_lpips_forward(lpips_model, net=args.lpips_net, use_gpu=args.use_gpu)
     segmenter = None
     if args.enable_car_only:

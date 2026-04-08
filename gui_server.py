@@ -141,7 +141,6 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             "ref_image": ref_image,
             "gen_image": gen_image,
             "lpips_net": form.getfirst("lpips_net", "alex"),
-            "lpips_train_mode": form.getfirst("lpips_train_mode", "lin"),
             "enable_heatmap": form.getfirst("enable_heatmap", "true") == "true",
             "enable_car_only": form.getfirst("enable_car_only", "false") == "true",
             "car_mode": form.getfirst("car_mode", "neutralize_crop"),
@@ -167,8 +166,6 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             str(run_paths["norm_dir"]),
             "--lpips-net",
             payload["lpips_net"],
-            "--lpips-train-mode",
-            payload["lpips_train_mode"],
         ]
 
         if payload["enable_heatmap"]:
