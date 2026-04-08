@@ -333,7 +333,30 @@ def compute_lpips_with_map(ref, gen, lpips_model, use_gpu=False):
     return dist_value, dist_map
 
 
-def save_lpips_spatial_map(dist_map, path):
+def resize_mask_to_spatial_map(mask, target_shape):
+    if mask is None:
+        return None
+
+    spatial_mask = np.asarray(mask, dtype=bool)
+    if spatial_mask.ndim != 2:
+        return None
+
+    target_rows, target_cols = target_shape
+    if target_rows <= 0 or target_cols <= 0:
+        return None
+
+    if spatial_mask.shape == (target_rows, target_cols):
+        return spatial_mask
+
+    mask_image = Image.fromarray(spatial_mask.astype(np.uint8) * 255, mode="L")
+    resized_mask = np.asarray(
+        mask_image.resize((target_cols, target_rows), resample=Image.Resampling.NEAREST),
+        dtype=np.uint8,
+    )
+    return resized_mask.astype(bool)
+
+
+def save_lpips_spatial_map(dist_map, path, overlay_mask=None, mask_mode=None):
     dist_map = np.asarray(dist_map, dtype=np.float32)
     if dist_map.ndim == 1:
         dist_map = dist_map[np.newaxis, :]
@@ -346,6 +369,12 @@ def save_lpips_spatial_map(dist_map, path):
         "max": float(np.max(dist_map)),
         "values": dist_map.tolist(),
     }
+
+    resized_overlay_mask = resize_mask_to_spatial_map(overlay_mask, dist_map.shape)
+    if resized_overlay_mask is not None and np.any(resized_overlay_mask):
+        payload["overlay_mask"] = resized_overlay_mask.astype(np.uint8).tolist()
+        payload["mask_mode"] = str(mask_mode) if mask_mode else "overlay"
+
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
@@ -989,7 +1018,6 @@ def evaluate_pair(
         heatmap_dir = Path(lpips_heatmap_dir)
         heatmap_dir.mkdir(parents=True, exist_ok=True)
         spatial_path = heatmap_dir / f"{basename}_lpips_spatial.json"
-        save_lpips_spatial_map(lpips_map, spatial_path)
         lpips_spatial_path = str(spatial_path)
 
     foreground_mask = compute_foreground_mask_union(ref_norm, gen_norm)
@@ -1037,10 +1065,13 @@ def evaluate_pair(
     gen_car_mask = car_masks.get("gen_mask")
     car_focus_mask = car_masks.get("car_mask")
 
-    if lpips_heatmap_dir is not None and lpips_spatial_path and lpips_map_mean is not None and car_focus_mask is not None:
-        lpips_map = apply_mask_to_lpips_map(lpips_map, car_focus_mask)
-        lpips_map_mean = float(np.mean(lpips_map))
-        save_lpips_spatial_map(lpips_map, Path(lpips_spatial_path))
+    if lpips_heatmap_dir is not None and lpips_spatial_path and lpips_map_mean is not None:
+        save_lpips_spatial_map(
+            lpips_map,
+            Path(lpips_spatial_path),
+            overlay_mask=car_focus_mask,
+            mask_mode="car_focus" if car_focus_mask is not None else None,
+        )
 
     has_valid_car_masks = ref_car_mask is not None and gen_car_mask is not None and np.any(ref_car_mask) and np.any(gen_car_mask)
     if has_valid_car_masks:
