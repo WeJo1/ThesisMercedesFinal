@@ -46,8 +46,8 @@ const fallbackApiOrigins = ['http://127.0.0.1:4173', 'http://localhost:4173'];
 let isComparisonRunning = false;
 let lastSpatialPayload = null;
 const largeSpatialCellLimit = 12000;
-const spatialHotspotLimit = 20;
-const localInspectorRadius = 3;
+const spatialHotspotLimit = 10;
+const localInspectorRadius = 2;
 
 const mercedesStarSvgPath = 'icons/stern.svg';
 
@@ -614,14 +614,7 @@ function renderSpatialSummary(analysis) {
     ['Matrix', `${analysis.rows} × ${analysis.cols}`],
     ['Min', formatSpatialValue(analysis.min)],
     ['Max', formatSpatialValue(analysis.max)],
-    ['Mittelwert', formatSpatialValue(analysis.mean)],
     ['Median', formatSpatialValue(analysis.median)],
-    ['P90', formatSpatialValue(analysis.p90)],
-    ['P95', formatSpatialValue(analysis.p95)],
-    ['P99', formatSpatialValue(analysis.p99)],
-    ['Spannweite', formatSpatialValue(analysis.range)],
-    ['> P95', formatPercent(analysis.thresholdStats.aboveP95Share)],
-    ['> P99', formatPercent(analysis.thresholdStats.aboveP99Share)],
   ];
 
   spatialSummary.innerHTML = summaryEntries
@@ -640,16 +633,15 @@ function renderSpatialHotspots(analysis) {
         <td>${entry.row}</td>
         <td>${entry.col}</td>
         <td>${formatSpatialValue(entry.value)}</td>
-        <td>${formatPercent(entry.normalizedToMax * 100)}</td>
         <td><span class="spatial-badge spatial-badge-${entry.category.replace(' ', '-')}">${entry.category}</span></td>
       </tr>`;
     })
     .join('');
 
-  spatialHotspots.innerHTML = `<h4>Hotspots (Top ${analysis.hotspotEntries.length})</h4>
+  spatialHotspots.innerHTML = `<h4>Hotspots (Top ${spatialHotspotLimit})</h4>
     <div class="spatial-hotspot-table-wrap">
       <table class="spatial-hotspot-table">
-        <thead><tr><th>Rang</th><th>Row</th><th>Col</th><th>Wert</th><th>Norm.</th><th>Klasse</th></tr></thead>
+        <thead><tr><th>Rang</th><th>Row</th><th>Col</th><th>Wert</th><th>Klasse</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>`;
@@ -703,6 +695,7 @@ function renderLocalSpatialInspector(analysis, centerRow, centerCol) {
   spatialLocalInspector.innerHTML = `<h4>Lokale Inspektion</h4>
     <p class="spatial-meta">Zelle [row=${centerRow}, col=${centerCol}] = ${formatSpatialValue(analysis.values[centerRow][centerCol])}</p>
     <table class="spatial-local-table"><tbody>${localRows.join('')}</tbody></table>`;
+  spatialLocalInspector.hidden = false;
 }
 
 function resetSpatialOutput() {
@@ -718,6 +711,7 @@ function resetSpatialOutput() {
   spatialHotspots.innerHTML = '';
   spatialAggregated.innerHTML = '';
   spatialLocalInspector.innerHTML = '';
+  spatialLocalInspector.hidden = true;
   spatialMatrixNotice.textContent = 'Diese Ansicht rendert die gesamte Matrix erst bei Bedarf.';
   spatialMatrix.innerHTML = '';
   spatialMatrix.dataset.fullRendered = 'false';
@@ -811,7 +805,8 @@ function updateSpatialOutput(data) {
   renderSpatialSummary(analysis);
   renderSpatialHotspots(analysis);
   renderAggregatedSpatialGrid(analysis);
-  spatialLocalInspector.innerHTML = '<p class="spatial-meta">Klicke in die Heatmap, um eine lokale Matrix-Inspektion zu öffnen.</p>';
+  spatialLocalInspector.innerHTML = '';
+  spatialLocalInspector.hidden = true;
   prepareExactMatrixPanel(analysis);
 
   if (heatmapDetails) {
