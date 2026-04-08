@@ -599,7 +599,12 @@ button {
   width: 100%;
 }
 
-.spatial-panel-summary .spatial-card {
+.spatial-panel-compact-analysis[open] .compact-analysis-body {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.spatial-panel-compact-analysis[open] .spatial-card {
   width: 100%;
 }
 
