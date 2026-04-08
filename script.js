@@ -754,9 +754,6 @@ function resetSpatialOutput() {
   if (aggregatedDetails) {
     aggregatedDetails.open = false;
   }
-  if (compactAnalysisDetails) {
-    compactAnalysisDetails.open = true;
-  }
   if (heatmapDetails) {
     heatmapDetails.open = true;
   }
@@ -862,9 +859,6 @@ function updateSpatialOutput(data) {
   }
   if (aggregatedDetails) {
     aggregatedDetails.open = false;
-  }
-  if (compactAnalysisDetails) {
-    compactAnalysisDetails.open = true;
   }
   if (matrixDetails) {
     matrixDetails.open = false;
