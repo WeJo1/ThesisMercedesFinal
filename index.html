@@ -144,19 +144,20 @@
                   <div id="spatialAggregated" class="spatial-aggregated"></div>
                 </article>
               </details>
-              <section class="spatial-panel spatial-panel-summary">
-                <article class="spatial-card">
-                  <h3>Kompakte Analyse</h3>
-                  <div id="spatialSummary" class="spatial-summary"></div>
-                </article>
-              </section>
-              <section class="spatial-panel spatial-panel-hotspots">
-                <article class="spatial-card">
-                  <h3>Hotspots</h3>
-                  <p class="spatial-panel-note">Fokus: hohe LPIPS-Bereiche als schnelle technische Diagnose.</p>
-                  <div id="spatialHotspots" class="spatial-hotspots"></div>
-                </article>
-              </section>
+              <details id="compactAnalysisDetails" class="spatial-panel spatial-panel-compact-analysis" open>
+                <summary>Kompakte Analyse</summary>
+                <div class="compact-analysis-body">
+                  <article class="spatial-card">
+                    <h3>Kompakte Statistik</h3>
+                    <div id="spatialSummary" class="spatial-summary"></div>
+                  </article>
+                  <article class="spatial-card">
+                    <h3>Hotspots</h3>
+                    <p class="spatial-panel-note">Fokus: hohe LPIPS-Bereiche als schnelle technische Diagnose.</p>
+                    <div id="spatialHotspots" class="spatial-hotspots"></div>
+                  </article>
+                </div>
+              </details>
               <details id="matrixDetails" class="spatial-panel spatial-panel-matrix">
                 <summary>Exakte Vollmatrix (potenziell langsam)</summary>
                 <article class="spatial-card">
