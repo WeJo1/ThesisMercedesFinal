@@ -67,6 +67,20 @@ function warnBrowser(message, details = null) {
   console.warn(`[CompareGUI] ${message}`, details);
 }
 
+function isSpatialDomReady() {
+  return Boolean(
+    spatialSection
+    && spatialMeta
+    && spatialSummary
+    && spatialHotspots
+    && spatialAggregated
+    && spatialLocalInspector
+    && spatialMatrixNotice
+    && spatialMatrix
+    && spatialHeatmapCanvas,
+  );
+}
+
 function setStatus(mode, text) {
   statusBadge.className = `status-badge ${mode}`;
   statusBadge.textContent = text;
@@ -689,6 +703,12 @@ function renderLocalSpatialInspector(analysis, centerRow, centerCol) {
 }
 
 function resetSpatialOutput() {
+  if (!isSpatialDomReady()) {
+    warnBrowser('Spatial-Ausgabe kann nicht zurückgesetzt werden: DOM-Container fehlen.');
+    lastSpatialPayload = null;
+    return;
+  }
+
   spatialSection.hidden = true;
   spatialMeta.textContent = '--';
   spatialSummary.innerHTML = '';
@@ -770,6 +790,11 @@ function attachSpatialDetailListeners() {
 }
 
 function updateSpatialOutput(data) {
+  if (!isSpatialDomReady()) {
+    warnBrowser('Spatial-Ausgabe übersprungen: DOM-Container fehlen oder sind veraltet.');
+    return;
+  }
+
   const values = data?.lpips_spatial_map?.values;
   const analysis = buildSpatialAnalysis(values, data?.lpips_spatial_map?.min, data?.lpips_spatial_map?.max);
   if (!analysis) {
@@ -1080,7 +1105,6 @@ function resetInterface() {
   carOnlyMode.checked = false;
   carMode.value = 'neutralize_crop';
   maskSource.value = 'ref';
-  overlayOpacity.value = '0.55';
 
   refPreview.removeAttribute('src');
   genPreview.removeAttribute('src');
@@ -1123,7 +1147,6 @@ refImage.addEventListener('change', () => showPreview(refImage, refPreview));
 genImage.addEventListener('change', () => showPreview(genImage, genPreview));
 runModel.addEventListener('click', runComparison);
 resetForm.addEventListener('click', resetInterface);
-overlayOpacity.addEventListener('input', handleOverlayOpacityChange);
 attachSpatialDetailListeners();
 
 [refPreview, genPreview, carRefPreview, carGenPreview].forEach((imgNode) => {
