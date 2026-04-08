@@ -501,10 +501,14 @@ button {
 
 .image-preview-grid img {
   width: 100%;
-  aspect-ratio: 4 / 3;
+  height: auto;
   object-fit: contain;
   background: rgba(8, 15, 24, 0.72);
   border-radius: 0.4rem;
+}
+
+.image-preview-grid .preview-figure:not(.has-image) img {
+  aspect-ratio: 4 / 3;
 }
 
 .image-preview-grid img:not([src]),
@@ -574,7 +578,7 @@ button {
 }
 
 .spatial-panel-heatmap[open] .spatial-card {
-  width: min(100%, var(--spatial-target-width, 100%));
+  width: 100%;
   margin-left: auto;
   margin-right: 0;
   text-align: center;
@@ -595,11 +599,6 @@ button {
 .spatial-card h3 {
   margin: 0 0 0.35rem;
   font-size: 0.86rem;
-}
-
-.spatial-card-heatmap {
-  max-width: 240px;
-  margin-inline: auto;
 }
 
 .spatial-meta {
@@ -639,7 +638,7 @@ button {
 
 .spatial-canvas {
   display: block;
-  width: min(100%, var(--spatial-target-width, 100%));
+  width: 100%;
   height: auto;
   margin-inline: auto;
   image-rendering: pixelated;
