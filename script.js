@@ -203,16 +203,22 @@ function updatePreviewState(imgTarget, hasImage) {
 }
 
 function syncHeatmapPreviewSize() {
-  if (!spatialHeatmapCanvas || !refPreview) {
+  if (!spatialHeatmapCanvas || !spatialSection) {
     return;
   }
 
-  const referenceWidth = Math.round(refPreview.clientWidth);
-  const referenceHeight = Math.round(refPreview.clientHeight);
+  const targetPreview = genPreview?.clientWidth > 0 ? genPreview : refPreview;
+  if (!targetPreview) {
+    return;
+  }
+
+  const referenceWidth = Math.round(targetPreview.clientWidth);
+  const referenceHeight = Math.round(targetPreview.clientHeight);
   if (referenceWidth <= 0 || referenceHeight <= 0) {
     return;
   }
 
+  spatialSection.style.setProperty('--spatial-target-width', `${referenceWidth}px`);
   spatialHeatmapCanvas.style.width = `${referenceWidth}px`;
   spatialHeatmapCanvas.style.height = `${referenceHeight}px`;
 
@@ -726,6 +732,7 @@ overlayOpacity.addEventListener('input', handleOverlayOpacityChange);
 
 [refPreview, genPreview, carRefPreview, carGenPreview].forEach((imgNode) => {
   updatePreviewState(imgNode, Boolean(imgNode.getAttribute('src')));
+  imgNode.addEventListener('load', syncHeatmapPreviewSize);
 });
 
 stopCalculation();
