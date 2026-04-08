@@ -41,7 +41,7 @@ const fallbackApiOrigins = ['http://127.0.0.1:4173', 'http://localhost:4173'];
 let isComparisonRunning = false;
 let lastSpatialPayload = null;
 
-const mercedesStarSvgPath = 'icons/stern.svg';
+const mercedesStarSvgPath = 'icons/stern1.png';
 
 function logBrowser(message, details = null) {
   if (details === null) {
