@@ -332,8 +332,6 @@ function renderSpatialHeatmap(values, minValue, maxValue) {
 function renderSpatialMatrixTable(values, minValue, maxValue) {
   const rowCount = values.length;
   const colCount = values[0].length;
-  const maxRows = Math.min(rowCount, 32);
-  const maxCols = Math.min(colCount, 32);
   const range = Math.max(maxValue - minValue, 1e-8);
   const highThreshold = minValue + range * 0.75;
   const veryHighThreshold = minValue + range * 0.9;
@@ -342,9 +340,9 @@ function renderSpatialMatrixTable(values, minValue, maxValue) {
   tableNode.className = 'spatial-table';
   const bodyNode = document.createElement('tbody');
 
-  for (let rowIndex = 0; rowIndex < maxRows; rowIndex += 1) {
+  for (let rowIndex = 0; rowIndex < rowCount; rowIndex += 1) {
     const rowNode = document.createElement('tr');
-    for (let colIndex = 0; colIndex < maxCols; colIndex += 1) {
+    for (let colIndex = 0; colIndex < colCount; colIndex += 1) {
       const cellNode = document.createElement('td');
       const numericValue = Number(values[rowIndex][colIndex]);
       cellNode.textContent = formatSpatialValue(numericValue);
@@ -361,13 +359,6 @@ function renderSpatialMatrixTable(values, minValue, maxValue) {
   tableNode.append(bodyNode);
   spatialMatrix.innerHTML = '';
   spatialMatrix.append(tableNode);
-
-  if (rowCount > maxRows || colCount > maxCols) {
-    const noteNode = document.createElement('p');
-    noteNode.className = 'comparison-note';
-    noteNode.textContent = `Anzeige gekürzt auf ${maxRows}x${maxCols} von ${rowCount}x${colCount}.`;
-    spatialMatrix.append(noteNode);
-  }
 }
 
 function updateSpatialOutput(data) {
