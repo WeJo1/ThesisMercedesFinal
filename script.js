@@ -484,14 +484,14 @@ function buildSpatialAnalysis(values) {
   if (!Array.isArray(values) || values.length === 0 || !Array.isArray(values[0])) {
     return null;
   }
-  const rows = values.length;
-  const cols = values[0].length;
+  const normalizedValues = values.map((row) => row.map((cellValue) => Number(cellValue)));
+  const rows = normalizedValues.length;
+  const cols = normalizedValues[0].length;
   const flatValues = [];
-  values.forEach((row) => {
+  normalizedValues.forEach((row) => {
     row.forEach((cellValue) => {
-      const numericValue = Number(cellValue);
-      if (Number.isFinite(numericValue)) {
-        flatValues.push(numericValue);
+      if (Number.isFinite(cellValue)) {
+        flatValues.push(cellValue);
       }
     });
   });
@@ -503,11 +503,11 @@ function buildSpatialAnalysis(values) {
 
   const min = stats.min;
   const max = stats.max;
-  const hotspotEntries = computeHotspots(values, spatialHotspotLimit, max);
-  const aggregatedGrid = buildAggregatedSpatialGrid(values, 12, 12, 'mean');
+  const hotspotEntries = computeHotspots(normalizedValues, spatialHotspotLimit, max);
+  const aggregatedGrid = buildAggregatedSpatialGrid(normalizedValues, 12, 12, 'mean');
 
   return {
-    values,
+    values: normalizedValues,
     rows,
     cols,
     min,
@@ -529,6 +529,35 @@ function buildSpatialAnalysis(values) {
   };
 }
 
+function getHeatmapColor(normalized) {
+  const gradientStops = [
+    [0, 39, 15, 90],
+    [0.18, 64, 68, 171],
+    [0.36, 65, 182, 196],
+    [0.54, 111, 222, 122],
+    [0.72, 249, 221, 67],
+    [1, 255, 98, 76],
+  ];
+
+  const clamped = Math.min(Math.max(normalized, 0), 1);
+  for (let index = 1; index < gradientStops.length; index += 1) {
+    const [currentStop, currentR, currentG, currentB] = gradientStops[index];
+    const [previousStop, previousR, previousG, previousB] = gradientStops[index - 1];
+    if (clamped > currentStop) {
+      continue;
+    }
+    const span = Math.max(currentStop - previousStop, 1e-8);
+    const mixFactor = (clamped - previousStop) / span;
+    const r = Math.round(previousR + (currentR - previousR) * mixFactor);
+    const g = Math.round(previousG + (currentG - previousG) * mixFactor);
+    const b = Math.round(previousB + (currentB - previousB) * mixFactor);
+    return [r, g, b];
+  }
+
+  const [, r, g, b] = gradientStops[gradientStops.length - 1];
+  return [r, g, b];
+}
+
 function renderSpatialHeatmap(values, minValue, maxValue) {
   syncHeatmapPreviewSize();
   const context = spatialHeatmapCanvas.getContext('2d');
@@ -546,10 +575,11 @@ function renderSpatialHeatmap(values, minValue, maxValue) {
 
   values.forEach((row, rowIndex) => {
     row.forEach((cellValue, colIndex) => {
-      const normalized = Math.min(Math.max((Number(cellValue) - minValue) / range, 0), 1);
-      const r = Math.round(255 * normalized);
-      const g = Math.round(255 * (1 - Math.abs(normalized - 0.5) * 2));
-      const b = Math.round(255 * (1 - normalized));
+      const numericValue = Number(cellValue);
+      const normalized = Number.isFinite(numericValue)
+        ? Math.min(Math.max((numericValue - minValue) / range, 0), 1)
+        : 0;
+      const [r, g, b] = getHeatmapColor(normalized);
       const idx = (rowIndex * cols + colIndex) * 4;
       imageData.data[idx] = r;
       imageData.data[idx + 1] = g;
@@ -784,6 +814,19 @@ function attachSpatialDetailListeners() {
       renderLocalSpatialInspector(lastSpatialPayload, pickedCell.row, pickedCell.col);
     });
   }
+
+  document.addEventListener('click', (event) => {
+    if (!spatialLocalInspector || spatialLocalInspector.hidden) {
+      return;
+    }
+    const clickedInsideHeatmap = spatialHeatmapCanvas?.contains(event.target);
+    const clickedInsideInspector = spatialLocalInspector.contains(event.target);
+    if (clickedInsideHeatmap || clickedInsideInspector) {
+      return;
+    }
+    spatialLocalInspector.innerHTML = '';
+    spatialLocalInspector.hidden = true;
+  });
 }
 
 function updateSpatialOutput(data) {
