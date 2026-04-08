@@ -1,7 +1,6 @@
 const refImage = document.getElementById('refImage');
 const genImage = document.getElementById('genImage');
 const lpipsNet = document.getElementById('lpipsNet');
-const lpipsTrainMode = document.getElementById('lpipsTrainMode');
 const enableHeatmap = document.getElementById('enableHeatmap');
 const carOnlyMode = document.getElementById('carOnlyMode');
 const carMode = document.getElementById('carMode');
@@ -1022,7 +1021,6 @@ async function runComparison() {
   payload.append('ref_image', refFile);
   payload.append('gen_image', genFile);
   payload.append('lpips_net', lpipsNet.value);
-  payload.append('lpips_train_mode', lpipsTrainMode.value);
   payload.append('enable_heatmap', String(enableHeatmap.checked));
   payload.append('enable_car_only', String(carOnlyMode.checked));
   payload.append('car_mode', carMode.value);
@@ -1033,7 +1031,6 @@ async function runComparison() {
       refFile: refFile.name,
       genFile: genFile.name,
       lpipsNet: lpipsNet.value,
-      lpipsTrainMode: lpipsTrainMode.value,
       enableHeatmap: enableHeatmap.checked,
       enableCarOnly: carOnlyMode.checked,
       carMode: carMode.value,
@@ -1079,7 +1076,6 @@ function resetInterface() {
   refImage.value = '';
   genImage.value = '';
   lpipsNet.value = 'alex';
-  lpipsTrainMode.value = 'lin';
   enableHeatmap.checked = true;
   carOnlyMode.checked = false;
   carMode.value = 'neutralize_crop';
