@@ -584,6 +584,17 @@ button {
   text-align: center;
 }
 
+.spatial-heatmap-layout {
+  display: flex;
+  gap: 0.7rem;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.spatial-heatmap-card {
+  flex: 2 1 360px;
+}
+
 .spatial-panel-matrix[open] .spatial-card {
   width: 100%;
 }
@@ -770,7 +781,13 @@ button {
 }
 
 .spatial-local-inspector {
-  margin-top: 0.7rem;
+  flex: 1 1 240px;
+  margin-top: 0;
+  width: min(100%, 340px);
+}
+
+.spatial-local-inspector[hidden] {
+  display: none;
 }
 
 .spatial-local-table {
@@ -923,6 +940,14 @@ button {
 @media (max-width: 900px) {
   .content-grid {
     grid-template-columns: 1fr;
+  }
+
+  .spatial-heatmap-layout {
+    flex-direction: column;
+  }
+
+  .spatial-local-inspector {
+    width: 100%;
   }
 }
 
