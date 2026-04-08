@@ -604,6 +604,22 @@ button {
   gap: 0.55rem;
 }
 
+.spatial-panel-compact-analysis {
+  padding: 0;
+}
+
+.spatial-panel-compact-analysis > summary {
+  padding: 0.55rem;
+}
+
+.spatial-panel-compact-analysis[open] > summary {
+  margin-bottom: 0;
+}
+
+.spatial-panel-compact-analysis[open] .compact-analysis-body {
+  padding: 0 0.55rem 0.55rem;
+}
+
 .spatial-panel-compact-analysis[open] .spatial-card {
   width: 100%;
 }
