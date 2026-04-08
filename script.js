@@ -20,8 +20,14 @@ const carGenPreview = document.getElementById('carGenPreview');
 const spatialSection = document.getElementById('spatialSection');
 const spatialMeta = document.getElementById('spatialMeta');
 const spatialMatrix = document.getElementById('spatialMatrix');
+const spatialSummary = document.getElementById('spatialSummary');
+const spatialHotspots = document.getElementById('spatialHotspots');
+const spatialAggregated = document.getElementById('spatialAggregated');
+const spatialLocalInspector = document.getElementById('spatialLocalInspector');
+const spatialMatrixNotice = document.getElementById('spatialMatrixNotice');
 const spatialHeatmapCanvas = document.getElementById('spatialHeatmapCanvas');
 const heatmapDetails = document.getElementById('heatmapDetails');
+const aggregatedDetails = document.getElementById('aggregatedDetails');
 const matrixDetails = document.getElementById('matrixDetails');
 const comparisonSection = document.getElementById('comparisonSection');
 const comparisonList = document.getElementById('comparisonList');
@@ -40,6 +46,9 @@ const maskDice = document.getElementById('maskDice');
 const fallbackApiOrigins = ['http://127.0.0.1:4173', 'http://localhost:4173'];
 let isComparisonRunning = false;
 let lastSpatialPayload = null;
+const largeSpatialCellLimit = 12000;
+const spatialHotspotLimit = 20;
+const localInspectorRadius = 3;
 
 const mercedesStarSvgPath = 'icons/stern.svg';
 
@@ -321,15 +330,187 @@ function formatSpatialValue(value) {
   return numeric.toFixed(3);
 }
 
-function getPercentileThreshold(flatValues, percentile) {
-  if (!Array.isArray(flatValues) || flatValues.length === 0) {
+function formatPercent(value, digits = 2) {
+  const numeric = Number(value);
+  if (Number.isNaN(numeric)) {
+    return '--';
+  }
+  return `${numeric.toFixed(digits)} %`;
+}
+
+function getPercentileValue(sortedValues, percentile) {
+  if (!Array.isArray(sortedValues) || sortedValues.length === 0) {
     return Number.NaN;
   }
-
-  const sortedValues = [...flatValues].sort((a, b) => a - b);
   const clampedPercentile = Math.min(Math.max(percentile, 0), 1);
   const index = Math.floor((sortedValues.length - 1) * clampedPercentile);
   return sortedValues[index];
+}
+
+function computeSpatialStats(flatValues) {
+  const safeValues = Array.isArray(flatValues) ? flatValues.filter((value) => Number.isFinite(value)) : [];
+  if (safeValues.length === 0) {
+    return null;
+  }
+
+  const sortedValues = [...safeValues].sort((a, b) => a - b);
+  const count = sortedValues.length;
+  const sum = sortedValues.reduce((acc, value) => acc + value, 0);
+  const min = sortedValues[0];
+  const max = sortedValues[count - 1];
+  const mean = sum / count;
+  const p90 = getPercentileValue(sortedValues, 0.9);
+  const p95 = getPercentileValue(sortedValues, 0.95);
+  const p99 = getPercentileValue(sortedValues, 0.99);
+  const median = getPercentileValue(sortedValues, 0.5);
+  const aboveP95 = safeValues.filter((value) => value > p95).length;
+  const aboveP99 = safeValues.filter((value) => value > p99).length;
+
+  return {
+    count,
+    min,
+    max,
+    mean,
+    median,
+    p90,
+    p95,
+    p99,
+    range: max - min,
+    aboveP95Share: (aboveP95 / count) * 100,
+    aboveP99Share: (aboveP99 / count) * 100,
+  };
+}
+
+function computeHotspots(values, maxCount = spatialHotspotLimit, globalMax = Number.NaN) {
+  if (!Array.isArray(values) || values.length === 0 || !Array.isArray(values[0])) {
+    return [];
+  }
+
+  const hotspots = [];
+  for (let rowIndex = 0; rowIndex < values.length; rowIndex += 1) {
+    for (let colIndex = 0; colIndex < values[rowIndex].length; colIndex += 1) {
+      const numericValue = Number(values[rowIndex][colIndex]);
+      if (!Number.isFinite(numericValue)) {
+        continue;
+      }
+      hotspots.push({ row: rowIndex, col: colIndex, value: numericValue });
+    }
+  }
+
+  hotspots.sort((left, right) => {
+    if (right.value !== left.value) {
+      return right.value - left.value;
+    }
+    if (left.row !== right.row) {
+      return left.row - right.row;
+    }
+    return left.col - right.col;
+  });
+
+  const denominator = Math.max(Number(globalMax), 1e-8);
+  return hotspots.slice(0, Math.max(1, maxCount)).map((entry, index) => {
+    const normalizedToMax = entry.value / denominator;
+    const category = normalizedToMax >= 0.9 ? 'sehr hoch' : normalizedToMax >= 0.75 ? 'hoch' : 'moderat';
+    return {
+      ...entry,
+      rank: index + 1,
+      normalizedToMax,
+      category,
+    };
+  });
+}
+
+function buildAggregatedSpatialGrid(values, targetRows = 12, targetCols = 12, mode = 'mean') {
+  if (!Array.isArray(values) || values.length === 0 || !Array.isArray(values[0])) {
+    return null;
+  }
+  const sourceRows = values.length;
+  const sourceCols = values[0].length;
+  const rowBins = Math.max(1, Math.min(targetRows, sourceRows));
+  const colBins = Math.max(1, Math.min(targetCols, sourceCols));
+  const aggregatedValues = Array.from({ length: rowBins }, () => Array(colBins).fill(0));
+
+  for (let aggRow = 0; aggRow < rowBins; aggRow += 1) {
+    const rowStart = Math.floor((aggRow * sourceRows) / rowBins);
+    const rowEnd = Math.floor(((aggRow + 1) * sourceRows) / rowBins);
+    for (let aggCol = 0; aggCol < colBins; aggCol += 1) {
+      const colStart = Math.floor((aggCol * sourceCols) / colBins);
+      const colEnd = Math.floor(((aggCol + 1) * sourceCols) / colBins);
+      let sum = 0;
+      let count = 0;
+      let max = -Infinity;
+
+      for (let rowIndex = rowStart; rowIndex < Math.max(rowEnd, rowStart + 1); rowIndex += 1) {
+        for (let colIndex = colStart; colIndex < Math.max(colEnd, colStart + 1); colIndex += 1) {
+          const numericValue = Number(values[rowIndex][colIndex]);
+          if (!Number.isFinite(numericValue)) {
+            continue;
+          }
+          sum += numericValue;
+          count += 1;
+          max = Math.max(max, numericValue);
+        }
+      }
+
+      aggregatedValues[aggRow][aggCol] = mode === 'max' ? max : sum / Math.max(count, 1);
+    }
+  }
+
+  return {
+    rows: rowBins,
+    cols: colBins,
+    values: aggregatedValues,
+    mode,
+  };
+}
+
+function buildSpatialAnalysis(values, explicitMin, explicitMax) {
+  if (!Array.isArray(values) || values.length === 0 || !Array.isArray(values[0])) {
+    return null;
+  }
+  const rows = values.length;
+  const cols = values[0].length;
+  const flatValues = [];
+  values.forEach((row) => {
+    row.forEach((cellValue) => {
+      const numericValue = Number(cellValue);
+      if (Number.isFinite(numericValue)) {
+        flatValues.push(numericValue);
+      }
+    });
+  });
+
+  const stats = computeSpatialStats(flatValues);
+  if (!stats) {
+    return null;
+  }
+
+  const min = Number.isFinite(Number(explicitMin)) ? Number(explicitMin) : stats.min;
+  const max = Number.isFinite(Number(explicitMax)) ? Number(explicitMax) : stats.max;
+  const hotspotEntries = computeHotspots(values, spatialHotspotLimit, max);
+  const aggregatedGrid = buildAggregatedSpatialGrid(values, 12, 12, 'mean');
+
+  return {
+    values,
+    rows,
+    cols,
+    min,
+    max,
+    mean: stats.mean,
+    median: stats.median,
+    p90: stats.p90,
+    p95: stats.p95,
+    p99: stats.p99,
+    range: stats.range,
+    flatValues,
+    hotspotEntries,
+    aggregatedGrid,
+    thresholdStats: {
+      aboveP95Share: stats.aboveP95Share,
+      aboveP99Share: stats.aboveP99Share,
+    },
+    totalCells: rows * cols,
+  };
 }
 
 function renderSpatialHeatmap(values, minValue, maxValue) {
@@ -377,7 +558,7 @@ function renderSpatialHeatmap(values, minValue, maxValue) {
   context.drawImage(offscreen, 0, 0, drawWidth, drawHeight);
 }
 
-function renderSpatialMatrixTable(values, minValue, maxValue) {
+function renderExactSpatialMatrix(values, minValue, maxValue) {
   const rowCount = values.length;
   const colCount = values[0].length;
   const range = Math.max(maxValue - minValue, 1e-8);
@@ -409,30 +590,208 @@ function renderSpatialMatrixTable(values, minValue, maxValue) {
   spatialMatrix.append(tableNode);
 }
 
+function renderSpatialSummary(analysis) {
+  if (!spatialSummary || !analysis) {
+    return;
+  }
+  const summaryEntries = [
+    ['Matrix', `${analysis.rows} × ${analysis.cols}`],
+    ['Min', formatSpatialValue(analysis.min)],
+    ['Max', formatSpatialValue(analysis.max)],
+    ['Mittelwert', formatSpatialValue(analysis.mean)],
+    ['Median', formatSpatialValue(analysis.median)],
+    ['P90', formatSpatialValue(analysis.p90)],
+    ['P95', formatSpatialValue(analysis.p95)],
+    ['P99', formatSpatialValue(analysis.p99)],
+    ['Spannweite', formatSpatialValue(analysis.range)],
+    ['> P95', formatPercent(analysis.thresholdStats.aboveP95Share)],
+    ['> P99', formatPercent(analysis.thresholdStats.aboveP99Share)],
+  ];
+
+  spatialSummary.innerHTML = summaryEntries
+    .map(([label, value]) => `<article class="spatial-stat-card"><p class="spatial-stat-label">${label}</p><p class="spatial-stat-value">${value}</p></article>`)
+    .join('');
+}
+
+function renderSpatialHotspots(analysis) {
+  if (!spatialHotspots || !analysis) {
+    return;
+  }
+  const rows = analysis.hotspotEntries
+    .map((entry) => {
+      return `<tr>
+        <td>${entry.rank}</td>
+        <td>${entry.row}</td>
+        <td>${entry.col}</td>
+        <td>${formatSpatialValue(entry.value)}</td>
+        <td>${formatPercent(entry.normalizedToMax * 100)}</td>
+        <td><span class="spatial-badge spatial-badge-${entry.category.replace(' ', '-')}">${entry.category}</span></td>
+      </tr>`;
+    })
+    .join('');
+
+  spatialHotspots.innerHTML = `<h4>Hotspots (Top ${analysis.hotspotEntries.length})</h4>
+    <div class="spatial-hotspot-table-wrap">
+      <table class="spatial-hotspot-table">
+        <thead><tr><th>Rang</th><th>Row</th><th>Col</th><th>Wert</th><th>Norm.</th><th>Klasse</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+function renderAggregatedSpatialGrid(analysis) {
+  if (!spatialAggregated || !analysis?.aggregatedGrid) {
+    return;
+  }
+  const grid = analysis.aggregatedGrid;
+  const minValue = Math.min(...grid.values.flat());
+  const maxValue = Math.max(...grid.values.flat());
+  const range = Math.max(maxValue - minValue, 1e-8);
+
+  const tableRows = grid.values
+    .map((row) => {
+      const cells = row
+        .map((value) => {
+          const normalized = Math.min(Math.max((value - minValue) / range, 0), 1);
+          const alpha = 0.18 + normalized * 0.72;
+          const color = `rgba(${Math.round(255 * normalized)}, ${Math.round(185 - normalized * 85)}, ${Math.round(255 * (1 - normalized))}, ${alpha})`;
+          return `<td style="background:${color}" title="${formatSpatialValue(value)}">${formatSpatialValue(value)}</td>`;
+        })
+        .join('');
+      return `<tr>${cells}</tr>`;
+    })
+    .join('');
+
+  spatialAggregated.innerHTML = `<p class="spatial-meta">Blöcke: ${grid.rows}×${grid.cols} (${grid.mode})</p><table class="spatial-aggregated-table"><tbody>${tableRows}</tbody></table>`;
+}
+
+function renderLocalSpatialInspector(analysis, centerRow, centerCol) {
+  if (!spatialLocalInspector || !analysis) {
+    return;
+  }
+  const rowStart = Math.max(0, centerRow - localInspectorRadius);
+  const rowEnd = Math.min(analysis.rows - 1, centerRow + localInspectorRadius);
+  const colStart = Math.max(0, centerCol - localInspectorRadius);
+  const colEnd = Math.min(analysis.cols - 1, centerCol + localInspectorRadius);
+
+  const localRows = [];
+  for (let rowIndex = rowStart; rowIndex <= rowEnd; rowIndex += 1) {
+    const cells = [];
+    for (let colIndex = colStart; colIndex <= colEnd; colIndex += 1) {
+      const isSelected = rowIndex === centerRow && colIndex === centerCol;
+      cells.push(`<td class="${isSelected ? 'is-selected' : ''}">${formatSpatialValue(analysis.values[rowIndex][colIndex])}</td>`);
+    }
+    localRows.push(`<tr>${cells.join('')}</tr>`);
+  }
+
+  spatialLocalInspector.innerHTML = `<h4>Lokale Inspektion</h4>
+    <p class="spatial-meta">Zelle [row=${centerRow}, col=${centerCol}] = ${formatSpatialValue(analysis.values[centerRow][centerCol])}</p>
+    <table class="spatial-local-table"><tbody>${localRows.join('')}</tbody></table>`;
+}
+
+function resetSpatialOutput() {
+  spatialSection.hidden = true;
+  spatialMeta.textContent = '--';
+  spatialSummary.innerHTML = '';
+  spatialHotspots.innerHTML = '';
+  spatialAggregated.innerHTML = '';
+  spatialLocalInspector.innerHTML = '';
+  spatialMatrixNotice.textContent = 'Diese Ansicht rendert die gesamte Matrix erst bei Bedarf.';
+  spatialMatrix.innerHTML = '';
+  spatialMatrix.dataset.fullRendered = 'false';
+  spatialMatrix.dataset.spatialKey = '';
+  if (matrixDetails) {
+    matrixDetails.open = false;
+  }
+  if (aggregatedDetails) {
+    aggregatedDetails.open = false;
+  }
+  if (heatmapDetails) {
+    heatmapDetails.open = true;
+  }
+  const context = spatialHeatmapCanvas.getContext('2d');
+  if (context) {
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    context.clearRect(0, 0, spatialHeatmapCanvas.width, spatialHeatmapCanvas.height);
+  }
+  lastSpatialPayload = null;
+}
+
+function getSpatialCellFromCanvasEvent(analysis, event) {
+  const rect = spatialHeatmapCanvas.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) {
+    return null;
+  }
+  const x = event.clientX - rect.left;
+  const y = event.clientY - rect.top;
+  const col = Math.min(analysis.cols - 1, Math.max(0, Math.floor((x / rect.width) * analysis.cols)));
+  const row = Math.min(analysis.rows - 1, Math.max(0, Math.floor((y / rect.height) * analysis.rows)));
+  return { row, col };
+}
+
+function prepareExactMatrixPanel(analysis) {
+  if (!spatialMatrixNotice) {
+    return;
+  }
+  const isLargeMatrix = analysis.totalCells > largeSpatialCellLimit;
+  spatialMatrix.innerHTML = '';
+  spatialMatrix.dataset.fullRendered = 'false';
+  spatialMatrix.dataset.spatialKey = `${analysis.rows}x${analysis.cols}:${analysis.min}:${analysis.max}`;
+  spatialMatrixNotice.innerHTML = isLargeMatrix
+    ? `Diese Vollmatrix ist sehr groß (${analysis.totalCells} Zellen) und kann die Darstellung verlangsamen.`
+    : 'Diese Ansicht rendert die gesamte Matrix erst bei Bedarf.';
+}
+
+function attachSpatialDetailListeners() {
+  if (matrixDetails) {
+    matrixDetails.addEventListener('toggle', () => {
+      if (!matrixDetails.open || !lastSpatialPayload) {
+        return;
+      }
+      if (spatialMatrix.dataset.fullRendered === 'true') {
+        return;
+      }
+      renderExactSpatialMatrix(lastSpatialPayload.values, lastSpatialPayload.min, lastSpatialPayload.max);
+      spatialMatrix.dataset.fullRendered = 'true';
+    });
+  }
+
+  if (spatialHeatmapCanvas) {
+    spatialHeatmapCanvas.addEventListener('click', (event) => {
+      if (!lastSpatialPayload) {
+        return;
+      }
+      const pickedCell = getSpatialCellFromCanvasEvent(lastSpatialPayload, event);
+      if (!pickedCell) {
+        return;
+      }
+      renderLocalSpatialInspector(lastSpatialPayload, pickedCell.row, pickedCell.col);
+    });
+  }
+}
+
 function updateSpatialOutput(data) {
   const values = data?.lpips_spatial_map?.values;
-  if (!Array.isArray(values) || values.length === 0 || !Array.isArray(values[0])) {
-    spatialSection.hidden = true;
-    spatialMeta.textContent = '--';
-    spatialMatrix.innerHTML = '';
-    const context = spatialHeatmapCanvas.getContext('2d');
-    if (context) {
-      context.setTransform(1, 0, 0, 1, 0, 0);
-      context.clearRect(0, 0, spatialHeatmapCanvas.width, spatialHeatmapCanvas.height);
-    }
+  const analysis = buildSpatialAnalysis(values, data?.lpips_spatial_map?.min, data?.lpips_spatial_map?.max);
+  if (!analysis) {
+    resetSpatialOutput();
     return;
   }
 
-  const minValue = Number(data.lpips_spatial_map?.min ?? Math.min(...values.flat()));
-  const maxValue = Number(data.lpips_spatial_map?.max ?? Math.max(...values.flat()));
-  const rows = Number(data.lpips_spatial_map?.rows ?? values.length);
-  const cols = Number(data.lpips_spatial_map?.cols ?? values[0].length);
+  lastSpatialPayload = analysis;
+  spatialMeta.textContent = `Matrix: ${analysis.rows}x${analysis.cols} | min=${formatSpatialValue(analysis.min)} | max=${formatSpatialValue(analysis.max)} | mean=${formatSpatialValue(analysis.mean)}`;
+  renderSpatialHeatmap(analysis.values, analysis.min, analysis.max);
+  renderSpatialSummary(analysis);
+  renderSpatialHotspots(analysis);
+  renderAggregatedSpatialGrid(analysis);
+  spatialLocalInspector.innerHTML = '<p class="spatial-meta">Klicke in die Heatmap, um eine lokale Matrix-Inspektion zu öffnen.</p>';
+  prepareExactMatrixPanel(analysis);
 
-  spatialMeta.textContent = `Matrix: ${rows}x${cols} | min=${formatSpatialValue(minValue)} | max=${formatSpatialValue(maxValue)}`;
-  renderSpatialMatrixTable(values, minValue, maxValue);
-  renderSpatialHeatmap(values, minValue, maxValue);
   if (heatmapDetails) {
-    heatmapDetails.open = false;
+    heatmapDetails.open = true;
+  }
+  if (aggregatedDetails) {
+    aggregatedDetails.open = false;
   }
   if (matrixDetails) {
     matrixDetails.open = false;
@@ -769,6 +1128,7 @@ genImage.addEventListener('change', () => showPreview(genImage, genPreview));
 runModel.addEventListener('click', runComparison);
 resetForm.addEventListener('click', resetInterface);
 overlayOpacity.addEventListener('input', handleOverlayOpacityChange);
+attachSpatialDetailListeners();
 
 [refPreview, genPreview, carRefPreview, carGenPreview].forEach((imgNode) => {
   updatePreviewState(imgNode, Boolean(imgNode.getAttribute('src')));

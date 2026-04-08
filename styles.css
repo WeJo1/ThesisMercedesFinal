@@ -588,6 +588,10 @@ button {
   width: 100%;
 }
 
+.spatial-panel-summary .spatial-card {
+  width: 100%;
+}
+
 .spatial-card {
   margin: 0;
   border: 1px solid rgba(170, 193, 220, 0.22);
@@ -607,10 +611,128 @@ button {
   color: #b5c8dd;
 }
 
+.spatial-panel-note {
+  margin: 0 0 0.6rem;
+  font-size: 0.76rem;
+  color: #b5c8dd;
+}
+
+.spatial-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 0.45rem;
+  margin-bottom: 0.7rem;
+}
+
+.spatial-stat-card {
+  margin: 0;
+  border: 1px solid rgba(170, 193, 220, 0.24);
+  border-radius: 0.45rem;
+  padding: 0.45rem 0.5rem;
+  background: rgba(10, 18, 29, 0.8);
+}
+
+.spatial-stat-label {
+  margin: 0;
+  font-size: 0.68rem;
+  color: #9fb8d3;
+}
+
+.spatial-stat-value {
+  margin: 0.2rem 0 0;
+  font-size: 0.85rem;
+  color: #e5f0fb;
+  font-weight: 600;
+}
+
+.spatial-hotspots h4,
+.spatial-local-inspector h4 {
+  margin: 0 0 0.45rem;
+  font-size: 0.82rem;
+}
+
+.spatial-hotspot-table-wrap {
+  width: 100%;
+  overflow: auto;
+}
+
+.spatial-hotspot-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.72rem;
+}
+
+.spatial-hotspot-table th,
+.spatial-hotspot-table td {
+  border: 1px solid rgba(170, 193, 220, 0.2);
+  padding: 0.28rem 0.38rem;
+  text-align: right;
+}
+
+.spatial-hotspot-table th {
+  background: rgba(23, 38, 58, 0.95);
+  color: #d9e9fa;
+}
+
+.spatial-hotspot-table td {
+  color: #ccdeef;
+}
+
+.spatial-badge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 0.08rem 0.42rem;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.spatial-badge-sehr-hoch {
+  background: rgba(255, 108, 108, 0.25);
+  color: #ffdddd;
+}
+
+.spatial-badge-hoch {
+  background: rgba(255, 193, 78, 0.24);
+  color: #ffe8bb;
+}
+
+.spatial-badge-moderat {
+  background: rgba(106, 172, 255, 0.24);
+  color: #dceefe;
+}
+
+.spatial-aggregated {
+  overflow: auto;
+}
+
+.spatial-aggregated-table {
+  border-collapse: collapse;
+  font-size: 0.65rem;
+}
+
+.spatial-aggregated-table td {
+  border: 1px solid rgba(170, 193, 220, 0.18);
+  min-width: 2.3rem;
+  text-align: center;
+  padding: 0.2rem 0.18rem;
+  color: #e9f3fc;
+}
+
 .spatial-matrix {
   overflow: auto;
   max-height: 26rem;
   width: 100%;
+}
+
+.spatial-matrix-notice {
+  margin: 0 0 0.55rem;
+  padding: 0.46rem 0.58rem;
+  border: 1px solid rgba(255, 177, 91, 0.48);
+  background: rgba(255, 177, 91, 0.12);
+  border-radius: 0.45rem;
+  color: #ffe2c2;
+  font-size: 0.74rem;
 }
 
 .spatial-table {
@@ -645,6 +767,28 @@ button {
   border: 1px solid rgba(170, 193, 220, 0.3);
   border-radius: 0.45rem;
   background: rgba(4, 7, 12, 0.92);
+}
+
+.spatial-local-inspector {
+  margin-top: 0.7rem;
+}
+
+.spatial-local-table {
+  border-collapse: collapse;
+  font-size: 0.66rem;
+}
+
+.spatial-local-table td {
+  border: 1px solid rgba(170, 193, 220, 0.18);
+  padding: 0.17rem 0.25rem;
+  text-align: right;
+  color: #dbeafb;
+}
+
+.spatial-local-table td.is-selected {
+  background: rgba(255, 201, 90, 0.28);
+  color: #fff1d2;
+  font-weight: 700;
 }
 
 .stats-grid {
