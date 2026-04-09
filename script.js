@@ -641,7 +641,7 @@ function buildSpatialAnalysis(values, overlayMaskPayload = null, maskMode = null
     overlayMask,
     outlineMask,
     maskMode: overlayMask ? (maskMode || 'overlay') : null,
-    outlineMode: outlineMask ? (outlineMode || 'outline') : null,
+    outlineMode: outlineMask && outlineMode === 'car_outline' ? 'car_outline' : null,
     rows,
     cols,
     min,
@@ -721,8 +721,8 @@ function normalizeHeatmapValue(value, lowerBound, upperBound) {
   return Math.min(1, heatmapUpperStretchPivot + stretchedTail * tailSpan);
 }
 
-function drawOverlayContour(context, outlineMask, rows, cols, drawWidth, drawHeight) {
-  if (!outlineMask) {
+function drawOverlayContour(context, outlineMask, outlineMode, rows, cols, drawWidth, drawHeight) {
+  if (!outlineMask || outlineMode !== 'car_outline') {
     return;
   }
 
@@ -797,7 +797,7 @@ function drawOverlayContour(context, outlineMask, rows, cols, drawWidth, drawHei
   context.restore();
 }
 
-function renderSpatialHeatmap(values, lowerBound, upperBound, overlayMask = null, outlineMask = null) {
+function renderSpatialHeatmap(values, lowerBound, upperBound, overlayMask = null, outlineMask = null, outlineMode = null) {
   const context = spatialHeatmapCanvas.getContext('2d');
   if (!context) {
     return;
@@ -816,6 +816,7 @@ function renderSpatialHeatmap(values, lowerBound, upperBound, overlayMask = null
     upperBound,
     hasOverlayMask: Boolean(overlayMask),
     hasOutlineMask: Boolean(outlineMask),
+    outlineMode,
   });
 
   values.forEach((row, rowIndex) => {
@@ -856,7 +857,7 @@ function renderSpatialHeatmap(values, lowerBound, upperBound, overlayMask = null
   context.clearRect(0, 0, drawWidth, drawHeight);
   context.imageSmoothingEnabled = false;
   context.drawImage(offscreen, 0, 0, drawWidth, drawHeight);
-  drawOverlayContour(context, outlineMask, rows, cols, drawWidth, drawHeight);
+  drawOverlayContour(context, outlineMask, outlineMode, rows, cols, drawWidth, drawHeight);
   logBrowser('Heatmap render complete: putImageData + upscale drawImage executed.', {
     drawWidth,
     drawHeight,
@@ -874,6 +875,7 @@ function rerenderSpatialHeatmapFromLastPayload(reason = 'unknown') {
     lastSpatialPayload.scaleUpperBound,
     lastSpatialPayload.overlayMask,
     lastSpatialPayload.outlineMask,
+    lastSpatialPayload.outlineMode,
   );
   return true;
 }
@@ -1195,9 +1197,9 @@ function updateSpatialOutput(data) {
   } else if (analysis.overlayMask) {
     focusLabel = 'Overlay-Fokus aktiv';
     focusInfo = ' | Overlay-Fokus aktiv: Bereiche außerhalb der Overlay-Maske werden nur visuell entsättigt';
-  } else if (analysis.outlineMask) {
-    focusLabel = 'Global + Objektumriss';
-    focusInfo = ' | Globale Heatmap mit zusätzlicher Objektkontur';
+  } else if (analysis.outlineMask && analysis.outlineMode === 'car_outline') {
+    focusLabel = 'Global + Fahrzeugkontur';
+    focusInfo = ' | Globale Heatmap mit zusätzlicher Fahrzeugkontur';
   }
   spatialMeta.textContent = `Matrix: ${analysis.rows}x${analysis.cols} | Bereich=${focusLabel} | Roh min=${formatSpatialValue(analysis.min)} | Roh max=${formatSpatialValue(analysis.max)} | Skala=q05–q99.5 (${formatSpatialValue(analysis.scaleLowerBound)}..${formatSpatialValue(analysis.scaleUpperBound)}) | Mean=${formatSpatialValue(analysis.mean)}${focusInfo}`;
   syncHeatmapPreviewSize({ rerenderOnResize: false, reason: 'update-spatial-output' });
