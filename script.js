@@ -50,9 +50,11 @@ const largeSpatialCellLimit = 12000;
 const spatialHotspotLimit = 10;
 const localInspectorRadius = 2;
 const heatmapScaleQuantileLow = 0.08;
-const heatmapScaleQuantileHigh = 0.97;
+const heatmapScaleQuantileHigh = 0.995;
 const heatmapHighlightGamma = 0.95;
 const heatmapDisplayBrightnessFloor = 0.18;
+const heatmapUpperStretchPivot = 0.85;
+const heatmapUpperStretchFactor = 1.45;
 
 const mercedesStarIconPath = 'icons/stern.svg';
 maskSource.value = 'union';
@@ -597,6 +599,9 @@ function buildSpatialAnalysis(values, overlayMaskPayload = null, maskMode = null
   const sortedScaleValues = [...valuesForScaling].sort((a, b) => a - b);
   const p05 = getPercentileValue(sortedScaleValues, 0.05);
   const p95 = getPercentileValue(sortedScaleValues, 0.95);
+  const q99 = getPercentileValue(sortedScaleValues, 0.99);
+  const q99_5 = getPercentileValue(sortedScaleValues, 0.995);
+  const q99_9 = getPercentileValue(sortedScaleValues, 0.999);
   const qLow = getPercentileValue(sortedScaleValues, heatmapScaleQuantileLow);
   const qHigh = getPercentileValue(sortedScaleValues, heatmapScaleQuantileHigh);
   const scaleMin = scalingStats.min;
@@ -607,6 +612,17 @@ function buildSpatialAnalysis(values, overlayMaskPayload = null, maskMode = null
   if (!Number.isFinite(scaleLowerBound) || !Number.isFinite(scaleUpperBound) || (scaleUpperBound - scaleLowerBound) < minimumSpread) {
     scaleLowerBound = scaleMin;
     scaleUpperBound = scaleMax;
+  }
+  const q99LikeUpperCandidates = [q99_5, q99, q99_9, scaleMax];
+  for (let index = 0; index < q99LikeUpperCandidates.length; index += 1) {
+    const candidate = q99LikeUpperCandidates[index];
+    if (!Number.isFinite(candidate)) {
+      continue;
+    }
+    if (candidate > scaleLowerBound && (candidate - scaleLowerBound) >= minimumSpread) {
+      scaleUpperBound = candidate;
+      break;
+    }
   }
   if (!Number.isFinite(scaleLowerBound) || !Number.isFinite(scaleUpperBound) || (scaleUpperBound - scaleLowerBound) < minimumSpread) {
     const center = Number.isFinite(scalingStats.mean) ? scalingStats.mean : 0;
@@ -634,6 +650,9 @@ function buildSpatialAnalysis(values, overlayMaskPayload = null, maskMode = null
     p99: stats.p99,
     scaleP05: p05,
     scaleP95: p95,
+    scaleQ99: q99,
+    scaleQ99_5: q99_5,
+    scaleQ99_9: q99_9,
     scaleQuantileLow: qLow,
     scaleQuantileHigh: qHigh,
     scaleMin,
@@ -661,7 +680,9 @@ function getHeatmapColor(normalized) {
     [0.36, 65, 182, 196],
     [0.54, 111, 222, 122],
     [0.72, 249, 221, 67],
-    [1, 255, 98, 76],
+    [0.88, 255, 98, 76],
+    [0.96, 242, 52, 176],
+    [1, 255, 248, 240],
   ];
 
   const clamped = Math.min(Math.max(normalized, 0), 1);
@@ -683,6 +704,20 @@ function getHeatmapColor(normalized) {
   return [r, g, b];
 }
 
+function normalizeHeatmapValue(value, lowerBound, upperBound) {
+  const range = Math.max(upperBound - lowerBound, 1e-8);
+  const linearNormalized = Number.isFinite(value)
+    ? Math.min(Math.max((value - lowerBound) / range, 0), 1)
+    : 0;
+  if (linearNormalized <= heatmapUpperStretchPivot) {
+    return linearNormalized;
+  }
+  const tailSpan = Math.max(1 - heatmapUpperStretchPivot, 1e-8);
+  const tailValue = (linearNormalized - heatmapUpperStretchPivot) / tailSpan;
+  const stretchedTail = Math.min(1, tailValue ** (1 / heatmapUpperStretchFactor));
+  return Math.min(1, heatmapUpperStretchPivot + stretchedTail * tailSpan);
+}
+
 function renderSpatialHeatmap(values, lowerBound, upperBound, overlayMask = null) {
   const context = spatialHeatmapCanvas.getContext('2d');
   if (!context) {
@@ -695,7 +730,6 @@ function renderSpatialHeatmap(values, lowerBound, upperBound, overlayMask = null
   const rows = values.length;
   const cols = values[0].length;
   const imageData = context.createImageData(cols, rows);
-  const range = Math.max(upperBound - lowerBound, 1e-8);
   logBrowser('Rendering heatmap.', {
     rows,
     cols,
@@ -708,27 +742,23 @@ function renderSpatialHeatmap(values, lowerBound, upperBound, overlayMask = null
     row.forEach((cellValue, colIndex) => {
       const numericValue = Number(cellValue);
       const isMaskedIn = !overlayMask || Boolean(overlayMask[rowIndex]?.[colIndex]);
-      const normalizedLinear = Number.isFinite(numericValue)
-        ? Math.min(Math.max((numericValue - lowerBound) / range, 0), 1)
-        : 0;
+      const idx = (rowIndex * cols + colIndex) * 4;
+      if (overlayMask && !isMaskedIn) {
+        imageData.data[idx] = 0;
+        imageData.data[idx + 1] = 0;
+        imageData.data[idx + 2] = 0;
+        imageData.data[idx + 3] = 0;
+        return;
+      }
+      const normalizedLinear = normalizeHeatmapValue(numericValue, lowerBound, upperBound);
       const normalizedGamma = normalizedLinear ** heatmapHighlightGamma;
       const normalizedDisplay = heatmapDisplayBrightnessFloor
         + (1 - heatmapDisplayBrightnessFloor) * normalizedGamma;
       const [r, g, b] = getHeatmapColor(normalizedDisplay);
-      const idx = (rowIndex * cols + colIndex) * 4;
       imageData.data[idx] = r;
       imageData.data[idx + 1] = g;
       imageData.data[idx + 2] = b;
-      let alpha = 255;
-      if (overlayMask && !isMaskedIn) {
-        const gray = Math.round((r + g + b) / 3);
-        const desaturateStrength = 0.2;
-        imageData.data[idx] = Math.round(r * (1 - desaturateStrength) + gray * desaturateStrength);
-        imageData.data[idx + 1] = Math.round(g * (1 - desaturateStrength) + gray * desaturateStrength);
-        imageData.data[idx + 2] = Math.round(b * (1 - desaturateStrength) + gray * desaturateStrength);
-        alpha = 188;
-      }
-      imageData.data[idx + 3] = alpha;
+      imageData.data[idx + 3] = 255;
     });
   });
 
@@ -769,7 +799,6 @@ function rerenderSpatialHeatmapFromLastPayload(reason = 'unknown') {
 function renderExactSpatialMatrix(analysis) {
   const rowCount = analysis.values.length;
   const colCount = analysis.values[0].length;
-  const range = Math.max(analysis.scaleUpperBound - analysis.scaleLowerBound, 1e-8);
   const highThreshold = 0.85;
   const veryHighThreshold = 0.95;
 
@@ -783,16 +812,17 @@ function renderExactSpatialMatrix(analysis) {
       const cellNode = document.createElement('td');
       const numericValue = Number(analysis.values[rowIndex][colIndex]);
       const isMaskedIn = !analysis.overlayMask || Boolean(analysis.overlayMask[rowIndex]?.[colIndex]);
-      cellNode.textContent = formatSpatialValue(numericValue);
       if (!isMaskedIn) {
+        cellNode.textContent = '--';
         cellNode.classList.add('spatial-cell-masked-out');
+        rowNode.append(cellNode);
+        continue;
       }
-      const normalized = Number.isFinite(numericValue)
-        ? Math.min(Math.max((numericValue - analysis.scaleLowerBound) / range, 0), 1) ** heatmapHighlightGamma
-        : 0;
-      if (isMaskedIn && normalized >= veryHighThreshold) {
+      cellNode.textContent = formatSpatialValue(numericValue);
+      const normalized = normalizeHeatmapValue(numericValue, analysis.scaleLowerBound, analysis.scaleUpperBound) ** heatmapHighlightGamma;
+      if (normalized >= veryHighThreshold) {
         cellNode.classList.add('spatial-cell-very-high');
-      } else if (isMaskedIn && normalized >= highThreshold) {
+      } else if (normalized >= highThreshold) {
         cellNode.classList.add('spatial-cell-high');
       }
       rowNode.append(cellNode);
@@ -905,6 +935,14 @@ function renderLocalSpatialInspector(analysis, centerRow, centerCol) {
   spatialLocalInspector.hidden = false;
 }
 
+function renderLocalSpatialInspectorNotice(message) {
+  if (!spatialLocalInspector) {
+    return;
+  }
+  spatialLocalInspector.innerHTML = `<h4>Lokale Inspektion</h4><p class="spatial-meta">${message}</p>`;
+  spatialLocalInspector.hidden = false;
+}
+
 function resetSpatialOutput() {
   if (!isSpatialDomReady()) {
     warnBrowser('Spatial-Ausgabe kann nicht zurückgesetzt werden: DOM-Container fehlen.');
@@ -988,6 +1026,12 @@ function attachSpatialDetailListeners() {
       if (!pickedCell) {
         return;
       }
+      const isMaskedIn = !lastSpatialPayload.overlayMask
+        || Boolean(lastSpatialPayload.overlayMask[pickedCell.row]?.[pickedCell.col]);
+      if (!isMaskedIn) {
+        renderLocalSpatialInspectorNotice('Außerhalb des Car-Fokus');
+        return;
+      }
       renderLocalSpatialInspector(lastSpatialPayload, pickedCell.row, pickedCell.col);
     });
   }
@@ -1044,7 +1088,10 @@ function updateSpatialOutput(data) {
   lastSpatialPayload = analysis;
   spatialSection.hidden = false;
   const focusLabel = analysis.overlayMask ? 'Car-Fokus aktiv' : 'Global';
-  spatialMeta.textContent = `Matrix: ${analysis.rows}x${analysis.cols} | Bereich=${focusLabel} | Roh min=${formatSpatialValue(analysis.min)} | Roh max=${formatSpatialValue(analysis.max)} | Skala=${formatSpatialValue(analysis.scaleLowerBound)}..${formatSpatialValue(analysis.scaleUpperBound)} | Mean=${formatSpatialValue(analysis.mean)}`;
+  const carFocusInfo = analysis.overlayMask && analysis.maskMode === 'car_focus'
+    ? ' | Car-Fokus aktiv: Bereiche außerhalb der Fahrzeugmaske werden in der Heatmap ausgeblendet'
+    : '';
+  spatialMeta.textContent = `Matrix: ${analysis.rows}x${analysis.cols} | Bereich=${focusLabel} | Roh min=${formatSpatialValue(analysis.min)} | Roh max=${formatSpatialValue(analysis.max)} | Skala=q05–q99.5 (${formatSpatialValue(analysis.scaleLowerBound)}..${formatSpatialValue(analysis.scaleUpperBound)}) | Mean=${formatSpatialValue(analysis.mean)}${carFocusInfo}`;
   syncHeatmapPreviewSize({ rerenderOnResize: false, reason: 'update-spatial-output' });
   rerenderSpatialHeatmapFromLastPayload('update-spatial-output');
   renderSpatialSummary(analysis);
