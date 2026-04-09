@@ -46,7 +46,7 @@
             <input id="enableHeatmap" type="checkbox" checked />
             <label for="enableHeatmap">LPIPS Spatial-Matrix erzeugen</label>
           </div>
-          <p class="preview-title">Haupt-LPIPS nutzt den offiziellen Forward auf gemeinsamer ROI (aus content_mask).</p>
+          <p class="preview-title">Haupt-LPIPS nutzt den offiziellen Forward auf dem vollständigen normalisierten Bildpaar.</p>
 
           <div class="toggle-row">
             <input id="carOnlyMode" type="checkbox" />
@@ -177,7 +177,7 @@
                 <p class="stat-label">LPIPS (Wert + %)</p>
                 <details class="metric-info">
                   <summary aria-label="LPIPS Erklärung anzeigen">ⓘ</summary>
-                  <p>Zeigt die perzeptuelle Abweichung via offiziellem LPIPS-Forward auf gemeinsamer ROI aus der content_mask.</p>
+                  <p>Zeigt die perzeptuelle Abweichung via offiziellem LPIPS-Forward auf dem vollständigen normalisierten Bildpaar.</p>
                 </details>
               </div>
               <p id="lpips" class="stat-value">--</p>
