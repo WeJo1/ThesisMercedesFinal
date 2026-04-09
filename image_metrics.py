@@ -321,6 +321,24 @@ def configure_determinism(seed=None, deterministic=False):
             torch.backends.cudnn.benchmark = False
 
 
+def run_lpips_pipeline_sanity_checks():
+    import ast
+
+    module_path = Path(__file__).resolve()
+    module_text = module_path.read_text(encoding="utf-8")
+    tree = ast.parse(module_text)
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id == "masked_lpips":
+                raise RuntimeError("Sanity-Check fehlgeschlagen: masked_lpips-Aufruf im Bewertungsfluss gefunden.")
+
+            if isinstance(node.func, ast.Attribute):
+                attr = node.func
+                if attr.attr == "forward" and isinstance(attr.value, ast.Attribute) and attr.value.attr == "net":
+                    raise RuntimeError("Sanity-Check fehlgeschlagen: Direkter net.forward-Aufruf im Bewertungsfluss gefunden.")
+
+
 def numpy_to_lpips_tensor(img):
     if torch is None:
         raise RuntimeError(f"'torch' ist nicht verfügbar: {TORCH_IMPORT_ERROR}")
@@ -361,6 +379,38 @@ def compute_lpips_with_map(ref, gen, lpips_model, use_gpu=False):
     if dist_map.ndim == 0:
         dist_map = np.array([[float(dist_map)]], dtype=np.float32)
     return dist_value, dist_map
+
+
+def compute_mask_roi_bbox(mask, fallback_shape):
+    metric_mask = np.asarray(mask, dtype=bool) if mask is not None else None
+    if metric_mask is None or not np.any(metric_mask):
+        h, w = fallback_shape
+        return 0, 0, w, h
+
+    ys, xs = np.where(metric_mask)
+    x0 = int(np.min(xs))
+    x1 = int(np.max(xs)) + 1
+    y0 = int(np.min(ys))
+    y1 = int(np.max(ys)) + 1
+    return x0, y0, x1, y1
+
+
+def crop_image_to_bbox(img, bbox):
+    x0, y0, x1, y1 = bbox
+    return img[y0:y1, x0:x1, :]
+
+
+def crop_mask_to_bbox(mask, bbox):
+    if mask is None:
+        return None
+    x0, y0, x1, y1 = bbox
+    return np.asarray(mask, dtype=bool)[y0:y1, x0:x1]
+
+
+def compute_lpips_on_roi(ref, gen, roi_bbox, lpips_model, use_gpu=False):
+    ref_roi = crop_image_to_bbox(ref, roi_bbox)
+    gen_roi = crop_image_to_bbox(gen, roi_bbox)
+    return compute_lpips(ref_roi, gen_roi, lpips_model, use_gpu=use_gpu)
 
 
 def resize_mask_to_spatial_map(mask, target_shape):
@@ -406,22 +456,6 @@ def save_lpips_spatial_map(dist_map, path, overlay_mask=None, mask_mode=None):
         payload["mask_mode"] = str(mask_mode) if mask_mode else "overlay"
 
     path.write_text(json.dumps(payload), encoding="utf-8")
-
-
-def compute_lpips_on_content(ref, gen, content_mask, lpips_model, use_gpu=False, mask_downsample="bilinear", eps=1e-8):
-    metric_mask = prepare_metric_mask(content_mask, ref, gen)
-    if metric_mask is None:
-        return compute_lpips(ref, gen, lpips_model, use_gpu=use_gpu)
-
-    return masked_lpips(
-        ref,
-        gen,
-        metric_mask,
-        lpips_model,
-        use_gpu=use_gpu,
-        mask_downsample=mask_downsample,
-        eps=eps,
-    )
 
 
 def build_vehicle_segmenter(use_gpu=False, score_threshold=0.5, mask_threshold=0.5):
@@ -573,51 +607,6 @@ def apply_masked_car_crop(img, mask, bbox):
     return masked_crop, mask_crop
 
 
-def downsample_mask_torch(mask_t, target_hw, mode="bilinear"):
-    if torch is None:
-        raise RuntimeError(f"'torch' ist nicht verfügbar: {TORCH_IMPORT_ERROR}")
-
-    align_corners = False if mode == "bilinear" else None
-    if mode == "nearest":
-        resized = torch.nn.functional.interpolate(mask_t, size=target_hw, mode=mode)
-    else:
-        resized = torch.nn.functional.interpolate(mask_t, size=target_hw, mode=mode, align_corners=align_corners)
-    return resized
-
-
-def masked_lpips(ref, gen, mask, lpips_model, use_gpu=False, mask_downsample="bilinear", eps=1e-8):
-    ref_t = numpy_to_lpips_tensor(ref)
-    gen_t = numpy_to_lpips_tensor(gen)
-    mask_t = torch.from_numpy(mask.astype(np.float32))[None, None, :, :]
-
-    if use_gpu and torch.cuda.is_available():
-        ref_t = ref_t.cuda()
-        gen_t = gen_t.cuda()
-        mask_t = mask_t.cuda()
-
-    if not hasattr(lpips_model, "net"):
-        raise RuntimeError("LPIPS-Modell unterstützt kein feature-basiertes masked LPIPS.")
-
-    with torch.no_grad():
-        feats0 = lpips_model.net.forward(ref_t)
-        feats1 = lpips_model.net.forward(gen_t)
-
-        weighted_layers = []
-        for i, (f0, f1) in enumerate(zip(feats0, feats1)):
-            diff = (lpips.normalize_tensor(f0) - lpips.normalize_tensor(f1)) ** 2
-            if hasattr(lpips_model, "lins") and len(lpips_model.lins) > i:
-                diff = lpips_model.lins[i].model(diff)
-            dist_map = torch.mean(diff, dim=1, keepdim=True)
-            mask_small = downsample_mask_torch(mask_t, dist_map.shape[-2:], mode=mask_downsample)
-            numerator = torch.sum(dist_map * mask_small)
-            denominator = torch.sum(mask_small) + eps
-            weighted_layers.append(numerator / denominator)
-
-        dist = torch.sum(torch.stack(weighted_layers))
-
-    return float(dist.item())
-
-
 def save_mask_image(mask, path):
     mask_img = (mask.astype(np.uint8) * 255)
     Image.fromarray(mask_img, mode="L").save(path)
@@ -745,24 +734,24 @@ def compute_car_only_metrics(
         lpips_car = compute_lpips(ref_car, gen_car, lpips_model, use_gpu=use_gpu)
         ssim_car = compute_ssim(ref_car, gen_car)
     elif car_mode == "weighted_lpips":
+        debug["fallback_reason"] = "car_mode=weighted_lpips ist deprecated und nutzt neutralize_crop."
+        ref_car, mask_crop = apply_neutralize_crop(ref_norm, mask, metric_bbox, neutral_value=neutral_value)
+        gen_car, _ = apply_neutralize_crop(gen_norm, mask, metric_bbox, neutral_value=neutral_value)
+        ref_preview, _ = apply_masked_car_crop(ref_norm, ref_preview_mask, ref_preview_bbox)
+        gen_preview, _ = apply_masked_car_crop(gen_norm, gen_preview_mask, gen_preview_bbox)
+        lpips_car = compute_lpips(ref_car, gen_car, lpips_model, use_gpu=use_gpu)
+        ssim_car = compute_ssim(ref_car, gen_car)
+    elif car_mode == "roi_crop":
         x0, y0, x1, y1 = metric_bbox
         ref_car = ref_norm[y0:y1, x0:x1, :]
         gen_car = gen_norm[y0:y1, x0:x1, :]
         mask_crop = mask[y0:y1, x0:x1]
         ref_preview, _ = apply_masked_car_crop(ref_norm, ref_preview_mask, ref_preview_bbox)
         gen_preview, _ = apply_masked_car_crop(gen_norm, gen_preview_mask, gen_preview_bbox)
-        lpips_car = masked_lpips(
-            ref_car,
-            gen_car,
-            mask_crop,
-            lpips_model,
-            use_gpu=use_gpu,
-            mask_downsample=mask_downsample,
-            eps=eps,
-        )
-        ssim_car = compute_masked_ssim(ref_car, gen_car, mask_crop, neutral_value=neutral_value)
+        lpips_car = compute_lpips(ref_car, gen_car, lpips_model, use_gpu=use_gpu)
+        ssim_car = compute_ssim(ref_car, gen_car)
     else:
-        raise ValueError("car_mode muss 'neutralize_crop' oder 'weighted_lpips' sein")
+        raise ValueError("car_mode muss 'neutralize_crop', 'roi_crop' oder 'weighted_lpips' sein")
 
     stem = Path(ref_path).stem
 
@@ -1003,22 +992,26 @@ def evaluate_pair(
     ref_norm_path, gen_norm_path = save_normalized_pair(ref_norm, gen_norm, basename, out_dir)
 
     valid_content_mask = prepare_metric_mask(content_mask, ref_norm, gen_norm)
+    content_roi_bbox = compute_mask_roi_bbox(valid_content_mask, fallback_shape=ref_norm.shape[:2])
+    content_roi_ref = crop_image_to_bbox(ref_norm, content_roi_bbox)
+    content_roi_gen = crop_image_to_bbox(gen_norm, content_roi_bbox)
     ssim_val = compute_masked_ssim(ref_norm, gen_norm, valid_content_mask, neutral_value=neutral_value)
-    lpips_val = compute_lpips_on_content(
-        ref_norm,
-        gen_norm,
-        valid_content_mask,
-        lpips_model,
-        use_gpu=use_gpu,
-        mask_downsample=mask_downsample,
-        eps=eps,
-    )
+    lpips_val = compute_lpips(content_roi_ref, content_roi_gen, lpips_model, use_gpu=use_gpu)
     delta_e_val = compute_masked_delta_e(ref_norm, gen_norm, valid_content_mask)
     percent_metrics = convert_metrics_to_percent(ssim_val, lpips_val, delta_e_val)
     lpips_spatial_path = None
-    lpips_map_mean = None
+    lpips_map_mean, lpips_map = compute_lpips_with_map(
+        content_roi_ref,
+        content_roi_gen,
+        lpips_model,
+        use_gpu=use_gpu,
+    )
+    if not np.isclose(lpips_val, lpips_map_mean, atol=1e-6, rtol=1e-5):
+        raise RuntimeError(
+            f"LPIPS-Inkonsistenz: lpips={lpips_val:.8f} vs lpips_map_mean={lpips_map_mean:.8f}. "
+            "Erwarte identische ROI und identischen offiziellen LPIPS-Forward."
+        )
     if lpips_heatmap_dir is not None:
-        lpips_map_mean, lpips_map = compute_lpips_with_map(ref_norm, gen_norm, lpips_model, use_gpu=use_gpu)
         heatmap_dir = Path(lpips_heatmap_dir)
         heatmap_dir.mkdir(parents=True, exist_ok=True)
         spatial_path = heatmap_dir / f"{basename}_lpips_spatial.json"
@@ -1027,14 +1020,13 @@ def evaluate_pair(
     foreground_mask = compute_foreground_mask_union(ref_norm, gen_norm)
     if valid_content_mask is not None:
         foreground_mask = foreground_mask & valid_content_mask
-    lpips_foreground = masked_lpips(
+    foreground_roi_bbox = compute_mask_roi_bbox(foreground_mask, fallback_shape=ref_norm.shape[:2])
+    lpips_foreground = compute_lpips_on_roi(
         ref_norm,
         gen_norm,
-        foreground_mask,
+        foreground_roi_bbox,
         lpips_model,
         use_gpu=use_gpu,
-        mask_downsample=mask_downsample,
-        eps=eps,
     )
     lpips_foreground_similarity_percent = convert_lpips_to_similarity_percent(lpips_foreground)
 
@@ -1070,10 +1062,11 @@ def evaluate_pair(
     car_focus_mask = car_masks.get("car_mask")
 
     if lpips_heatmap_dir is not None and lpips_spatial_path and lpips_map_mean is not None:
+        heatmap_overlay_mask = crop_mask_to_bbox(car_focus_mask, content_roi_bbox)
         save_lpips_spatial_map(
             lpips_map,
             Path(lpips_spatial_path),
-            overlay_mask=car_focus_mask,
+            overlay_mask=heatmap_overlay_mask,
             mask_mode="car_focus" if car_focus_mask is not None else None,
         )
 
@@ -1095,6 +1088,7 @@ def evaluate_pair(
     print(f"  Ref content area   : {normalization_debug['ref_content_area_px']} px")
     print(f"  Gen content area   : {normalization_debug['gen_content_area_px']} px")
     print(f"  Final content area : {normalization_debug['content_area_px']} px")
+    print(f"  Main LPIPS ROI     : {content_roi_bbox}")
     if valid_content_mask is not None:
         content_area_px = int(np.sum(valid_content_mask))
         content_area_ratio = float(content_area_px / valid_content_mask.size)
@@ -1301,19 +1295,24 @@ def parse_args():
     parser.add_argument("--deterministic", action="store_true", help="Aktiviere deterministische Backends (langsamer, aber reproduzierbarer)")
     parser.add_argument("--enable-car-only", action="store_true", help="Aktiviere Car-only Metriken (LPIPS/SSIM)")
     parser.add_argument("--car-only", action="store_true", help="Kurzform für --enable-car-only")
-    parser.add_argument("--car-mode", default="neutralize_crop", choices=["neutralize_crop", "weighted_lpips"], help="Auto-fokussierte LPIPS-Berechnung")
+    parser.add_argument(
+        "--car-mode",
+        default="neutralize_crop",
+        choices=["neutralize_crop", "roi_crop", "weighted_lpips"],
+        help="Auto-fokussierte Car-only-Berechnung (weighted_lpips ist deprecated und wird auf neutralize_crop umgebogen)",
+    )
     parser.add_argument("--mask-source", default="union", choices=["ref", "gen", "union"], help="Quelle für die Auto-Maske")
     parser.add_argument("--pad-px", type=int, default=20, help="Padding für Car-Crop-BBox")
     parser.add_argument("--neutral-value", type=float, default=0.5, help="Neutralwert für Hintergrundpixel [0..1]")
     parser.add_argument("--min-mask-area", type=int, default=0, help="Minimale Maskenfläche in Pixel")
-    parser.add_argument("--mask-downsample", default="bilinear", choices=["bilinear", "nearest"], help="Downsample-Modus der Maske für weighted LPIPS")
+    parser.add_argument("--mask-downsample", default="bilinear", choices=["bilinear", "nearest"], help="Deprecated: ohne produktive Wirkung")
     parser.add_argument("--mask-grow-px", type=int, default=10, help="Erweitere die Car-Maske lokal um X Pixel")
     parser.add_argument("--mask-min-object-area", type=int, default=500, help="Entferne sehr kleine Maskeninseln")
     parser.add_argument("--mask-max-hole-area", type=int, default=3000, help="Fülle kleine Löcher in der Car-Maske")
     parser.add_argument("--mask-trim-px", type=int, default=1, help="Schneide Maskenrand um X Pixel ein für sauberere Konturen")
     parser.add_argument("--roi-min-size-px", type=int, default=64, help="Minimale Kantenlänge der Car-ROI in Pixel")
     parser.add_argument("--roi-square", action="store_true", help="Erzwinge quadratische Car-ROI für stabilere Vergleiche")
-    parser.add_argument("--eps", type=float, default=1e-8, help="Epsilon für weighted LPIPS")
+    parser.add_argument("--eps", type=float, default=1e-8, help="Deprecated: ohne produktive Wirkung")
     parser.add_argument("--mask-score-threshold", type=float, default=0.5, help="Score-Schwelle für Vehicle-Segmentierung")
     parser.add_argument("--mask-threshold", type=float, default=0.5, help="Pixel-Schwelle der Segmentierungsmaske [0..1]")
     parser.add_argument("--debug-dir", default=None, help="Optionales Debug-Verzeichnis für Masken/Crops")
@@ -1376,6 +1375,8 @@ def main():
     print(f"[INFO] ROI square      : {args.roi_square}")
     print(f"[INFO] Car-only aktiv  : {args.enable_car_only}")
     print("============================================================")
+    run_lpips_pipeline_sanity_checks()
+    print("[INFO] Sanity-Check     : kein masked_lpips-Aufruf, kein direkter net.forward im Bewertungsfluss")
 
     lpips_model = init_lpips_model(net=args.lpips_net, use_gpu=args.use_gpu)
     verify_lpips_forward(lpips_model, net=args.lpips_net, use_gpu=args.use_gpu)
