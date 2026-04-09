@@ -131,9 +131,10 @@ python3 image_metrics.py --car-only
 Nutze diese Parameter je nach Bedarf:
 
 - `--mode letterbox` – normalisiere Bildgrößen (Default: `letterbox`)
-- Die Letterbox-Normalisierung erzeugt eine `content_mask` (gültige Bildfläche ohne gepaddete Ränder).
+- Die Letterbox-Normalisierung nutzt einen gemeinsamen symmetrischen Zielraum für beide Bilder und erzeugt eine symmetrische `content_mask`.
 - Hauptmetriken (`SSIM`, `LPIPS`, `ΔE CIEDE2000`) nutzen diese `content_mask` konsistent als Vergleichsfläche.
 - Gepaddete Letterbox-Ränder werden bei den Hauptmetriken ignoriert, damit der Vergleich methodisch stabil bleibt.
+- `--mask-source {ref|gen|union}` – Default ist `union` für Car-only.
 - `--lpips-net {alex|vgg|squeeze}` – wähle LPIPS-Backbone
 - LPIPS nutzt in diesem Tool immer das offizielle vortrainierte Inferenzmodell mit trainierten linearen Kalibrierungsschichten.
 - `lpips=True` aktiviert die trainierten linearen Kalibrierungsschichten.

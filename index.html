@@ -46,6 +46,7 @@
             <input id="enableHeatmap" type="checkbox" checked />
             <label for="enableHeatmap">LPIPS Spatial-Matrix erzeugen</label>
           </div>
+          <p class="preview-title">Hauptmetriken nutzen einen gemeinsamen symmetrischen Zielraum.</p>
 
           <div class="toggle-row">
             <input id="carOnlyMode" type="checkbox" />
@@ -66,9 +67,10 @@
               <select id="maskSource">
                 <option value="ref">ref</option>
                 <option value="gen">gen</option>
-                <option value="union">union</option>
+                <option value="union" selected>union</option>
               </select>
             </div>
+            <p class="field-hint">Standard: <code>union</code> für weniger Richtungsabhängigkeit im Fahrzeugmodus.</p>
           </details>
 
           <div class="actions">
