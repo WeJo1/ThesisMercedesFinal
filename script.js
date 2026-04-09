@@ -272,29 +272,69 @@ function getRenderedImageSize(imgNode) {
   return null;
 }
 
-function syncHeatmapPreviewSize() {
+function syncHeatmapPreviewSize(options = {}) {
+  const { rerenderOnResize = true, reason = 'unspecified' } = options;
   if (!spatialHeatmapCanvas || !spatialSection) {
-    return;
+    return false;
   }
 
   const targetPreview = getActiveHeatmapPreviewImage();
   const renderedSize = getRenderedImageSize(targetPreview);
   if (!renderedSize) {
+    logBrowser('Heatmap resize skipped: no rendered preview size available.');
     spatialSection.style.removeProperty('--spatial-target-width');
     spatialHeatmapCanvas.style.removeProperty('width');
     spatialHeatmapCanvas.style.removeProperty('height');
-    return;
+    return false;
   }
 
+  const previousCssWidth = Math.round(parseFloat(spatialHeatmapCanvas.style.width) || 0);
+  const previousCssHeight = Math.round(parseFloat(spatialHeatmapCanvas.style.height) || 0);
+  const previousPixelWidth = spatialHeatmapCanvas.width;
+  const previousPixelHeight = spatialHeatmapCanvas.height;
   const { width: referenceWidth, height: referenceHeight } = renderedSize;
+  const pixelRatio = window.devicePixelRatio || 1;
+  const nextPixelWidth = Math.max(1, Math.round(referenceWidth * pixelRatio));
+  const nextPixelHeight = Math.max(1, Math.round(referenceHeight * pixelRatio));
+
+  logBrowser(`Heatmap resize check (before) [${reason}].`, {
+    previousCssWidth,
+    previousCssHeight,
+    previousPixelWidth,
+    previousPixelHeight,
+    nextCssWidth: referenceWidth,
+    nextCssHeight: referenceHeight,
+    nextPixelWidth,
+    nextPixelHeight,
+  });
 
   spatialSection.style.setProperty('--spatial-target-width', `${referenceWidth}px`);
   spatialHeatmapCanvas.style.width = `${referenceWidth}px`;
   spatialHeatmapCanvas.style.height = `${referenceHeight}px`;
 
-  const pixelRatio = window.devicePixelRatio || 1;
-  spatialHeatmapCanvas.width = Math.max(1, Math.round(referenceWidth * pixelRatio));
-  spatialHeatmapCanvas.height = Math.max(1, Math.round(referenceHeight * pixelRatio));
+  const hasPixelResize = previousPixelWidth !== nextPixelWidth || previousPixelHeight !== nextPixelHeight;
+  if (!hasPixelResize) {
+    logBrowser(`Heatmap resize skipped: canvas pixel size unchanged [${reason}].`, {
+      cssWidth: referenceWidth,
+      cssHeight: referenceHeight,
+      pixelWidth: nextPixelWidth,
+      pixelHeight: nextPixelHeight,
+    });
+    return false;
+  }
+
+  spatialHeatmapCanvas.width = nextPixelWidth;
+  spatialHeatmapCanvas.height = nextPixelHeight;
+  logBrowser(`Heatmap canvas resized (after) [${reason}].`, {
+    cssWidth: referenceWidth,
+    cssHeight: referenceHeight,
+    pixelWidth: spatialHeatmapCanvas.width,
+    pixelHeight: spatialHeatmapCanvas.height,
+  });
+  if (rerenderOnResize) {
+    rerenderSpatialHeatmapFromLastPayload(`sync-resize:${reason}`);
+  }
+  return true;
 }
 
 function showPreview(input, imgTarget) {
@@ -318,12 +358,14 @@ function setPreviewImage(imgTarget, value) {
   if (!value) {
     imgTarget.removeAttribute('src');
     updatePreviewState(imgTarget, false);
-    syncHeatmapPreviewSize();
+    syncHeatmapPreviewSize({ rerenderOnResize: false, reason: 'set-preview-empty' });
+    rerenderSpatialHeatmapFromLastPayload('preview-cleared');
     return;
   }
   imgTarget.src = value;
   updatePreviewState(imgTarget, true);
-  syncHeatmapPreviewSize();
+  syncHeatmapPreviewSize({ rerenderOnResize: false, reason: 'set-preview-value' });
+  rerenderSpatialHeatmapFromLastPayload('preview-src-updated');
 }
 
 function updateCarOnlyPreview(data) {
@@ -539,6 +581,20 @@ function buildSpatialAnalysis(values, overlayMaskPayload = null, maskMode = null
   const sortedScaleValues = [...valuesForScaling].sort((a, b) => a - b);
   const p05 = getPercentileValue(sortedScaleValues, 0.05);
   const p95 = getPercentileValue(sortedScaleValues, 0.95);
+  const scaleMin = scalingStats.min;
+  const scaleMax = scalingStats.max;
+  const minimumSpread = 1e-4;
+  let scaleLowerBound = p05;
+  let scaleUpperBound = p95;
+  if (!Number.isFinite(scaleLowerBound) || !Number.isFinite(scaleUpperBound) || (scaleUpperBound - scaleLowerBound) < minimumSpread) {
+    scaleLowerBound = scaleMin;
+    scaleUpperBound = scaleMax;
+  }
+  if (!Number.isFinite(scaleLowerBound) || !Number.isFinite(scaleUpperBound) || (scaleUpperBound - scaleLowerBound) < minimumSpread) {
+    const center = Number.isFinite(scalingStats.mean) ? scalingStats.mean : 0;
+    scaleLowerBound = center - minimumSpread / 2;
+    scaleUpperBound = center + minimumSpread / 2;
+  }
   const hotspotEntries = computeHotspots(normalizedValues, spatialHotspotLimit, max);
   const aggregatedGrid = buildAggregatedSpatialGrid(normalizedValues, 12, 12, 'mean');
   const overlayMaskCoverage = overlayMask
@@ -560,6 +616,10 @@ function buildSpatialAnalysis(values, overlayMaskPayload = null, maskMode = null
     p99: stats.p99,
     scaleP05: p05,
     scaleP95: p95,
+    scaleMin,
+    scaleMax,
+    scaleLowerBound,
+    scaleUpperBound,
     range: stats.range,
     flatValues,
     hotspotEntries,
@@ -604,7 +664,6 @@ function getHeatmapColor(normalized) {
 }
 
 function renderSpatialHeatmap(values, lowerBound, upperBound, overlayMask = null) {
-  syncHeatmapPreviewSize();
   const context = spatialHeatmapCanvas.getContext('2d');
   if (!context) {
     return;
@@ -617,6 +676,13 @@ function renderSpatialHeatmap(values, lowerBound, upperBound, overlayMask = null
   const cols = values[0].length;
   const imageData = context.createImageData(cols, rows);
   const range = Math.max(upperBound - lowerBound, 1e-8);
+  logBrowser('Rendering heatmap.', {
+    rows,
+    cols,
+    lowerBound,
+    upperBound,
+    hasOverlayMask: Boolean(overlayMask),
+  });
 
   values.forEach((row, rowIndex) => {
     row.forEach((cellValue, colIndex) => {
@@ -633,11 +699,11 @@ function renderSpatialHeatmap(values, lowerBound, upperBound, overlayMask = null
       let alpha = 255;
       if (overlayMask && !isMaskedIn) {
         const gray = Math.round((r + g + b) / 3);
-        const desaturateStrength = 0.75;
+        const desaturateStrength = 0.45;
         imageData.data[idx] = Math.round(r * (1 - desaturateStrength) + gray * desaturateStrength);
         imageData.data[idx + 1] = Math.round(g * (1 - desaturateStrength) + gray * desaturateStrength);
         imageData.data[idx + 2] = Math.round(b * (1 - desaturateStrength) + gray * desaturateStrength);
-        alpha = 95;
+        alpha = 132;
       }
       imageData.data[idx + 3] = alpha;
     });
@@ -657,6 +723,24 @@ function renderSpatialHeatmap(values, lowerBound, upperBound, overlayMask = null
   context.clearRect(0, 0, drawWidth, drawHeight);
   context.imageSmoothingEnabled = false;
   context.drawImage(offscreen, 0, 0, drawWidth, drawHeight);
+  logBrowser('Heatmap render complete: putImageData + upscale drawImage executed.', {
+    drawWidth,
+    drawHeight,
+  });
+}
+
+function rerenderSpatialHeatmapFromLastPayload(reason = 'unknown') {
+  if (!lastSpatialPayload || !Array.isArray(lastSpatialPayload.values)) {
+    logBrowser(`Heatmap rerender skipped (${reason}): no spatial payload.`);
+    return false;
+  }
+  renderSpatialHeatmap(
+    lastSpatialPayload.values,
+    lastSpatialPayload.scaleLowerBound,
+    lastSpatialPayload.scaleUpperBound,
+    lastSpatialPayload.overlayMask,
+  );
+  return true;
 }
 
 function renderExactSpatialMatrix(values, minValue, maxValue) {
@@ -870,6 +954,16 @@ function attachSpatialDetailListeners() {
     });
   }
 
+  if (heatmapDetails) {
+    heatmapDetails.addEventListener('toggle', () => {
+      if (!heatmapDetails.open) {
+        return;
+      }
+      syncHeatmapPreviewSize({ rerenderOnResize: false, reason: 'heatmap-panel-toggle' });
+      rerenderSpatialHeatmapFromLastPayload('heatmap-panel-toggle');
+    });
+  }
+
   document.addEventListener('click', (event) => {
     if (!spatialLocalInspector || spatialLocalInspector.hidden) {
       return;
@@ -882,6 +976,16 @@ function attachSpatialDetailListeners() {
     spatialLocalInspector.innerHTML = '';
     spatialLocalInspector.hidden = true;
   });
+}
+
+function handlePreviewLoaded() {
+  syncHeatmapPreviewSize({ rerenderOnResize: false, reason: 'preview-load' });
+  rerenderSpatialHeatmapFromLastPayload('preview-image-loaded');
+}
+
+function handleWindowResize() {
+  syncHeatmapPreviewSize({ rerenderOnResize: false, reason: 'window-resize' });
+  rerenderSpatialHeatmapFromLastPayload('window-resize');
 }
 
 function updateSpatialOutput(data) {
@@ -900,8 +1004,10 @@ function updateSpatialOutput(data) {
   }
 
   lastSpatialPayload = analysis;
+  spatialSection.hidden = false;
   spatialMeta.textContent = `Matrix: ${analysis.rows}x${analysis.cols} | raw min=${formatSpatialValue(analysis.min)} | raw max=${formatSpatialValue(analysis.max)} | mean=${formatSpatialValue(analysis.mean)}`;
-  renderSpatialHeatmap(analysis.values, analysis.scaleP05, analysis.scaleP95, analysis.overlayMask);
+  syncHeatmapPreviewSize({ rerenderOnResize: false, reason: 'update-spatial-output' });
+  rerenderSpatialHeatmapFromLastPayload('update-spatial-output');
   renderSpatialSummary(analysis);
   renderSpatialHotspots(analysis);
   renderAggregatedSpatialGrid(analysis);
@@ -918,7 +1024,14 @@ function updateSpatialOutput(data) {
   if (matrixDetails) {
     matrixDetails.open = false;
   }
-  spatialSection.hidden = false;
+
+  requestAnimationFrame(() => {
+    if (!lastSpatialPayload) {
+      return;
+    }
+    syncHeatmapPreviewSize({ rerenderOnResize: false, reason: 'update-spatial-output-raf' });
+    rerenderSpatialHeatmapFromLastPayload('update-spatial-output-raf');
+  });
 }
 
 function renderMetrics(data) {
@@ -1265,12 +1378,12 @@ attachSpatialDetailListeners();
 
 [refPreview, genPreview, carRefPreview, carGenPreview].forEach((imgNode) => {
   updatePreviewState(imgNode, Boolean(imgNode.getAttribute('src')));
-  imgNode.addEventListener('load', syncHeatmapPreviewSize);
+  imgNode.addEventListener('load', handlePreviewLoaded);
 });
 
 stopCalculation();
 ensureMainBoardVisible();
 startBrandIntroAnimation();
 enforceMercedesStarSvg();
-syncHeatmapPreviewSize();
-window.addEventListener('resize', syncHeatmapPreviewSize);
+syncHeatmapPreviewSize({ reason: 'initial-boot' });
+window.addEventListener('resize', handleWindowResize);
