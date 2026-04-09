@@ -131,11 +131,11 @@ python3 image_metrics.py --car-only
 Nutze diese Parameter je nach Bedarf:
 
 - `--mode letterbox` – normalisiere Bildgrößen (Default: `letterbox`)
-- Die Letterbox-Normalisierung nutzt einen gemeinsamen symmetrischen Zielraum für beide Bilder und erzeugt eine symmetrische `content_mask`.
-- Hauptmetriken (`SSIM`, `LPIPS`, `ΔE CIEDE2000`) nutzen diese `content_mask` konsistent als Vergleichsfläche.
-- Für Haupt-`LPIPS` wird aus der `content_mask` eine gemeinsame ROI-Bounding-Box abgeleitet und der **offizielle** LPIPS-Forward nur auf diesem Crop ausgeführt.
-- `lpips_map_mean` und Heatmap nutzen exakt dieselbe ROI und denselben offiziellen LPIPS-Forward wie Haupt-`LPIPS`.
-- Gepaddete Letterbox-Ränder werden bei den Hauptmetriken ignoriert, damit der Vergleich methodisch stabil bleibt.
+- Die Letterbox-Normalisierung nutzt einen gemeinsamen symmetrischen Zielraum für beide Bilder.
+- `SSIM` und `ΔE CIEDE2000` werten weiterhin nur den gültigen Bildinhalt über `content_mask` aus.
+- Haupt-`LPIPS` nutzt den **offiziellen** LPIPS-Forward auf dem vollständigen normalisierten Bildpaar.
+- `lpips_map_mean` und Heatmap basieren ebenfalls auf dem vollständigen normalisierten Bildpaar.
+- Gepaddete Letterbox-Ränder bleiben damit bei `SSIM`/`ΔE` ausgeschlossen, während Haupt-`LPIPS` auf dem normalisierten Vollbildraum arbeitet.
 - `--mask-source {ref|gen|union}` – Default ist `union` für Car-only.
 - `--lpips-net {alex|vgg|squeeze}` – wähle LPIPS-Backbone
 - LPIPS nutzt in diesem Tool immer das offizielle vortrainierte Inferenzmodell mit trainierten linearen Kalibrierungsschichten.
@@ -176,7 +176,9 @@ Nutze diese Leitlinie:
 - `pretrained=True` lädt die vortrainierten Gewichte.
 - `spatial=True` erzeugt zusätzlich eine räumliche Distanzmatrix für Heatmap/Analyse.
 - Das Tool nutzt keinen produktiven `masked_lpips(...)`-Pfad und keinen direkten `lpips_model.net.forward(...)`-Zugriff im Bewertungsfluss.
-- Für `LPIPS`, Heatmap, `lpips_map_mean`, `lpips_foreground` und `LPIPS car-only` wird der offizielle Forward `lpips_model(ref_t, gen_t)` auf ROI-Crops verwendet.
+- Für Haupt-`LPIPS` sowie Heatmap/`lpips_map_mean` läuft der offizielle Forward `lpips_model(ref_t, gen_t)` auf dem vollständigen normalisierten Bildpaar.
+- `LPIPS car-only` bleibt ein separater ROI-basierter Zusatzpfad.
+- `lpips_foreground` bleibt ein separater Zusatzwert auf maskiertem Inhalt.
 - Dieses Tool trainiert keine LPIPS-Gewichte nach.
 - Wenn du echtes Training brauchst, implementiere einen separaten Trainings-Workflow mit Trainingsdaten, Zielsignal und Trainingsschleife.
 
