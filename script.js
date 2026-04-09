@@ -49,6 +49,9 @@ let lastSpatialPayload = null;
 const largeSpatialCellLimit = 12000;
 const spatialHotspotLimit = 10;
 const localInspectorRadius = 2;
+const heatmapScaleQuantileLow = 0.01;
+const heatmapScaleQuantileHigh = 0.995;
+const heatmapHighlightGamma = 1.7;
 
 const mercedesStarSvgPath = 'icons/stern.svg';
 maskSource.value = 'union';
@@ -442,7 +445,7 @@ function computeSpatialStats(flatValues) {
   };
 }
 
-function computeHotspots(values, maxCount = spatialHotspotLimit, globalMax = Number.NaN) {
+function computeHotspots(values, maxCount = spatialHotspotLimit, globalMax = Number.NaN, overlayMask = null) {
   if (!Array.isArray(values) || values.length === 0 || !Array.isArray(values[0])) {
     return [];
   }
@@ -452,6 +455,9 @@ function computeHotspots(values, maxCount = spatialHotspotLimit, globalMax = Num
     for (let colIndex = 0; colIndex < values[rowIndex].length; colIndex += 1) {
       const numericValue = Number(values[rowIndex][colIndex]);
       if (!Number.isFinite(numericValue)) {
+        continue;
+      }
+      if (overlayMask && !overlayMask[rowIndex]?.[colIndex]) {
         continue;
       }
       hotspots.push({ row: rowIndex, col: colIndex, value: numericValue });
@@ -481,7 +487,7 @@ function computeHotspots(values, maxCount = spatialHotspotLimit, globalMax = Num
   });
 }
 
-function buildAggregatedSpatialGrid(values, targetRows = 12, targetCols = 12, mode = 'mean') {
+function buildAggregatedSpatialGrid(values, targetRows = 12, targetCols = 12, mode = 'mean', overlayMask = null) {
   if (!Array.isArray(values) || values.length === 0 || !Array.isArray(values[0])) {
     return null;
   }
@@ -503,6 +509,10 @@ function buildAggregatedSpatialGrid(values, targetRows = 12, targetCols = 12, mo
 
       for (let rowIndex = rowStart; rowIndex < Math.max(rowEnd, rowStart + 1); rowIndex += 1) {
         for (let colIndex = colStart; colIndex < Math.max(colEnd, colStart + 1); colIndex += 1) {
+          const isMaskedIn = !overlayMask || Boolean(overlayMask[rowIndex]?.[colIndex]);
+          if (!isMaskedIn) {
+            continue;
+          }
           const numericValue = Number(values[rowIndex][colIndex]);
           if (!Number.isFinite(numericValue)) {
             continue;
@@ -513,7 +523,11 @@ function buildAggregatedSpatialGrid(values, targetRows = 12, targetCols = 12, mo
         }
       }
 
-      aggregatedValues[aggRow][aggCol] = mode === 'max' ? max : sum / Math.max(count, 1);
+      if (count === 0) {
+        aggregatedValues[aggRow][aggCol] = Number.NaN;
+        continue;
+      }
+      aggregatedValues[aggRow][aggCol] = mode === 'max' ? max : sum / count;
     }
   }
 
@@ -582,11 +596,13 @@ function buildSpatialAnalysis(values, overlayMaskPayload = null, maskMode = null
   const sortedScaleValues = [...valuesForScaling].sort((a, b) => a - b);
   const p05 = getPercentileValue(sortedScaleValues, 0.05);
   const p95 = getPercentileValue(sortedScaleValues, 0.95);
+  const qLow = getPercentileValue(sortedScaleValues, heatmapScaleQuantileLow);
+  const qHigh = getPercentileValue(sortedScaleValues, heatmapScaleQuantileHigh);
   const scaleMin = scalingStats.min;
   const scaleMax = scalingStats.max;
   const minimumSpread = 1e-4;
-  let scaleLowerBound = p05;
-  let scaleUpperBound = p95;
+  let scaleLowerBound = qLow;
+  let scaleUpperBound = qHigh;
   if (!Number.isFinite(scaleLowerBound) || !Number.isFinite(scaleUpperBound) || (scaleUpperBound - scaleLowerBound) < minimumSpread) {
     scaleLowerBound = scaleMin;
     scaleUpperBound = scaleMax;
@@ -596,8 +612,8 @@ function buildSpatialAnalysis(values, overlayMaskPayload = null, maskMode = null
     scaleLowerBound = center - minimumSpread / 2;
     scaleUpperBound = center + minimumSpread / 2;
   }
-  const hotspotEntries = computeHotspots(normalizedValues, spatialHotspotLimit, max);
-  const aggregatedGrid = buildAggregatedSpatialGrid(normalizedValues, 12, 12, 'mean');
+  const hotspotEntries = computeHotspots(normalizedValues, spatialHotspotLimit, max, overlayMask);
+  const aggregatedGrid = buildAggregatedSpatialGrid(normalizedValues, 12, 12, 'mean', overlayMask);
   const overlayMaskCoverage = overlayMask
     ? (maskedValues.length / Math.max(rows * cols, 1)) * 100
     : null;
@@ -617,6 +633,8 @@ function buildSpatialAnalysis(values, overlayMaskPayload = null, maskMode = null
     p99: stats.p99,
     scaleP05: p05,
     scaleP95: p95,
+    scaleQuantileLow: qLow,
+    scaleQuantileHigh: qHigh,
     scaleMin,
     scaleMax,
     scaleLowerBound,
@@ -689,9 +707,10 @@ function renderSpatialHeatmap(values, lowerBound, upperBound, overlayMask = null
     row.forEach((cellValue, colIndex) => {
       const numericValue = Number(cellValue);
       const isMaskedIn = !overlayMask || Boolean(overlayMask[rowIndex]?.[colIndex]);
-      const normalized = Number.isFinite(numericValue)
+      const normalizedLinear = Number.isFinite(numericValue)
         ? Math.min(Math.max((numericValue - lowerBound) / range, 0), 1)
         : 0;
+      const normalized = normalizedLinear ** heatmapHighlightGamma;
       const [r, g, b] = getHeatmapColor(normalized);
       const idx = (rowIndex * cols + colIndex) * 4;
       imageData.data[idx] = r;
@@ -744,12 +763,12 @@ function rerenderSpatialHeatmapFromLastPayload(reason = 'unknown') {
   return true;
 }
 
-function renderExactSpatialMatrix(values, minValue, maxValue) {
-  const rowCount = values.length;
-  const colCount = values[0].length;
-  const range = Math.max(maxValue - minValue, 1e-8);
-  const highThreshold = minValue + range * 0.75;
-  const veryHighThreshold = minValue + range * 0.9;
+function renderExactSpatialMatrix(analysis) {
+  const rowCount = analysis.values.length;
+  const colCount = analysis.values[0].length;
+  const range = Math.max(analysis.scaleUpperBound - analysis.scaleLowerBound, 1e-8);
+  const highThreshold = 0.85;
+  const veryHighThreshold = 0.95;
 
   const tableNode = document.createElement('table');
   tableNode.className = 'spatial-table';
@@ -759,11 +778,18 @@ function renderExactSpatialMatrix(values, minValue, maxValue) {
     const rowNode = document.createElement('tr');
     for (let colIndex = 0; colIndex < colCount; colIndex += 1) {
       const cellNode = document.createElement('td');
-      const numericValue = Number(values[rowIndex][colIndex]);
+      const numericValue = Number(analysis.values[rowIndex][colIndex]);
+      const isMaskedIn = !analysis.overlayMask || Boolean(analysis.overlayMask[rowIndex]?.[colIndex]);
       cellNode.textContent = formatSpatialValue(numericValue);
-      if (numericValue >= veryHighThreshold) {
+      if (!isMaskedIn) {
+        cellNode.classList.add('spatial-cell-masked-out');
+      }
+      const normalized = Number.isFinite(numericValue)
+        ? Math.min(Math.max((numericValue - analysis.scaleLowerBound) / range, 0), 1) ** heatmapHighlightGamma
+        : 0;
+      if (isMaskedIn && normalized >= veryHighThreshold) {
         cellNode.classList.add('spatial-cell-very-high');
-      } else if (numericValue >= highThreshold) {
+      } else if (isMaskedIn && normalized >= highThreshold) {
         cellNode.classList.add('spatial-cell-high');
       }
       rowNode.append(cellNode);
@@ -822,14 +848,22 @@ function renderAggregatedSpatialGrid(analysis) {
     return;
   }
   const grid = analysis.aggregatedGrid;
-  const minValue = Math.min(...grid.values.flat());
-  const maxValue = Math.max(...grid.values.flat());
+  const finiteValues = grid.values.flat().filter((value) => Number.isFinite(Number(value)));
+  if (finiteValues.length === 0) {
+    spatialAggregated.innerHTML = `<p class="spatial-meta">Blöcke: ${grid.rows}×${grid.cols} (${grid.mode})</p><p class="spatial-meta">Keine gültigen Werte für die kompakte Ansicht verfügbar.</p>`;
+    return;
+  }
+  const minValue = Math.min(...finiteValues);
+  const maxValue = Math.max(...finiteValues);
   const range = Math.max(maxValue - minValue, 1e-8);
 
   const tableRows = grid.values
     .map((row) => {
       const cells = row
         .map((value) => {
+          if (!Number.isFinite(Number(value))) {
+            return '<td class="spatial-cell-masked-out">--</td>';
+          }
           const normalized = Math.min(Math.max((value - minValue) / range, 0), 1);
           const alpha = 0.18 + normalized * 0.72;
           const color = `rgba(${Math.round(255 * normalized)}, ${Math.round(185 - normalized * 85)}, ${Math.round(255 * (1 - normalized))}, ${alpha})`;
@@ -937,7 +971,7 @@ function attachSpatialDetailListeners() {
       if (spatialMatrix.dataset.fullRendered === 'true') {
         return;
       }
-      renderExactSpatialMatrix(lastSpatialPayload.values, lastSpatialPayload.min, lastSpatialPayload.max);
+      renderExactSpatialMatrix(lastSpatialPayload);
       spatialMatrix.dataset.fullRendered = 'true';
     });
   }
@@ -1006,7 +1040,8 @@ function updateSpatialOutput(data) {
 
   lastSpatialPayload = analysis;
   spatialSection.hidden = false;
-  spatialMeta.textContent = `Matrix: ${analysis.rows}x${analysis.cols} | raw min=${formatSpatialValue(analysis.min)} | raw max=${formatSpatialValue(analysis.max)} | mean=${formatSpatialValue(analysis.mean)}`;
+  const focusLabel = analysis.overlayMask ? 'Car-Fokus aktiv' : 'Global';
+  spatialMeta.textContent = `Matrix: ${analysis.rows}x${analysis.cols} | Bereich=${focusLabel} | Roh min=${formatSpatialValue(analysis.min)} | Roh max=${formatSpatialValue(analysis.max)} | Skala=${formatSpatialValue(analysis.scaleLowerBound)}..${formatSpatialValue(analysis.scaleUpperBound)} | Mean=${formatSpatialValue(analysis.mean)}`;
   syncHeatmapPreviewSize({ rerenderOnResize: false, reason: 'update-spatial-output' });
   rerenderSpatialHeatmapFromLastPayload('update-spatial-output');
   renderSpatialSummary(analysis);
