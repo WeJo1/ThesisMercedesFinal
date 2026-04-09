@@ -51,6 +51,7 @@ const spatialHotspotLimit = 10;
 const localInspectorRadius = 2;
 
 const mercedesStarSvgPath = 'icons/stern.svg';
+maskSource.value = 'union';
 
 function logBrowser(message, details = null) {
   if (details === null) {
@@ -1331,7 +1332,7 @@ function resetInterface() {
   enableHeatmap.checked = true;
   carOnlyMode.checked = false;
   carMode.value = 'neutralize_crop';
-  maskSource.value = 'ref';
+  maskSource.value = 'union';
 
   refPreview.removeAttribute('src');
   genPreview.removeAttribute('src');
