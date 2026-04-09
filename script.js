@@ -900,11 +900,7 @@ function updateSpatialOutput(data) {
   }
 
   lastSpatialPayload = analysis;
-  const maskActive = Boolean(analysis.overlayMask);
-  const maskCoverage = maskActive && Number.isFinite(analysis.overlayMaskCoverage)
-    ? `${analysis.overlayMaskCoverage.toFixed(2)}%`
-    : '--';
-  spatialMeta.textContent = `Matrix: ${analysis.rows}x${analysis.cols} | raw min=${formatSpatialValue(analysis.min)} | raw max=${formatSpatialValue(analysis.max)} | mean=${formatSpatialValue(analysis.mean)} | p05=${formatSpatialValue(analysis.scaleP05)} | p95=${formatSpatialValue(analysis.scaleP95)} | overlay_mask=${maskActive ? `aktiv (${analysis.maskMode || 'overlay'})` : 'inaktiv'} | mask_area=${maskCoverage}`;
+  spatialMeta.textContent = `Matrix: ${analysis.rows}x${analysis.cols} | raw min=${formatSpatialValue(analysis.min)} | raw max=${formatSpatialValue(analysis.max)} | mean=${formatSpatialValue(analysis.mean)}`;
   renderSpatialHeatmap(analysis.values, analysis.scaleP05, analysis.scaleP95, analysis.overlayMask);
   renderSpatialSummary(analysis);
   renderSpatialHotspots(analysis);
