@@ -266,7 +266,7 @@ def prepare_metric_mask(mask, ref, gen):
     return metric_mask
 
 
-def init_lpips_model(net="alex", use_gpu=False):
+def init_lpips_model(net="alex", use_gpu=False, spatial=False):
     if lpips is None:
         raise RuntimeError("Paket 'lpips' nicht gefunden. Installiere die Abhängigkeiten aus requirements.txt.")
 
@@ -276,16 +276,17 @@ def init_lpips_model(net="alex", use_gpu=False):
     # Nutze immer den offiziellen LPIPS-Inferenzpfad (lin):
     # - lpips=True aktiviert die trainierten linearen Kalibrierungsschichten.
     # - pretrained=True lädt die vortrainierten Gewichte.
+    # - spatial=False berechnet den offiziellen LPIPS-Skalarscore.
     # - spatial=True liefert zusätzlich eine räumliche Distanzkarte (Heatmap).
     # Dieses Tool trainiert keine LPIPS-Gewichte nach.
-    model = lpips.LPIPS(net=net, spatial=True, lpips=True, pretrained=True)
+    model = lpips.LPIPS(net=net, spatial=spatial, lpips=True, pretrained=True)
     if use_gpu and torch.cuda.is_available():
         model = model.cuda()
     model.eval()
     return model
 
 
-def verify_lpips_forward(lpips_model, net="alex", use_gpu=False):
+def verify_lpips_forward(lpips_model, net="alex", use_gpu=False, expect_spatial=False):
     if torch is None:
         raise RuntimeError(f"'torch' ist nicht verfügbar: {TORCH_IMPORT_ERROR}")
 
@@ -303,6 +304,14 @@ def verify_lpips_forward(lpips_model, net="alex", use_gpu=False):
 
     if out.ndim < 2:
         raise RuntimeError(f"LPIPS-Forward für net='{net}' liefert unerwartete Form: {tuple(out.shape)}")
+    if expect_spatial and out.ndim != 4:
+        raise RuntimeError(
+            f"LPIPS-Forward für net='{net}' sollte für spatial=True eine 4D-Map liefern, erhielt {tuple(out.shape)}"
+        )
+    if not expect_spatial and tuple(out.shape) != (1, 1, 1, 1):
+        raise RuntimeError(
+            f"LPIPS-Forward für net='{net}' sollte für spatial=False die Form (1,1,1,1) liefern, erhielt {tuple(out.shape)}"
+        )
 
 
 def configure_determinism(seed=None, deterministic=False):
@@ -363,7 +372,7 @@ def compute_lpips(ref, gen, lpips_model, use_gpu=False):
     return float(torch.mean(dist).item())
 
 
-def compute_lpips_with_map(ref, gen, lpips_model, use_gpu=False):
+def compute_lpips_with_map(ref, gen, lpips_spatial_model, use_gpu=False):
     ref_t = numpy_to_lpips_tensor(ref)
     gen_t = numpy_to_lpips_tensor(gen)
 
@@ -372,7 +381,7 @@ def compute_lpips_with_map(ref, gen, lpips_model, use_gpu=False):
         gen_t = gen_t.cuda()
 
     with torch.no_grad():
-        dist = lpips_model(ref_t, gen_t)
+        dist = lpips_spatial_model(ref_t, gen_t)
 
     dist_value = float(torch.mean(dist).item())
     dist_map = dist.detach().float().cpu().numpy().squeeze()
@@ -953,6 +962,7 @@ def evaluate_pair(
     ref_path,
     gen_path,
     lpips_model,
+    lpips_spatial_model=None,
     mode="letterbox",
     out_dir="normalized",
     use_gpu=False,
@@ -1000,16 +1010,14 @@ def evaluate_pair(
     delta_e_val = compute_masked_delta_e(ref_norm, gen_norm, valid_content_mask)
     percent_metrics = convert_metrics_to_percent(ssim_val, lpips_val, delta_e_val)
     lpips_spatial_path = None
-    lpips_map_mean, lpips_map = compute_lpips_with_map(
-        content_roi_ref,
-        content_roi_gen,
-        lpips_model,
-        use_gpu=use_gpu,
-    )
-    if not np.isclose(lpips_val, lpips_map_mean, atol=1e-6, rtol=1e-5):
-        raise RuntimeError(
-            f"LPIPS-Inkonsistenz: lpips={lpips_val:.8f} vs lpips_map_mean={lpips_map_mean:.8f}. "
-            "Erwarte identische ROI und identischen offiziellen LPIPS-Forward."
+    lpips_map_mean = None
+    lpips_map = None
+    if lpips_spatial_model is not None:
+        lpips_map_mean, lpips_map = compute_lpips_with_map(
+            content_roi_ref,
+            content_roi_gen,
+            lpips_spatial_model,
+            use_gpu=use_gpu,
         )
     if lpips_heatmap_dir is not None:
         heatmap_dir = Path(lpips_heatmap_dir)
@@ -1061,7 +1069,7 @@ def evaluate_pair(
     gen_car_mask = car_masks.get("gen_mask")
     car_focus_mask = car_masks.get("car_mask")
 
-    if lpips_heatmap_dir is not None and lpips_spatial_path and lpips_map_mean is not None:
+    if lpips_heatmap_dir is not None and lpips_spatial_path and lpips_map_mean is not None and lpips_map is not None:
         heatmap_overlay_mask = crop_mask_to_bbox(car_focus_mask, content_roi_bbox)
         save_lpips_spatial_map(
             lpips_map,
@@ -1171,6 +1179,7 @@ def evaluate_folders(
     generated_dir,
     output_csv,
     lpips_model,
+    lpips_spatial_model=None,
     mode="letterbox",
     out_dir="normalized",
     use_gpu=False,
@@ -1221,6 +1230,7 @@ def evaluate_folders(
             ref_path=str(ref_path),
             gen_path=str(gen_path),
             lpips_model=lpips_model,
+            lpips_spatial_model=lpips_spatial_model,
             mode=mode,
             out_dir=out_dir,
             use_gpu=use_gpu,
@@ -1378,8 +1388,10 @@ def main():
     run_lpips_pipeline_sanity_checks()
     print("[INFO] Sanity-Check     : kein masked_lpips-Aufruf, kein direkter net.forward im Bewertungsfluss")
 
-    lpips_model = init_lpips_model(net=args.lpips_net, use_gpu=args.use_gpu)
-    verify_lpips_forward(lpips_model, net=args.lpips_net, use_gpu=args.use_gpu)
+    lpips_model = init_lpips_model(net=args.lpips_net, use_gpu=args.use_gpu, spatial=False)
+    verify_lpips_forward(lpips_model, net=args.lpips_net, use_gpu=args.use_gpu, expect_spatial=False)
+    lpips_spatial_model = init_lpips_model(net=args.lpips_net, use_gpu=args.use_gpu, spatial=True)
+    verify_lpips_forward(lpips_spatial_model, net=args.lpips_net, use_gpu=args.use_gpu, expect_spatial=True)
     segmenter = None
     if args.enable_car_only:
         print("[INFO] Car-only wird aktiviert. Einfacher Aufruf: python image_metrics.py --car-only")
@@ -1401,6 +1413,7 @@ def main():
             ref_path=args.ref,
             gen_path=args.gen,
             lpips_model=lpips_model,
+            lpips_spatial_model=lpips_spatial_model,
             mode=args.mode,
             out_dir=args.out,
             use_gpu=args.use_gpu,
@@ -1432,6 +1445,7 @@ def main():
         generated_dir=args.generated_dir,
         output_csv=args.output_csv,
         lpips_model=lpips_model,
+        lpips_spatial_model=lpips_spatial_model,
         mode=args.mode,
         out_dir=args.out,
         use_gpu=args.use_gpu,
