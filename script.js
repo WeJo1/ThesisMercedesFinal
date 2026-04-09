@@ -49,11 +49,12 @@ let lastSpatialPayload = null;
 const largeSpatialCellLimit = 12000;
 const spatialHotspotLimit = 10;
 const localInspectorRadius = 2;
-const heatmapScaleQuantileLow = 0.01;
-const heatmapScaleQuantileHigh = 0.995;
-const heatmapHighlightGamma = 1.7;
+const heatmapScaleQuantileLow = 0.08;
+const heatmapScaleQuantileHigh = 0.97;
+const heatmapHighlightGamma = 0.95;
+const heatmapDisplayBrightnessFloor = 0.18;
 
-const mercedesStarSvgPath = 'icons/stern.svg';
+const mercedesStarIconPath = 'icons/stern.svg';
 maskSource.value = 'union';
 
 function logBrowser(message, details = null) {
@@ -144,7 +145,7 @@ function setHeaderLoadingState(isLoading) {
 }
 
 function enforceMercedesStarSvg() {
-  document.documentElement.style.setProperty('--mercedes-star', `url("${mercedesStarSvgPath}")`);
+  document.documentElement.style.setProperty('--mercedes-star', `url("${mercedesStarIconPath}")`);
 }
 
 
@@ -710,8 +711,10 @@ function renderSpatialHeatmap(values, lowerBound, upperBound, overlayMask = null
       const normalizedLinear = Number.isFinite(numericValue)
         ? Math.min(Math.max((numericValue - lowerBound) / range, 0), 1)
         : 0;
-      const normalized = normalizedLinear ** heatmapHighlightGamma;
-      const [r, g, b] = getHeatmapColor(normalized);
+      const normalizedGamma = normalizedLinear ** heatmapHighlightGamma;
+      const normalizedDisplay = heatmapDisplayBrightnessFloor
+        + (1 - heatmapDisplayBrightnessFloor) * normalizedGamma;
+      const [r, g, b] = getHeatmapColor(normalizedDisplay);
       const idx = (rowIndex * cols + colIndex) * 4;
       imageData.data[idx] = r;
       imageData.data[idx + 1] = g;
@@ -719,11 +722,11 @@ function renderSpatialHeatmap(values, lowerBound, upperBound, overlayMask = null
       let alpha = 255;
       if (overlayMask && !isMaskedIn) {
         const gray = Math.round((r + g + b) / 3);
-        const desaturateStrength = 0.45;
+        const desaturateStrength = 0.2;
         imageData.data[idx] = Math.round(r * (1 - desaturateStrength) + gray * desaturateStrength);
         imageData.data[idx + 1] = Math.round(g * (1 - desaturateStrength) + gray * desaturateStrength);
         imageData.data[idx + 2] = Math.round(b * (1 - desaturateStrength) + gray * desaturateStrength);
-        alpha = 132;
+        alpha = 188;
       }
       imageData.data[idx + 3] = alpha;
     });
