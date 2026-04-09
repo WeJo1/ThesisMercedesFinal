@@ -390,6 +390,19 @@ def compute_lpips_with_map(ref, gen, lpips_spatial_model, use_gpu=False):
     return dist_value, dist_map
 
 
+def masked_lpips(*args, **kwargs):  # noqa: ARG001
+    raise RuntimeError("masked_lpips ist deaktiviert: nur offizieller LPIPS-Forward erlaubt.")
+
+
+def compute_lpips_on_content(ref, gen, lpips_model, mask=None, use_gpu=False):
+    metric_mask = prepare_metric_mask(mask, ref, gen)
+    if metric_mask is None:
+        return compute_lpips(ref, gen, lpips_model, use_gpu=use_gpu)
+
+    roi_bbox = compute_mask_roi_bbox(metric_mask, fallback_shape=ref.shape[:2])
+    return compute_lpips_on_roi(ref, gen, roi_bbox, lpips_model, use_gpu=use_gpu)
+
+
 def compute_mask_roi_bbox(mask, fallback_shape):
     metric_mask = np.asarray(mask, dtype=bool) if mask is not None else None
     if metric_mask is None or not np.any(metric_mask):
@@ -1006,7 +1019,13 @@ def evaluate_pair(
     content_roi_ref = crop_image_to_bbox(ref_norm, content_roi_bbox)
     content_roi_gen = crop_image_to_bbox(gen_norm, content_roi_bbox)
     ssim_val = compute_masked_ssim(ref_norm, gen_norm, valid_content_mask, neutral_value=neutral_value)
-    lpips_val = compute_lpips(content_roi_ref, content_roi_gen, lpips_model, use_gpu=use_gpu)
+    lpips_val = compute_lpips_on_content(
+        ref_norm,
+        gen_norm,
+        lpips_model,
+        mask=valid_content_mask,
+        use_gpu=use_gpu,
+    )
     delta_e_val = compute_masked_delta_e(ref_norm, gen_norm, valid_content_mask)
     percent_metrics = convert_metrics_to_percent(ssim_val, lpips_val, delta_e_val)
     lpips_spatial_path = None
@@ -1029,11 +1048,11 @@ def evaluate_pair(
     if valid_content_mask is not None:
         foreground_mask = foreground_mask & valid_content_mask
     foreground_roi_bbox = compute_mask_roi_bbox(foreground_mask, fallback_shape=ref_norm.shape[:2])
-    lpips_foreground = compute_lpips_on_roi(
+    lpips_foreground = compute_lpips_on_content(
         ref_norm,
         gen_norm,
-        foreground_roi_bbox,
         lpips_model,
+        mask=foreground_mask,
         use_gpu=use_gpu,
     )
     lpips_foreground_similarity_percent = convert_lpips_to_similarity_percent(lpips_foreground)
