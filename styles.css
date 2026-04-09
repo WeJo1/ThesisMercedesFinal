@@ -798,7 +798,7 @@ button {
   image-rendering: pixelated;
   border: 1px solid rgba(170, 193, 220, 0.3);
   border-radius: 0.45rem;
-  background: rgba(4, 7, 12, 0.92);
+  background: rgba(9, 16, 27, 0.72);
 }
 
 .spatial-local-inspector {
