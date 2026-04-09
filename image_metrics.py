@@ -1015,17 +1015,8 @@ def evaluate_pair(
     ref_norm_path, gen_norm_path = save_normalized_pair(ref_norm, gen_norm, basename, out_dir)
 
     valid_content_mask = prepare_metric_mask(content_mask, ref_norm, gen_norm)
-    content_roi_bbox = compute_mask_roi_bbox(valid_content_mask, fallback_shape=ref_norm.shape[:2])
-    content_roi_ref = crop_image_to_bbox(ref_norm, content_roi_bbox)
-    content_roi_gen = crop_image_to_bbox(gen_norm, content_roi_bbox)
     ssim_val = compute_masked_ssim(ref_norm, gen_norm, valid_content_mask, neutral_value=neutral_value)
-    lpips_val = compute_lpips_on_content(
-        ref_norm,
-        gen_norm,
-        lpips_model,
-        mask=valid_content_mask,
-        use_gpu=use_gpu,
-    )
+    lpips_val = compute_lpips(ref_norm, gen_norm, lpips_model, use_gpu=use_gpu)
     delta_e_val = compute_masked_delta_e(ref_norm, gen_norm, valid_content_mask)
     percent_metrics = convert_metrics_to_percent(ssim_val, lpips_val, delta_e_val)
     lpips_spatial_path = None
@@ -1033,8 +1024,8 @@ def evaluate_pair(
     lpips_map = None
     if lpips_spatial_model is not None:
         lpips_map_mean, lpips_map = compute_lpips_with_map(
-            content_roi_ref,
-            content_roi_gen,
+            ref_norm,
+            gen_norm,
             lpips_spatial_model,
             use_gpu=use_gpu,
         )
@@ -1089,11 +1080,10 @@ def evaluate_pair(
     car_focus_mask = car_masks.get("car_mask")
 
     if lpips_heatmap_dir is not None and lpips_spatial_path and lpips_map_mean is not None and lpips_map is not None:
-        heatmap_overlay_mask = crop_mask_to_bbox(car_focus_mask, content_roi_bbox)
         save_lpips_spatial_map(
             lpips_map,
             Path(lpips_spatial_path),
-            overlay_mask=heatmap_overlay_mask,
+            overlay_mask=car_focus_mask,
             mask_mode="car_focus" if car_focus_mask is not None else None,
         )
 
@@ -1115,17 +1105,18 @@ def evaluate_pair(
     print(f"  Ref content area   : {normalization_debug['ref_content_area_px']} px")
     print(f"  Gen content area   : {normalization_debug['gen_content_area_px']} px")
     print(f"  Final content area : {normalization_debug['content_area_px']} px")
-    print(f"  Main LPIPS ROI     : {content_roi_bbox}")
     if valid_content_mask is not None:
         content_area_px = int(np.sum(valid_content_mask))
         content_area_ratio = float(content_area_px / valid_content_mask.size)
-        print(f"  Main scope         : content_mask")
+        print("  Main scope         : normalized_full_frame")
+        print("  SSIM/DeltaE scope  : content_mask")
         print(f"  Content area (px)  : {content_area_px}")
         print(f"  Content area (%)   : {content_area_ratio * 100.0:.2f}%")
     else:
         content_area_px = int(ref_norm.shape[0] * ref_norm.shape[1])
         content_area_ratio = 1.0
-        print("  Main scope         : full_frame (Fallback)")
+        print("  Main scope         : normalized_full_frame")
+        print("  SSIM/DeltaE scope  : normalized_full_frame (Fallback)")
     print(f"  SSIM               : {ssim_val:.6f}")
     print(f"  SSIM (%)           : {percent_metrics['ssim_percent']:.2f}%")
     print(f"  LPIPS              : {lpips_val:.6f}")
@@ -1162,7 +1153,7 @@ def evaluate_pair(
         "normalized_width": norm_w,
         "normalized_height": norm_h,
         "normalization_mode": mode,
-        "main_metric_scope": "content_mask" if valid_content_mask is not None else "full_frame_fallback",
+        "main_metric_scope": "normalized_full_frame",
         "content_mask_area_px": content_area_px,
         "content_mask_area_ratio": content_area_ratio,
         "ssim": ssim_val,
