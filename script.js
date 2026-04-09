@@ -1029,7 +1029,15 @@ function attachSpatialDetailListeners() {
       const isMaskedIn = !lastSpatialPayload.overlayMask
         || Boolean(lastSpatialPayload.overlayMask[pickedCell.row]?.[pickedCell.col]);
       if (!isMaskedIn) {
-        renderLocalSpatialInspectorNotice('Außerhalb des Car-Fokus');
+        let focusAreaLabel = 'Overlay-Fokus';
+        if (lastSpatialPayload.maskMode === 'car_focus') {
+          focusAreaLabel = 'Car-Fokus';
+        } else if (lastSpatialPayload.maskMode === 'foreground_focus') {
+          focusAreaLabel = 'Objekt-Fokus';
+        } else if (lastSpatialPayload.maskMode === 'content_focus') {
+          focusAreaLabel = 'Content-Fokus';
+        }
+        renderLocalSpatialInspectorNotice(`Außerhalb des ${focusAreaLabel}`);
         return;
       }
       renderLocalSpatialInspector(lastSpatialPayload, pickedCell.row, pickedCell.col);
@@ -1087,11 +1095,22 @@ function updateSpatialOutput(data) {
 
   lastSpatialPayload = analysis;
   spatialSection.hidden = false;
-  const focusLabel = analysis.overlayMask ? 'Car-Fokus aktiv' : 'Global';
-  const carFocusInfo = analysis.overlayMask && analysis.maskMode === 'car_focus'
-    ? ' | Car-Fokus aktiv: Bereiche außerhalb der Fahrzeugmaske werden in der Heatmap ausgeblendet'
-    : '';
-  spatialMeta.textContent = `Matrix: ${analysis.rows}x${analysis.cols} | Bereich=${focusLabel} | Roh min=${formatSpatialValue(analysis.min)} | Roh max=${formatSpatialValue(analysis.max)} | Skala=q05–q99.5 (${formatSpatialValue(analysis.scaleLowerBound)}..${formatSpatialValue(analysis.scaleUpperBound)}) | Mean=${formatSpatialValue(analysis.mean)}${carFocusInfo}`;
+  let focusLabel = 'Global';
+  let focusInfo = '';
+  if (analysis.maskMode === 'car_focus') {
+    focusLabel = 'Car-Fokus aktiv';
+    focusInfo = ' | Car-Fokus aktiv: Bereiche außerhalb der Fahrzeugmaske werden in der Heatmap ausgeblendet';
+  } else if (analysis.maskMode === 'foreground_focus') {
+    focusLabel = 'Objekt-Fokus aktiv';
+    focusInfo = ' | Objekt-Fokus aktiv: Bereiche außerhalb des Vordergrunds werden in der Heatmap ausgeblendet';
+  } else if (analysis.maskMode === 'content_focus') {
+    focusLabel = 'Content-Fokus aktiv';
+    focusInfo = ' | Content-Fokus aktiv: Bereiche außerhalb der Content-Maske werden in der Heatmap ausgeblendet';
+  } else if (analysis.overlayMask) {
+    focusLabel = 'Overlay-Fokus aktiv';
+    focusInfo = ' | Overlay-Fokus aktiv: Bereiche außerhalb der Overlay-Maske werden in der Heatmap ausgeblendet';
+  }
+  spatialMeta.textContent = `Matrix: ${analysis.rows}x${analysis.cols} | Bereich=${focusLabel} | Roh min=${formatSpatialValue(analysis.min)} | Roh max=${formatSpatialValue(analysis.max)} | Skala=q05–q99.5 (${formatSpatialValue(analysis.scaleLowerBound)}..${formatSpatialValue(analysis.scaleUpperBound)}) | Mean=${formatSpatialValue(analysis.mean)}${focusInfo}`;
   syncHeatmapPreviewSize({ rerenderOnResize: false, reason: 'update-spatial-output' });
   rerenderSpatialHeatmapFromLastPayload('update-spatial-output');
   renderSpatialSummary(analysis);
