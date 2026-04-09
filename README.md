@@ -114,7 +114,7 @@ python3 image_metrics.py \
   --reference-dir "reference" \
   --generated-dir "generated" \
   --enable-car-only \
-  --car-mode neutralize_crop \
+  --car-mode roi_crop \
   --mask-source union \
   --car-only-dir car_only \
   --output-csv image_metrics_results.csv
@@ -133,6 +133,8 @@ Nutze diese Parameter je nach Bedarf:
 - `--mode letterbox` – normalisiere Bildgrößen (Default: `letterbox`)
 - Die Letterbox-Normalisierung nutzt einen gemeinsamen symmetrischen Zielraum für beide Bilder und erzeugt eine symmetrische `content_mask`.
 - Hauptmetriken (`SSIM`, `LPIPS`, `ΔE CIEDE2000`) nutzen diese `content_mask` konsistent als Vergleichsfläche.
+- Für Haupt-`LPIPS` wird aus der `content_mask` eine gemeinsame ROI-Bounding-Box abgeleitet und der **offizielle** LPIPS-Forward nur auf diesem Crop ausgeführt.
+- `lpips_map_mean` und Heatmap nutzen exakt dieselbe ROI und denselben offiziellen LPIPS-Forward wie Haupt-`LPIPS`.
 - Gepaddete Letterbox-Ränder werden bei den Hauptmetriken ignoriert, damit der Vergleich methodisch stabil bleibt.
 - `--mask-source {ref|gen|union}` – Default ist `union` für Car-only.
 - `--lpips-net {alex|vgg|squeeze}` – wähle LPIPS-Backbone
@@ -150,6 +152,7 @@ Nutze diese Parameter je nach Bedarf:
 - `--mask-threshold <wert>` – setze Pixel-Schwelle der Segmentierungsmaske
 - `--roi-min-size-px <wert>` – halte die Car-ROI mindestens auf dieser Kantenlänge
 - `--roi-square` – erzwinge quadratische ROI für robustere LPIPS/SSIM-Vergleiche
+- `--car-mode {neutralize_crop|roi_crop|weighted_lpips}` – `weighted_lpips` ist deprecated und wird intern auf `neutralize_crop` umgebogen (kein Custom-LPIPS).
 - `mask_iou` und `mask_dice` basieren auf segmentierten Fahrzeugmasken (Referenz vs. Generated), nicht auf allgemeinen Vordergrundmasken.
 - Ohne erfolgreiche Fahrzeugsegmentierung (oder ohne `--enable-car-only`) bleiben `mask_iou` und `mask_dice` leer (`None`/`--`).
 
@@ -172,6 +175,8 @@ Nutze diese Leitlinie:
 - `lpips=True` aktiviert die trainierten linearen Kalibrierungsschichten des offiziellen LPIPS-Setups.
 - `pretrained=True` lädt die vortrainierten Gewichte.
 - `spatial=True` erzeugt zusätzlich eine räumliche Distanzmatrix für Heatmap/Analyse.
+- Das Tool nutzt keinen produktiven `masked_lpips(...)`-Pfad und keinen direkten `lpips_model.net.forward(...)`-Zugriff im Bewertungsfluss.
+- Für `LPIPS`, Heatmap, `lpips_map_mean`, `lpips_foreground` und `LPIPS car-only` wird der offizielle Forward `lpips_model(ref_t, gen_t)` auf ROI-Crops verwendet.
 - Dieses Tool trainiert keine LPIPS-Gewichte nach.
 - Wenn du echtes Training brauchst, implementiere einen separaten Trainings-Workflow mit Trainingsdaten, Zielsignal und Trainingsschleife.
 
