@@ -573,7 +573,7 @@ function flattenValuesByMask(values, overlayMask) {
   return selectedValues;
 }
 
-function buildSpatialAnalysis(values, overlayMaskPayload = null, maskMode = null) {
+function buildSpatialAnalysis(values, overlayMaskPayload = null, maskMode = null, outlineMaskPayload = null, outlineMode = null) {
   if (!Array.isArray(values) || values.length === 0 || !Array.isArray(values[0])) {
     return null;
   }
@@ -582,6 +582,7 @@ function buildSpatialAnalysis(values, overlayMaskPayload = null, maskMode = null
   const cols = normalizedValues[0].length;
   const flatValues = flattenValuesByMask(normalizedValues, null);
   const overlayMask = sanitizeOverlayMask(overlayMaskPayload, rows, cols);
+  const outlineMask = sanitizeOverlayMask(outlineMaskPayload, rows, cols);
   const maskedValues = flattenValuesByMask(normalizedValues, overlayMask);
   const valuesForScaling = maskedValues.length > 0 ? maskedValues : flatValues;
 
@@ -638,7 +639,9 @@ function buildSpatialAnalysis(values, overlayMaskPayload = null, maskMode = null
   return {
     values: normalizedValues,
     overlayMask,
+    outlineMask,
     maskMode: overlayMask ? (maskMode || 'overlay') : null,
+    outlineMode: outlineMask ? (outlineMode || 'outline') : null,
     rows,
     cols,
     min,
@@ -718,7 +721,83 @@ function normalizeHeatmapValue(value, lowerBound, upperBound) {
   return Math.min(1, heatmapUpperStretchPivot + stretchedTail * tailSpan);
 }
 
-function renderSpatialHeatmap(values, lowerBound, upperBound, overlayMask = null) {
+function drawOverlayContour(context, outlineMask, rows, cols, drawWidth, drawHeight) {
+  if (!outlineMask) {
+    return;
+  }
+
+  const cellWidth = drawWidth / Math.max(cols, 1);
+  const cellHeight = drawHeight / Math.max(rows, 1);
+  context.save();
+  context.lineJoin = 'round';
+  context.lineCap = 'round';
+
+  for (let rowIndex = 0; rowIndex < rows; rowIndex += 1) {
+    for (let colIndex = 0; colIndex < cols; colIndex += 1) {
+      if (!outlineMask[rowIndex]?.[colIndex]) {
+        continue;
+      }
+      const hasTopGap = rowIndex === 0 || !outlineMask[rowIndex - 1]?.[colIndex];
+      const hasBottomGap = rowIndex === rows - 1 || !outlineMask[rowIndex + 1]?.[colIndex];
+      const hasLeftGap = colIndex === 0 || !outlineMask[rowIndex]?.[colIndex - 1];
+      const hasRightGap = colIndex === cols - 1 || !outlineMask[rowIndex]?.[colIndex + 1];
+      if (!hasTopGap && !hasBottomGap && !hasLeftGap && !hasRightGap) {
+        continue;
+      }
+
+      const x0 = colIndex * cellWidth;
+      const y0 = rowIndex * cellHeight;
+      const x1 = x0 + cellWidth;
+      const y1 = y0 + cellHeight;
+
+      context.lineWidth = 2;
+      context.strokeStyle = 'rgba(0, 0, 0, 0.55)';
+      context.beginPath();
+      if (hasTopGap) {
+        context.moveTo(x0, y0);
+        context.lineTo(x1, y0);
+      }
+      if (hasBottomGap) {
+        context.moveTo(x0, y1);
+        context.lineTo(x1, y1);
+      }
+      if (hasLeftGap) {
+        context.moveTo(x0, y0);
+        context.lineTo(x0, y1);
+      }
+      if (hasRightGap) {
+        context.moveTo(x1, y0);
+        context.lineTo(x1, y1);
+      }
+      context.stroke();
+
+      context.lineWidth = 1;
+      context.strokeStyle = 'rgba(200, 255, 255, 0.85)';
+      context.beginPath();
+      if (hasTopGap) {
+        context.moveTo(x0, y0);
+        context.lineTo(x1, y0);
+      }
+      if (hasBottomGap) {
+        context.moveTo(x0, y1);
+        context.lineTo(x1, y1);
+      }
+      if (hasLeftGap) {
+        context.moveTo(x0, y0);
+        context.lineTo(x0, y1);
+      }
+      if (hasRightGap) {
+        context.moveTo(x1, y0);
+        context.lineTo(x1, y1);
+      }
+      context.stroke();
+    }
+  }
+
+  context.restore();
+}
+
+function renderSpatialHeatmap(values, lowerBound, upperBound, overlayMask = null, outlineMask = null) {
   const context = spatialHeatmapCanvas.getContext('2d');
   if (!context) {
     return;
@@ -736,6 +815,7 @@ function renderSpatialHeatmap(values, lowerBound, upperBound, overlayMask = null
     lowerBound,
     upperBound,
     hasOverlayMask: Boolean(overlayMask),
+    hasOutlineMask: Boolean(outlineMask),
   });
 
   values.forEach((row, rowIndex) => {
@@ -743,21 +823,21 @@ function renderSpatialHeatmap(values, lowerBound, upperBound, overlayMask = null
       const numericValue = Number(cellValue);
       const isMaskedIn = !overlayMask || Boolean(overlayMask[rowIndex]?.[colIndex]);
       const idx = (rowIndex * cols + colIndex) * 4;
-      if (overlayMask && !isMaskedIn) {
-        imageData.data[idx] = 0;
-        imageData.data[idx + 1] = 0;
-        imageData.data[idx + 2] = 0;
-        imageData.data[idx + 3] = 0;
-        return;
-      }
       const normalizedLinear = normalizeHeatmapValue(numericValue, lowerBound, upperBound);
       const normalizedGamma = normalizedLinear ** heatmapHighlightGamma;
       const normalizedDisplay = heatmapDisplayBrightnessFloor
         + (1 - heatmapDisplayBrightnessFloor) * normalizedGamma;
-      const [r, g, b] = getHeatmapColor(normalizedDisplay);
-      imageData.data[idx] = r;
-      imageData.data[idx + 1] = g;
-      imageData.data[idx + 2] = b;
+      const [baseR, baseG, baseB] = getHeatmapColor(normalizedDisplay);
+      if (overlayMask && !isMaskedIn) {
+        const gray = Math.round(baseR * 0.299 + baseG * 0.587 + baseB * 0.114);
+        imageData.data[idx] = Math.round(baseR * 0.35 + gray * 0.65);
+        imageData.data[idx + 1] = Math.round(baseG * 0.35 + gray * 0.65);
+        imageData.data[idx + 2] = Math.round(baseB * 0.35 + gray * 0.65);
+      } else {
+        imageData.data[idx] = baseR;
+        imageData.data[idx + 1] = baseG;
+        imageData.data[idx + 2] = baseB;
+      }
       imageData.data[idx + 3] = 255;
     });
   });
@@ -776,6 +856,7 @@ function renderSpatialHeatmap(values, lowerBound, upperBound, overlayMask = null
   context.clearRect(0, 0, drawWidth, drawHeight);
   context.imageSmoothingEnabled = false;
   context.drawImage(offscreen, 0, 0, drawWidth, drawHeight);
+  drawOverlayContour(context, outlineMask, rows, cols, drawWidth, drawHeight);
   logBrowser('Heatmap render complete: putImageData + upscale drawImage executed.', {
     drawWidth,
     drawHeight,
@@ -792,6 +873,7 @@ function rerenderSpatialHeatmapFromLastPayload(reason = 'unknown') {
     lastSpatialPayload.scaleLowerBound,
     lastSpatialPayload.scaleUpperBound,
     lastSpatialPayload.overlayMask,
+    lastSpatialPayload.outlineMask,
   );
   return true;
 }
@@ -1018,7 +1100,7 @@ function attachSpatialDetailListeners() {
   }
 
   if (spatialHeatmapCanvas) {
-    spatialHeatmapCanvas.addEventListener('click', (event) => {
+    spatialHeatmapCanvas.addEventListener('mousemove', (event) => {
       if (!lastSpatialPayload) {
         return;
       }
@@ -1041,6 +1123,14 @@ function attachSpatialDetailListeners() {
         return;
       }
       renderLocalSpatialInspector(lastSpatialPayload, pickedCell.row, pickedCell.col);
+    });
+
+    spatialHeatmapCanvas.addEventListener('mouseleave', () => {
+      if (!spatialLocalInspector) {
+        return;
+      }
+      spatialLocalInspector.innerHTML = '';
+      spatialLocalInspector.hidden = true;
     });
   }
 
@@ -1087,7 +1177,9 @@ function updateSpatialOutput(data) {
   const values = data?.lpips_spatial_map?.values;
   const overlayMask = data?.lpips_spatial_map?.overlay_mask;
   const maskMode = data?.lpips_spatial_map?.mask_mode;
-  const analysis = buildSpatialAnalysis(values, overlayMask, maskMode);
+  const outlineMask = data?.lpips_spatial_map?.outline_mask;
+  const outlineMode = data?.lpips_spatial_map?.outline_mode;
+  const analysis = buildSpatialAnalysis(values, overlayMask, maskMode, outlineMask, outlineMode);
   if (!analysis) {
     resetSpatialOutput();
     return;
@@ -1099,16 +1191,13 @@ function updateSpatialOutput(data) {
   let focusInfo = '';
   if (analysis.maskMode === 'car_focus') {
     focusLabel = 'Car-Fokus aktiv';
-    focusInfo = ' | Car-Fokus aktiv: Bereiche außerhalb der Fahrzeugmaske werden in der Heatmap ausgeblendet';
-  } else if (analysis.maskMode === 'foreground_focus') {
-    focusLabel = 'Objekt-Fokus aktiv';
-    focusInfo = ' | Objekt-Fokus aktiv: Bereiche außerhalb des Vordergrunds werden in der Heatmap ausgeblendet';
-  } else if (analysis.maskMode === 'content_focus') {
-    focusLabel = 'Content-Fokus aktiv';
-    focusInfo = ' | Content-Fokus aktiv: Bereiche außerhalb der Content-Maske werden in der Heatmap ausgeblendet';
+    focusInfo = ' | Car-Fokus aktiv: Bereiche außerhalb der Fahrzeugmaske werden nur visuell entsättigt';
   } else if (analysis.overlayMask) {
     focusLabel = 'Overlay-Fokus aktiv';
-    focusInfo = ' | Overlay-Fokus aktiv: Bereiche außerhalb der Overlay-Maske werden in der Heatmap ausgeblendet';
+    focusInfo = ' | Overlay-Fokus aktiv: Bereiche außerhalb der Overlay-Maske werden nur visuell entsättigt';
+  } else if (analysis.outlineMask) {
+    focusLabel = 'Global + Objektumriss';
+    focusInfo = ' | Globale Heatmap mit zusätzlicher Objektkontur';
   }
   spatialMeta.textContent = `Matrix: ${analysis.rows}x${analysis.cols} | Bereich=${focusLabel} | Roh min=${formatSpatialValue(analysis.min)} | Roh max=${formatSpatialValue(analysis.max)} | Skala=q05–q99.5 (${formatSpatialValue(analysis.scaleLowerBound)}..${formatSpatialValue(analysis.scaleUpperBound)}) | Mean=${formatSpatialValue(analysis.mean)}${focusInfo}`;
   syncHeatmapPreviewSize({ rerenderOnResize: false, reason: 'update-spatial-output' });
