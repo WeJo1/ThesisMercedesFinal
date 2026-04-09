@@ -151,32 +151,62 @@ def np_to_pil_uint8(img):
     return Image.fromarray((clipped * 255.0).astype(np.uint8), mode="RGB")
 
 
+def letterbox_to_canvas(img, target_w, target_h, pad_color=LETTERBOX_PAD_COLOR):
+    src_h, src_w = img.shape[:2]
+    if src_w <= 0 or src_h <= 0:
+        raise ValueError("Bildgröße muss größer als 0 sein.")
+    if target_w <= 0 or target_h <= 0:
+        raise ValueError("Canvas-Größe muss größer als 0 sein.")
+
+    scale = min(target_w / src_w, target_h / src_h)
+    scaled_w = max(1, int(round(src_w * scale)))
+    scaled_h = max(1, int(round(src_h * scale)))
+    offset_x = (target_w - scaled_w) // 2
+    offset_y = (target_h - scaled_h) // 2
+
+    resized = np_to_pil_uint8(img).resize((scaled_w, scaled_h), resample=Image.Resampling.LANCZOS)
+    canvas = Image.new("RGB", (target_w, target_h), color=pad_color)
+    canvas.paste(resized, (offset_x, offset_y))
+
+    norm_img = np.asarray(canvas, dtype=np.float32) / 255.0
+    content_mask = np.zeros((target_h, target_w), dtype=bool)
+    content_mask[offset_y : offset_y + scaled_h, offset_x : offset_x + scaled_w] = True
+    debug = {
+        "source_width": int(src_w),
+        "source_height": int(src_h),
+        "scale": float(scale),
+        "scaled_width": int(scaled_w),
+        "scaled_height": int(scaled_h),
+        "offset_x": int(offset_x),
+        "offset_y": int(offset_y),
+    }
+    return norm_img, content_mask, debug
+
+
 def normalize_pair(ref_img, gen_img, mode="letterbox", pad_color=LETTERBOX_PAD_COLOR):
     if mode != "letterbox":
         raise ValueError("mode muss 'letterbox' sein")
 
     ref_h, ref_w = ref_img.shape[:2]
     gen_h, gen_w = gen_img.shape[:2]
+    target_w = max(ref_w, gen_w)
+    target_h = max(ref_h, gen_h)
 
-    ref_norm = ref_img.copy()
-    gen_pil = np_to_pil_uint8(gen_img)
+    ref_norm, ref_content_mask, ref_debug = letterbox_to_canvas(ref_img, target_w, target_h, pad_color=pad_color)
+    gen_norm, gen_content_mask, gen_debug = letterbox_to_canvas(gen_img, target_w, target_h, pad_color=pad_color)
+    content_mask = ref_content_mask & gen_content_mask
 
-    scale = min(ref_w / gen_w, ref_h / gen_h)
-    scaled_w = max(1, int(round(gen_w * scale)))
-    scaled_h = max(1, int(round(gen_h * scale)))
-
-    resized = gen_pil.resize((scaled_w, scaled_h), resample=Image.Resampling.LANCZOS)
-    canvas = Image.new("RGB", (ref_w, ref_h), color=pad_color)
-
-    offset_x = (ref_w - scaled_w) // 2
-    offset_y = (ref_h - scaled_h) // 2
-    canvas.paste(resized, (offset_x, offset_y))
-
-    gen_norm = np.asarray(canvas, dtype=np.float32) / 255.0
-
-    content_mask = np.zeros((ref_h, ref_w), dtype=bool)
-    content_mask[offset_y : offset_y + scaled_h, offset_x : offset_x + scaled_w] = True
-    return ref_norm, gen_norm, content_mask
+    debug = {
+        "reference_original": {"width": int(ref_w), "height": int(ref_h)},
+        "generated_original": {"width": int(gen_w), "height": int(gen_h)},
+        "target_size": {"width": int(target_w), "height": int(target_h)},
+        "ref_content_area_px": int(np.sum(ref_content_mask)),
+        "gen_content_area_px": int(np.sum(gen_content_mask)),
+        "content_area_px": int(np.sum(content_mask)),
+        "ref_letterbox": ref_debug,
+        "gen_letterbox": gen_debug,
+    }
+    return ref_norm, gen_norm, content_mask, debug
 
 
 def save_normalized_pair(ref_norm, gen_norm, basename, out_dir):
@@ -613,7 +643,7 @@ def compute_car_only_metrics(
     lpips_model,
     segmenter,
     car_mode="neutralize_crop",
-    mask_source="ref",
+    mask_source="union",
     pad_px=20,
     neutral_value=0.5,
     min_mask_area=0,
@@ -939,7 +969,7 @@ def evaluate_pair(
     use_gpu=False,
     segmenter=None,
     car_mode="neutralize_crop",
-    mask_source="ref",
+    mask_source="union",
     pad_px=20,
     neutral_value=0.5,
     min_mask_area=0,
@@ -964,7 +994,7 @@ def evaluate_pair(
     ref_h, ref_w = ref_img.shape[:2]
     gen_h, gen_w = gen_img.shape[:2]
 
-    ref_norm, gen_norm, content_mask = normalize_pair(ref_img, gen_img, mode=mode)
+    ref_norm, gen_norm, content_mask, normalization_debug = normalize_pair(ref_img, gen_img, mode=mode)
     validate_image_for_metrics(ref_norm, image_name="ref_norm")
     validate_image_for_metrics(gen_norm, image_name="gen_norm")
     norm_h, norm_w = ref_norm.shape[:2]
@@ -1057,7 +1087,14 @@ def evaluate_pair(
     print(f"Pair: {basename}")
     print(f"  Reference original : {ref_w}x{ref_h}")
     print(f"  Generated original : {gen_w}x{gen_h}")
+    print(
+        f"  Shared target size : "
+        f"{normalization_debug['target_size']['width']}x{normalization_debug['target_size']['height']}"
+    )
     print(f"  Normalized sizes   : {norm_w}x{norm_h}")
+    print(f"  Ref content area   : {normalization_debug['ref_content_area_px']} px")
+    print(f"  Gen content area   : {normalization_debug['gen_content_area_px']} px")
+    print(f"  Final content area : {normalization_debug['content_area_px']} px")
     if valid_content_mask is not None:
         content_area_px = int(np.sum(valid_content_mask))
         content_area_ratio = float(content_area_px / valid_content_mask.size)
@@ -1145,7 +1182,7 @@ def evaluate_folders(
     use_gpu=False,
     segmenter=None,
     car_mode="neutralize_crop",
-    mask_source="ref",
+    mask_source="union",
     pad_px=20,
     neutral_value=0.5,
     min_mask_area=0,
@@ -1265,7 +1302,7 @@ def parse_args():
     parser.add_argument("--enable-car-only", action="store_true", help="Aktiviere Car-only Metriken (LPIPS/SSIM)")
     parser.add_argument("--car-only", action="store_true", help="Kurzform für --enable-car-only")
     parser.add_argument("--car-mode", default="neutralize_crop", choices=["neutralize_crop", "weighted_lpips"], help="Auto-fokussierte LPIPS-Berechnung")
-    parser.add_argument("--mask-source", default="ref", choices=["ref", "gen", "union"], help="Quelle für die Auto-Maske")
+    parser.add_argument("--mask-source", default="union", choices=["ref", "gen", "union"], help="Quelle für die Auto-Maske")
     parser.add_argument("--pad-px", type=int, default=20, help="Padding für Car-Crop-BBox")
     parser.add_argument("--neutral-value", type=float, default=0.5, help="Neutralwert für Hintergrundpixel [0..1]")
     parser.add_argument("--min-mask-area", type=int, default=0, help="Minimale Maskenfläche in Pixel")
@@ -1299,7 +1336,7 @@ def parse_args():
     use_car_specific_option = any(
         [
             args.car_mode != "neutralize_crop",
-            args.mask_source != "ref",
+            args.mask_source != "union",
             args.pad_px != 20,
             args.neutral_value != 0.5,
             args.min_mask_area != 0,

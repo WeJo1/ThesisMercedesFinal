@@ -144,7 +144,7 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             "enable_heatmap": form.getfirst("enable_heatmap", "true") == "true",
             "enable_car_only": form.getfirst("enable_car_only", "false") == "true",
             "car_mode": form.getfirst("car_mode", "neutralize_crop"),
-            "mask_source": form.getfirst("mask_source", "ref"),
+            "mask_source": form.getfirst("mask_source", "union"),
         }
 
     def run_image_metrics(self, payload):
