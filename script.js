@@ -632,13 +632,12 @@ function renderSpatialHeatmap(values, lowerBound, upperBound, overlayMask = null
       imageData.data[idx + 2] = b;
       if (overlayMask && !isMaskedIn) {
         const gray = Math.round((r + g + b) / 3);
-        imageData.data[idx] = gray;
-        imageData.data[idx + 1] = gray;
-        imageData.data[idx + 2] = gray;
-        imageData.data[idx + 3] = 72;
-      } else {
-        imageData.data[idx + 3] = 255;
+        const desaturateStrength = 0.35;
+        imageData.data[idx] = Math.round(r * (1 - desaturateStrength) + gray * desaturateStrength);
+        imageData.data[idx + 1] = Math.round(g * (1 - desaturateStrength) + gray * desaturateStrength);
+        imageData.data[idx + 2] = Math.round(b * (1 - desaturateStrength) + gray * desaturateStrength);
       }
+      imageData.data[idx + 3] = 255;
     });
   });
 
