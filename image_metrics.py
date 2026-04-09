@@ -378,32 +378,6 @@ def save_lpips_spatial_map(dist_map, path, overlay_mask=None, mask_mode=None):
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
-def apply_mask_to_lpips_map(dist_map, mask):
-    spatial_map = np.asarray(dist_map, dtype=np.float32)
-    spatial_mask = np.asarray(mask, dtype=bool)
-
-    if spatial_map.ndim != 2 or spatial_mask.ndim != 2:
-        return spatial_map
-
-    map_h, map_w = spatial_map.shape
-    if spatial_mask.shape != (map_h, map_w):
-        mask_image = Image.fromarray(spatial_mask.astype(np.uint8) * 255, mode="L")
-        resized_mask = np.asarray(
-            mask_image.resize((map_w, map_h), resample=Image.Resampling.NEAREST),
-            dtype=np.uint8,
-        )
-        spatial_mask = resized_mask.astype(bool)
-
-    if not np.any(spatial_mask):
-        return spatial_map
-
-    masked_map = spatial_map.copy()
-    inside_values = masked_map[spatial_mask]
-    fill_value = float(np.min(inside_values))
-    masked_map[~spatial_mask] = fill_value
-    return masked_map
-
-
 def compute_lpips_on_content(ref, gen, content_mask, lpips_model, use_gpu=False, mask_downsample="bilinear", eps=1e-8):
     metric_mask = prepare_metric_mask(content_mask, ref, gen)
     if metric_mask is None:
