@@ -790,6 +790,12 @@ button {
   font-weight: 700;
 }
 
+.spatial-table td.spatial-cell-masked-out,
+.spatial-aggregated-table td.spatial-cell-masked-out {
+  background: rgba(118, 138, 160, 0.2);
+  color: rgba(220, 230, 242, 0.72);
+}
+
 .spatial-canvas {
   display: block;
   width: 100%;
