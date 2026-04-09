@@ -1113,12 +1113,24 @@ def evaluate_pair(
     gen_car_mask = car_masks.get("gen_mask")
     car_focus_mask = car_masks.get("car_mask")
 
+    heatmap_overlay_mask = None
+    heatmap_mask_mode = None
+    if car_focus_mask is not None and np.any(car_focus_mask):
+        heatmap_overlay_mask = car_focus_mask
+        heatmap_mask_mode = "car_focus"
+    elif foreground_mask is not None and np.any(foreground_mask):
+        heatmap_overlay_mask = foreground_mask
+        heatmap_mask_mode = "foreground_focus"
+    elif valid_content_mask is not None and np.any(valid_content_mask):
+        heatmap_overlay_mask = valid_content_mask
+        heatmap_mask_mode = "content_focus"
+
     if lpips_heatmap_dir is not None and lpips_spatial_path and lpips_map_mean is not None and lpips_map is not None:
         save_lpips_spatial_map(
             lpips_map,
             Path(lpips_spatial_path),
-            overlay_mask=car_focus_mask,
-            mask_mode="car_focus" if car_focus_mask is not None else None,
+            overlay_mask=heatmap_overlay_mask,
+            mask_mode=heatmap_mask_mode,
         )
 
     has_valid_car_masks = ref_car_mask is not None and gen_car_mask is not None and np.any(ref_car_mask) and np.any(gen_car_mask)
