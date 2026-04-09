@@ -46,7 +46,7 @@
             <input id="enableHeatmap" type="checkbox" checked />
             <label for="enableHeatmap">LPIPS Spatial-Matrix erzeugen</label>
           </div>
-          <p class="preview-title">Hauptmetriken nutzen einen gemeinsamen symmetrischen Zielraum.</p>
+          <p class="preview-title">Haupt-LPIPS nutzt den offiziellen Forward auf gemeinsamer ROI (aus content_mask).</p>
 
           <div class="toggle-row">
             <input id="carOnlyMode" type="checkbox" />
@@ -59,7 +59,7 @@
               <label for="carMode">Fahrzeug-Modus</label>
               <select id="carMode">
                 <option value="neutralize_crop">neutralize_crop</option>
-                <option value="weighted_lpips">weighted_lpips</option>
+                <option value="roi_crop">roi_crop</option>
               </select>
             </div>
             <div class="field-row">
@@ -177,7 +177,7 @@
                 <p class="stat-label">LPIPS (Wert + %)</p>
                 <details class="metric-info">
                   <summary aria-label="LPIPS Erklärung anzeigen">ⓘ</summary>
-                  <p>Zeigt die perzeptuelle Abweichung im gültigen Bildinhalt. Gepaddete Randbereiche werden ignoriert.</p>
+                  <p>Zeigt die perzeptuelle Abweichung via offiziellem LPIPS-Forward auf gemeinsamer ROI aus der content_mask.</p>
                 </details>
               </div>
               <p id="lpips" class="stat-value">--</p>
@@ -207,7 +207,7 @@
                 <p class="stat-label">LPIPS car-only (Wert + %)</p>
                 <details class="metric-info">
                   <summary aria-label="LPIPS car-only Erklärung anzeigen">ⓘ</summary>
-                  <p>Bewertet nur das Fahrzeug im Bild. Ist der Modus aus, bleibt der Wert leer.</p>
+                  <p>Bewertet die Fahrzeug-ROI per offiziellem LPIPS-Forward auf zugeschnittenem Bildbereich. Ist der Modus aus, bleibt der Wert leer.</p>
                 </details>
               </div>
               <p id="lpipsCar" class="stat-value">--</p>
