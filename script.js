@@ -576,8 +576,8 @@ function buildSpatialAnalysis(values, overlayMaskPayload = null, maskMode = null
 
 function getHeatmapColor(normalized) {
   const gradientStops = [
-    [0, 82, 64, 132],
-    [0.18, 78, 96, 186],
+    [0, 116, 102, 176],
+    [0.18, 95, 124, 200],
     [0.36, 65, 182, 196],
     [0.54, 111, 222, 122],
     [0.72, 249, 221, 67],
@@ -630,14 +630,16 @@ function renderSpatialHeatmap(values, lowerBound, upperBound, overlayMask = null
       imageData.data[idx] = r;
       imageData.data[idx + 1] = g;
       imageData.data[idx + 2] = b;
+      let alpha = 255;
       if (overlayMask && !isMaskedIn) {
         const gray = Math.round((r + g + b) / 3);
-        const desaturateStrength = 0.35;
+        const desaturateStrength = 0.75;
         imageData.data[idx] = Math.round(r * (1 - desaturateStrength) + gray * desaturateStrength);
         imageData.data[idx + 1] = Math.round(g * (1 - desaturateStrength) + gray * desaturateStrength);
         imageData.data[idx + 2] = Math.round(b * (1 - desaturateStrength) + gray * desaturateStrength);
+        alpha = 95;
       }
-      imageData.data[idx + 3] = 255;
+      imageData.data[idx + 3] = alpha;
     });
   });
 
