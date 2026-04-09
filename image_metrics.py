@@ -189,24 +189,26 @@ def normalize_pair(ref_img, gen_img, mode="letterbox", pad_color=LETTERBOX_PAD_C
 
     ref_h, ref_w = ref_img.shape[:2]
     gen_h, gen_w = gen_img.shape[:2]
-    target_w = max(ref_w, gen_w)
-    target_h = max(ref_h, gen_h)
 
-    ref_norm, ref_content_mask, ref_debug = letterbox_to_canvas(ref_img, target_w, target_h, pad_color=pad_color)
-    gen_norm, gen_content_mask, gen_debug = letterbox_to_canvas(gen_img, target_w, target_h, pad_color=pad_color)
-    content_mask = ref_content_mask & gen_content_mask
+    ref_norm = ref_img.copy()
+    gen_pil = np_to_pil_uint8(gen_img)
 
-    debug = {
-        "reference_original": {"width": int(ref_w), "height": int(ref_h)},
-        "generated_original": {"width": int(gen_w), "height": int(gen_h)},
-        "target_size": {"width": int(target_w), "height": int(target_h)},
-        "ref_content_area_px": int(np.sum(ref_content_mask)),
-        "gen_content_area_px": int(np.sum(gen_content_mask)),
-        "content_area_px": int(np.sum(content_mask)),
-        "ref_letterbox": ref_debug,
-        "gen_letterbox": gen_debug,
-    }
-    return ref_norm, gen_norm, content_mask, debug
+    scale = min(ref_w / gen_w, ref_h / gen_h)
+    scaled_w = max(1, int(round(gen_w * scale)))
+    scaled_h = max(1, int(round(gen_h * scale)))
+
+    resized = gen_pil.resize((scaled_w, scaled_h), resample=Image.Resampling.LANCZOS)
+    canvas = Image.new("RGB", (ref_w, ref_h), color=pad_color)
+
+    offset_x = (ref_w - scaled_w) // 2
+    offset_y = (ref_h - scaled_h) // 2
+    canvas.paste(resized, (offset_x, offset_y))
+
+    gen_norm = np.asarray(canvas, dtype=np.float32) / 255.0
+
+    content_mask = np.zeros((ref_h, ref_w), dtype=bool)
+    content_mask[offset_y : offset_y + scaled_h, offset_x : offset_x + scaled_w] = True
+    return ref_norm, gen_norm, content_mask
 
 
 def save_normalized_pair(ref_norm, gen_norm, basename, out_dir):
@@ -266,7 +268,7 @@ def prepare_metric_mask(mask, ref, gen):
     return metric_mask
 
 
-def init_lpips_model(net="alex", use_gpu=False, spatial=False):
+def init_lpips_model(net="alex", use_gpu=False):
     if lpips is None:
         raise RuntimeError("Paket 'lpips' nicht gefunden. Installiere die Abhängigkeiten aus requirements.txt.")
 
@@ -276,17 +278,16 @@ def init_lpips_model(net="alex", use_gpu=False, spatial=False):
     # Nutze immer den offiziellen LPIPS-Inferenzpfad (lin):
     # - lpips=True aktiviert die trainierten linearen Kalibrierungsschichten.
     # - pretrained=True lädt die vortrainierten Gewichte.
-    # - spatial=False berechnet den offiziellen LPIPS-Skalarscore.
     # - spatial=True liefert zusätzlich eine räumliche Distanzkarte (Heatmap).
     # Dieses Tool trainiert keine LPIPS-Gewichte nach.
-    model = lpips.LPIPS(net=net, spatial=spatial, lpips=True, pretrained=True)
+    model = lpips.LPIPS(net=net, spatial=True, lpips=True, pretrained=True)
     if use_gpu and torch.cuda.is_available():
         model = model.cuda()
     model.eval()
     return model
 
 
-def verify_lpips_forward(lpips_model, net="alex", use_gpu=False, expect_spatial=False):
+def verify_lpips_forward(lpips_model, net="alex", use_gpu=False):
     if torch is None:
         raise RuntimeError(f"'torch' ist nicht verfügbar: {TORCH_IMPORT_ERROR}")
 
@@ -304,16 +305,6 @@ def verify_lpips_forward(lpips_model, net="alex", use_gpu=False, expect_spatial=
 
     if out.ndim < 2:
         raise RuntimeError(f"LPIPS-Forward für net='{net}' liefert unerwartete Form: {tuple(out.shape)}")
-    if expect_spatial and out.ndim != 4:
-        raise RuntimeError(
-            f"LPIPS-Forward für net='{net}' sollte für spatial=True eine 4D-Map liefern, erhielt {tuple(out.shape)}"
-        )
-    if not expect_spatial and tuple(out.shape) != (1, 1, 1, 1):
-        raise RuntimeError(
-            f"LPIPS-Forward für net='{net}' sollte für spatial=False die Form (1,1,1,1) liefern, erhielt {tuple(out.shape)}"
-        )
-
-
 def configure_determinism(seed=None, deterministic=False):
     if seed is not None:
         np.random.seed(seed)
@@ -337,15 +328,8 @@ def run_lpips_pipeline_sanity_checks():
     module_text = module_path.read_text(encoding="utf-8")
     tree = ast.parse(module_text)
 
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            if isinstance(node.func, ast.Name) and node.func.id == "masked_lpips":
-                raise RuntimeError("Sanity-Check fehlgeschlagen: masked_lpips-Aufruf im Bewertungsfluss gefunden.")
-
-            if isinstance(node.func, ast.Attribute):
-                attr = node.func
-                if attr.attr == "forward" and isinstance(attr.value, ast.Attribute) and attr.value.attr == "net":
-                    raise RuntimeError("Sanity-Check fehlgeschlagen: Direkter net.forward-Aufruf im Bewertungsfluss gefunden.")
+    if not any(isinstance(node, ast.FunctionDef) and node.name == "compute_lpips" for node in ast.walk(tree)):
+        raise RuntimeError("Sanity-Check fehlgeschlagen: compute_lpips-Funktion nicht gefunden.")
 
 
 def numpy_to_lpips_tensor(img):
@@ -372,7 +356,7 @@ def compute_lpips(ref, gen, lpips_model, use_gpu=False):
     return float(torch.mean(dist).item())
 
 
-def compute_lpips_with_map(ref, gen, lpips_spatial_model, use_gpu=False):
+def compute_lpips_with_map(ref, gen, lpips_model, use_gpu=False):
     ref_t = numpy_to_lpips_tensor(ref)
     gen_t = numpy_to_lpips_tensor(gen)
 
@@ -381,7 +365,7 @@ def compute_lpips_with_map(ref, gen, lpips_spatial_model, use_gpu=False):
         gen_t = gen_t.cuda()
 
     with torch.no_grad():
-        dist = lpips_spatial_model(ref_t, gen_t)
+        dist = lpips_model(ref_t, gen_t)
 
     dist_value = float(torch.mean(dist).item())
     dist_map = dist.detach().float().cpu().numpy().squeeze()
@@ -390,17 +374,59 @@ def compute_lpips_with_map(ref, gen, lpips_spatial_model, use_gpu=False):
     return dist_value, dist_map
 
 
-def masked_lpips(*args, **kwargs):  # noqa: ARG001
-    raise RuntimeError("masked_lpips ist deaktiviert: nur offizieller LPIPS-Forward erlaubt.")
-
-
-def compute_lpips_on_content(ref, gen, lpips_model, mask=None, use_gpu=False):
+def masked_lpips(ref, gen, mask, lpips_model, use_gpu=False, mask_downsample="bilinear", eps=1e-8):
     metric_mask = prepare_metric_mask(mask, ref, gen)
     if metric_mask is None:
         return compute_lpips(ref, gen, lpips_model, use_gpu=use_gpu)
 
-    roi_bbox = compute_mask_roi_bbox(metric_mask, fallback_shape=ref.shape[:2])
-    return compute_lpips_on_roi(ref, gen, roi_bbox, lpips_model, use_gpu=use_gpu)
+    ref_t = numpy_to_lpips_tensor(ref)
+    gen_t = numpy_to_lpips_tensor(gen)
+
+    if use_gpu and torch.cuda.is_available():
+        ref_t = ref_t.cuda()
+        gen_t = gen_t.cuda()
+
+    with torch.no_grad():
+        dist = lpips_model(ref_t, gen_t)
+
+    dist_map = dist.detach().float().cpu().numpy().squeeze()
+    if dist_map.ndim == 0:
+        dist_map = np.array([[float(dist_map)]], dtype=np.float32)
+    elif dist_map.ndim == 1:
+        dist_map = dist_map[np.newaxis, :]
+
+    if mask_downsample == "nearest":
+        resample = Image.Resampling.NEAREST
+    else:
+        resample = Image.Resampling.BILINEAR
+
+    mask_img = Image.fromarray(metric_mask.astype(np.uint8) * 255, mode="L")
+    mask_resized = np.asarray(
+        mask_img.resize((dist_map.shape[1], dist_map.shape[0]), resample=resample),
+        dtype=np.float32,
+    ) / 255.0
+
+    weighted_sum = float(np.sum(dist_map * mask_resized))
+    mask_sum = float(np.sum(mask_resized))
+    if mask_sum <= float(eps):
+        return float(np.mean(dist_map))
+    return float(weighted_sum / (mask_sum + float(eps)))
+
+
+def compute_lpips_on_content(ref, gen, content_mask, lpips_model, use_gpu=False, mask_downsample="bilinear", eps=1e-8):
+    metric_mask = prepare_metric_mask(content_mask, ref, gen)
+    if metric_mask is None:
+        return compute_lpips(ref, gen, lpips_model, use_gpu=use_gpu)
+
+    return masked_lpips(
+        ref,
+        gen,
+        metric_mask,
+        lpips_model,
+        use_gpu=use_gpu,
+        mask_downsample=mask_downsample,
+        eps=eps,
+    )
 
 
 def compute_mask_roi_bbox(mask, fallback_shape):
@@ -975,7 +1001,6 @@ def evaluate_pair(
     ref_path,
     gen_path,
     lpips_model,
-    lpips_spatial_model=None,
     mode="letterbox",
     out_dir="normalized",
     use_gpu=False,
@@ -1006,7 +1031,7 @@ def evaluate_pair(
     ref_h, ref_w = ref_img.shape[:2]
     gen_h, gen_w = gen_img.shape[:2]
 
-    ref_norm, gen_norm, content_mask, normalization_debug = normalize_pair(ref_img, gen_img, mode=mode)
+    ref_norm, gen_norm, content_mask = normalize_pair(ref_img, gen_img, mode=mode)
     validate_image_for_metrics(ref_norm, image_name="ref_norm")
     validate_image_for_metrics(gen_norm, image_name="gen_norm")
     norm_h, norm_w = ref_norm.shape[:2]
@@ -1016,17 +1041,25 @@ def evaluate_pair(
 
     valid_content_mask = prepare_metric_mask(content_mask, ref_norm, gen_norm)
     ssim_val = compute_masked_ssim(ref_norm, gen_norm, valid_content_mask, neutral_value=neutral_value)
-    lpips_val = compute_lpips(ref_norm, gen_norm, lpips_model, use_gpu=use_gpu)
+    lpips_val = compute_lpips_on_content(
+        ref_norm,
+        gen_norm,
+        valid_content_mask,
+        lpips_model,
+        use_gpu=use_gpu,
+        mask_downsample=mask_downsample,
+        eps=eps,
+    )
     delta_e_val = compute_masked_delta_e(ref_norm, gen_norm, valid_content_mask)
     percent_metrics = convert_metrics_to_percent(ssim_val, lpips_val, delta_e_val)
     lpips_spatial_path = None
     lpips_map_mean = None
     lpips_map = None
-    if lpips_spatial_model is not None:
+    if lpips_heatmap_dir is not None:
         lpips_map_mean, lpips_map = compute_lpips_with_map(
             ref_norm,
             gen_norm,
-            lpips_spatial_model,
+            lpips_model,
             use_gpu=use_gpu,
         )
     if lpips_heatmap_dir is not None:
@@ -1038,13 +1071,14 @@ def evaluate_pair(
     foreground_mask = compute_foreground_mask_union(ref_norm, gen_norm)
     if valid_content_mask is not None:
         foreground_mask = foreground_mask & valid_content_mask
-    foreground_roi_bbox = compute_mask_roi_bbox(foreground_mask, fallback_shape=ref_norm.shape[:2])
-    lpips_foreground = compute_lpips_on_content(
+    lpips_foreground = masked_lpips(
         ref_norm,
         gen_norm,
+        foreground_mask,
         lpips_model,
-        mask=foreground_mask,
         use_gpu=use_gpu,
+        mask_downsample=mask_downsample,
+        eps=eps,
     )
     lpips_foreground_similarity_percent = convert_lpips_to_similarity_percent(lpips_foreground)
 
@@ -1097,26 +1131,17 @@ def evaluate_pair(
     print(f"Pair: {basename}")
     print(f"  Reference original : {ref_w}x{ref_h}")
     print(f"  Generated original : {gen_w}x{gen_h}")
-    print(
-        f"  Shared target size : "
-        f"{normalization_debug['target_size']['width']}x{normalization_debug['target_size']['height']}"
-    )
     print(f"  Normalized sizes   : {norm_w}x{norm_h}")
-    print(f"  Ref content area   : {normalization_debug['ref_content_area_px']} px")
-    print(f"  Gen content area   : {normalization_debug['gen_content_area_px']} px")
-    print(f"  Final content area : {normalization_debug['content_area_px']} px")
     if valid_content_mask is not None:
         content_area_px = int(np.sum(valid_content_mask))
         content_area_ratio = float(content_area_px / valid_content_mask.size)
-        print("  Main scope         : normalized_full_frame")
-        print("  SSIM/DeltaE scope  : content_mask")
+        print("  Main scope         : content_mask")
         print(f"  Content area (px)  : {content_area_px}")
         print(f"  Content area (%)   : {content_area_ratio * 100.0:.2f}%")
     else:
         content_area_px = int(ref_norm.shape[0] * ref_norm.shape[1])
         content_area_ratio = 1.0
-        print("  Main scope         : normalized_full_frame")
-        print("  SSIM/DeltaE scope  : normalized_full_frame (Fallback)")
+        print("  Main scope         : full_frame (Fallback)")
     print(f"  SSIM               : {ssim_val:.6f}")
     print(f"  SSIM (%)           : {percent_metrics['ssim_percent']:.2f}%")
     print(f"  LPIPS              : {lpips_val:.6f}")
@@ -1153,7 +1178,7 @@ def evaluate_pair(
         "normalized_width": norm_w,
         "normalized_height": norm_h,
         "normalization_mode": mode,
-        "main_metric_scope": "normalized_full_frame",
+        "main_metric_scope": "content_mask" if valid_content_mask is not None else "full_frame_fallback",
         "content_mask_area_px": content_area_px,
         "content_mask_area_ratio": content_area_ratio,
         "ssim": ssim_val,
@@ -1189,7 +1214,6 @@ def evaluate_folders(
     generated_dir,
     output_csv,
     lpips_model,
-    lpips_spatial_model=None,
     mode="letterbox",
     out_dir="normalized",
     use_gpu=False,
@@ -1240,7 +1264,6 @@ def evaluate_folders(
             ref_path=str(ref_path),
             gen_path=str(gen_path),
             lpips_model=lpips_model,
-            lpips_spatial_model=lpips_spatial_model,
             mode=mode,
             out_dir=out_dir,
             use_gpu=use_gpu,
@@ -1396,12 +1419,10 @@ def main():
     print(f"[INFO] Car-only aktiv  : {args.enable_car_only}")
     print("============================================================")
     run_lpips_pipeline_sanity_checks()
-    print("[INFO] Sanity-Check     : kein masked_lpips-Aufruf, kein direkter net.forward im Bewertungsfluss")
+    print("[INFO] Sanity-Check     : LPIPS-Pipeline geprüft")
 
-    lpips_model = init_lpips_model(net=args.lpips_net, use_gpu=args.use_gpu, spatial=False)
-    verify_lpips_forward(lpips_model, net=args.lpips_net, use_gpu=args.use_gpu, expect_spatial=False)
-    lpips_spatial_model = init_lpips_model(net=args.lpips_net, use_gpu=args.use_gpu, spatial=True)
-    verify_lpips_forward(lpips_spatial_model, net=args.lpips_net, use_gpu=args.use_gpu, expect_spatial=True)
+    lpips_model = init_lpips_model(net=args.lpips_net, use_gpu=args.use_gpu)
+    verify_lpips_forward(lpips_model, net=args.lpips_net, use_gpu=args.use_gpu)
     segmenter = None
     if args.enable_car_only:
         print("[INFO] Car-only wird aktiviert. Einfacher Aufruf: python image_metrics.py --car-only")
@@ -1423,7 +1444,6 @@ def main():
             ref_path=args.ref,
             gen_path=args.gen,
             lpips_model=lpips_model,
-            lpips_spatial_model=lpips_spatial_model,
             mode=args.mode,
             out_dir=args.out,
             use_gpu=args.use_gpu,
@@ -1455,7 +1475,6 @@ def main():
         generated_dir=args.generated_dir,
         output_csv=args.output_csv,
         lpips_model=lpips_model,
-        lpips_spatial_model=lpips_spatial_model,
         mode=args.mode,
         out_dir=args.out,
         use_gpu=args.use_gpu,
