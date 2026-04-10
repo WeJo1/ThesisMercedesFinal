@@ -55,6 +55,10 @@ const heatmapHighlightGamma = 0.95;
 const heatmapDisplayBrightnessFloor = 0.18;
 const heatmapUpperStretchPivot = 0.85;
 const heatmapUpperStretchFactor = 1.45;
+const heatmapEdgeBoostStrength = 0.42;
+const heatmapEdgeBoostClamp = 0.55;
+const heatmapSobelBoostStrength = 0.65;
+const heatmapSobelBoostClamp = 0.75;
 
 const mercedesStarIconPath = 'icons/stern.svg';
 maskSource.value = 'union';
@@ -721,6 +725,52 @@ function normalizeHeatmapValue(value, lowerBound, upperBound) {
   return Math.min(1, heatmapUpperStretchPivot + stretchedTail * tailSpan);
 }
 
+function buildEdgeAwareNormalizedGrid(values, lowerBound, upperBound) {
+  const rows = values.length;
+  const cols = values[0].length;
+  const baseGrid = values.map((row) => row.map((cellValue) => normalizeHeatmapValue(Number(cellValue), lowerBound, upperBound)));
+  const edgeAwareGrid = Array.from({ length: rows }, () => Array(cols).fill(0));
+  const getCell = (rowIndex, colIndex) => {
+    const safeRow = Math.max(0, Math.min(rows - 1, rowIndex));
+    const safeCol = Math.max(0, Math.min(cols - 1, colIndex));
+    return baseGrid[safeRow][safeCol];
+  };
+
+  for (let rowIndex = 0; rowIndex < rows; rowIndex += 1) {
+    for (let colIndex = 0; colIndex < cols; colIndex += 1) {
+      const center = baseGrid[rowIndex][colIndex];
+      const left = getCell(rowIndex, colIndex - 1);
+      const right = getCell(rowIndex, colIndex + 1);
+      const up = getCell(rowIndex - 1, colIndex);
+      const down = getCell(rowIndex + 1, colIndex);
+      const laplacian = (4 * center) - left - right - up - down;
+      const clampedEdgeSignal = Math.max(-heatmapEdgeBoostClamp, Math.min(heatmapEdgeBoostClamp, laplacian));
+
+      const topLeft = getCell(rowIndex - 1, colIndex - 1);
+      const top = getCell(rowIndex - 1, colIndex);
+      const topRight = getCell(rowIndex - 1, colIndex + 1);
+      const midLeft = getCell(rowIndex, colIndex - 1);
+      const midRight = getCell(rowIndex, colIndex + 1);
+      const bottomLeft = getCell(rowIndex + 1, colIndex - 1);
+      const bottom = getCell(rowIndex + 1, colIndex);
+      const bottomRight = getCell(rowIndex + 1, colIndex + 1);
+
+      const sobelX = (-1 * topLeft) + (1 * topRight) + (-2 * midLeft) + (2 * midRight) + (-1 * bottomLeft) + (1 * bottomRight);
+      const sobelY = (-1 * topLeft) + (-2 * top) + (-1 * topRight) + (1 * bottomLeft) + (2 * bottom) + (1 * bottomRight);
+      const sobelMagnitude = Math.sqrt((sobelX * sobelX) + (sobelY * sobelY));
+      const clampedSobelSignal = Math.max(0, Math.min(heatmapSobelBoostClamp, sobelMagnitude));
+
+      const midpointEmphasis = 1 - Math.abs((center * 2) - 1);
+      const laplaceBoost = clampedEdgeSignal * heatmapEdgeBoostStrength;
+      const sobelBoost = clampedSobelSignal * heatmapSobelBoostStrength * midpointEmphasis;
+      const boosted = center + laplaceBoost + sobelBoost;
+      edgeAwareGrid[rowIndex][colIndex] = Math.min(1, Math.max(0, boosted));
+    }
+  }
+
+  return edgeAwareGrid;
+}
+
 function drawOverlayContour(context, outlineMask, outlineMode, rows, cols, drawWidth, drawHeight) {
   if (!outlineMask || outlineMode !== 'car_outline') {
     return;
@@ -809,6 +859,7 @@ function renderSpatialHeatmap(values, lowerBound, upperBound, overlayMask = null
   const rows = values.length;
   const cols = values[0].length;
   const imageData = context.createImageData(cols, rows);
+  const edgeAwareGrid = buildEdgeAwareNormalizedGrid(values, lowerBound, upperBound);
   logBrowser('Rendering heatmap.', {
     rows,
     cols,
@@ -821,11 +872,10 @@ function renderSpatialHeatmap(values, lowerBound, upperBound, overlayMask = null
 
   values.forEach((row, rowIndex) => {
     row.forEach((cellValue, colIndex) => {
-      const numericValue = Number(cellValue);
       const isMaskedIn = !overlayMask || Boolean(overlayMask[rowIndex]?.[colIndex]);
       const idx = (rowIndex * cols + colIndex) * 4;
-      const normalizedLinear = normalizeHeatmapValue(numericValue, lowerBound, upperBound);
-      const normalizedGamma = normalizedLinear ** heatmapHighlightGamma;
+      const normalizedEdgeAware = edgeAwareGrid[rowIndex][colIndex];
+      const normalizedGamma = normalizedEdgeAware ** heatmapHighlightGamma;
       const normalizedDisplay = heatmapDisplayBrightnessFloor
         + (1 - heatmapDisplayBrightnessFloor) * normalizedGamma;
       const [baseR, baseG, baseB] = getHeatmapColor(normalizedDisplay);
