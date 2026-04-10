@@ -484,7 +484,14 @@ def resize_mask_to_spatial_map(mask, target_shape):
     return resized_mask.astype(bool)
 
 
-def save_lpips_spatial_map(dist_map, path, overlay_mask=None, mask_mode=None):
+def save_lpips_spatial_map(
+    dist_map,
+    path,
+    overlay_mask=None,
+    mask_mode=None,
+    outline_mask=None,
+    outline_mode=None,
+):
     dist_map = np.asarray(dist_map, dtype=np.float32)
     if dist_map.ndim == 1:
         dist_map = dist_map[np.newaxis, :]
@@ -502,6 +509,11 @@ def save_lpips_spatial_map(dist_map, path, overlay_mask=None, mask_mode=None):
     if resized_overlay_mask is not None and np.any(resized_overlay_mask):
         payload["overlay_mask"] = resized_overlay_mask.astype(np.uint8).tolist()
         payload["mask_mode"] = str(mask_mode) if mask_mode else "overlay"
+
+    resized_outline_mask = resize_mask_to_spatial_map(outline_mask, dist_map.shape)
+    if resized_outline_mask is not None and np.any(resized_outline_mask):
+        payload["outline_mask"] = resized_outline_mask.astype(np.uint8).tolist()
+        payload["outline_mode"] = str(outline_mode) if outline_mode else "outline"
 
     path.write_text(json.dumps(payload), encoding="utf-8")
 
@@ -1115,15 +1127,14 @@ def evaluate_pair(
 
     heatmap_overlay_mask = None
     heatmap_mask_mode = None
+    heatmap_outline_mask = None
+    heatmap_outline_mode = None
     if car_focus_mask is not None and np.any(car_focus_mask):
-        heatmap_overlay_mask = car_focus_mask
-        heatmap_mask_mode = "car_focus"
-    elif foreground_mask is not None and np.any(foreground_mask):
-        heatmap_overlay_mask = foreground_mask
-        heatmap_mask_mode = "foreground_focus"
-    elif valid_content_mask is not None and np.any(valid_content_mask):
-        heatmap_overlay_mask = valid_content_mask
-        heatmap_mask_mode = "content_focus"
+        heatmap_outline_mask = car_focus_mask
+        heatmap_outline_mode = "car_outline"
+        if segmenter is not None and car_metrics.get("lpips_car_only") is not None:
+            heatmap_overlay_mask = car_focus_mask
+            heatmap_mask_mode = "car_focus"
 
     if lpips_heatmap_dir is not None and lpips_spatial_path and lpips_map_mean is not None and lpips_map is not None:
         save_lpips_spatial_map(
@@ -1131,6 +1142,8 @@ def evaluate_pair(
             Path(lpips_spatial_path),
             overlay_mask=heatmap_overlay_mask,
             mask_mode=heatmap_mask_mode,
+            outline_mask=heatmap_outline_mask,
+            outline_mode=heatmap_outline_mode,
         )
 
     has_valid_car_masks = ref_car_mask is not None and gen_car_mask is not None and np.any(ref_car_mask) and np.any(gen_car_mask)
@@ -1436,8 +1449,10 @@ def main():
     lpips_model = init_lpips_model(net=args.lpips_net, use_gpu=args.use_gpu)
     verify_lpips_forward(lpips_model, net=args.lpips_net, use_gpu=args.use_gpu)
     segmenter = None
-    if args.enable_car_only:
-        print("[INFO] Car-only wird aktiviert. Einfacher Aufruf: python image_metrics.py --car-only")
+    needs_car_segmenter = args.enable_car_only or (args.lpips_heatmap_dir is not None)
+    if needs_car_segmenter:
+        if args.enable_car_only:
+            print("[INFO] Car-only wird aktiviert. Einfacher Aufruf: python image_metrics.py --car-only")
         try:
             segmenter = build_vehicle_segmenter(
                 use_gpu=args.use_gpu,
@@ -1445,8 +1460,10 @@ def main():
                 mask_threshold=args.mask_threshold,
             )
         except Exception as exc:  # noqa: BLE001
-            print(f"[WARN] Car-only wurde deaktiviert: {exc}")
-            args.enable_car_only = False
+            print(f"[WARN] Fahrzeugsegmentierung nicht verfügbar: {exc}")
+            if args.enable_car_only:
+                print("[WARN] Car-only wurde deaktiviert, Heatmaps laufen global ohne Fahrzeugkontur weiter.")
+                args.enable_car_only = False
 
     if args.ref or args.gen:
         if not (args.ref and args.gen):
