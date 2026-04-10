@@ -807,6 +807,28 @@ button {
   background: rgba(9, 16, 27, 0.72);
 }
 
+.spatial-canvas-stack {
+  position: relative;
+  width: 100%;
+}
+
+.spatial-canvas-stack .spatial-canvas {
+  margin-inline: 0;
+}
+
+.spatial-canvas-heatmap {
+  position: relative;
+  z-index: 1;
+}
+
+.spatial-canvas-outline {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: transparent;
+}
+
 .spatial-local-inspector {
   flex: 1 1 240px;
   margin-top: 0;

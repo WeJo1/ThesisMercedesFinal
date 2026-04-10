@@ -25,6 +25,7 @@ const spatialAggregated = document.getElementById('spatialAggregated');
 const spatialLocalInspector = document.getElementById('spatialLocalInspector');
 const spatialMatrixNotice = document.getElementById('spatialMatrixNotice');
 const spatialHeatmapCanvas = document.getElementById('spatialHeatmapCanvas');
+const spatialOutlineCanvas = document.getElementById('spatialOutlineCanvas');
 const heatmapDetails = document.getElementById('heatmapDetails');
 const aggregatedDetails = document.getElementById('aggregatedDetails');
 const compactAnalysisDetails = document.getElementById('compactAnalysisDetails');
@@ -89,7 +90,8 @@ function isSpatialDomReady() {
     && spatialLocalInspector
     && spatialMatrixNotice
     && spatialMatrix
-    && spatialHeatmapCanvas,
+    && spatialHeatmapCanvas
+    && spatialOutlineCanvas,
   );
 }
 
@@ -281,7 +283,7 @@ function getRenderedImageSize(imgNode) {
 
 function syncHeatmapPreviewSize(options = {}) {
   const { rerenderOnResize = true, reason = 'unspecified' } = options;
-  if (!spatialHeatmapCanvas || !spatialSection) {
+  if (!spatialHeatmapCanvas || !spatialOutlineCanvas || !spatialSection) {
     return false;
   }
 
@@ -292,6 +294,8 @@ function syncHeatmapPreviewSize(options = {}) {
     spatialSection.style.removeProperty('--spatial-target-width');
     spatialHeatmapCanvas.style.removeProperty('width');
     spatialHeatmapCanvas.style.removeProperty('height');
+    spatialOutlineCanvas.style.removeProperty('width');
+    spatialOutlineCanvas.style.removeProperty('height');
     return false;
   }
 
@@ -318,6 +322,8 @@ function syncHeatmapPreviewSize(options = {}) {
   spatialSection.style.setProperty('--spatial-target-width', `${referenceWidth}px`);
   spatialHeatmapCanvas.style.width = `${referenceWidth}px`;
   spatialHeatmapCanvas.style.height = `${referenceHeight}px`;
+  spatialOutlineCanvas.style.width = `${referenceWidth}px`;
+  spatialOutlineCanvas.style.height = `${referenceHeight}px`;
 
   const hasPixelResize = previousPixelWidth !== nextPixelWidth || previousPixelHeight !== nextPixelHeight;
   if (!hasPixelResize) {
@@ -332,6 +338,8 @@ function syncHeatmapPreviewSize(options = {}) {
 
   spatialHeatmapCanvas.width = nextPixelWidth;
   spatialHeatmapCanvas.height = nextPixelHeight;
+  spatialOutlineCanvas.width = nextPixelWidth;
+  spatialOutlineCanvas.height = nextPixelHeight;
   logBrowser(`Heatmap canvas resized (after) [${reason}].`, {
     cssWidth: referenceWidth,
     cssHeight: referenceHeight,
@@ -726,11 +734,19 @@ function drawOverlayContour(context, outlineMask, outlineMode, rows, cols, drawW
     return;
   }
 
+  const minCanvasEdge = Math.max(1, Math.min(drawWidth, drawHeight));
+  const haloWidth = Math.min(5.5, Math.max(1.8, minCanvasEdge * 0.0045));
+  const primaryWidth = Math.min(3.8, Math.max(1.2, haloWidth * 0.6));
+  const accentWidth = Math.min(2.2, Math.max(0.8, haloWidth * 0.4));
   const cellWidth = drawWidth / Math.max(cols, 1);
   const cellHeight = drawHeight / Math.max(rows, 1);
   context.save();
   context.lineJoin = 'round';
   context.lineCap = 'round';
+  context.shadowColor = 'rgba(0, 0, 0, 0.55)';
+  context.shadowBlur = haloWidth * 0.8;
+  context.shadowOffsetX = 0;
+  context.shadowOffsetY = 0;
 
   for (let rowIndex = 0; rowIndex < rows; rowIndex += 1) {
     for (let colIndex = 0; colIndex < cols; colIndex += 1) {
@@ -750,8 +766,8 @@ function drawOverlayContour(context, outlineMask, outlineMode, rows, cols, drawW
       const x1 = x0 + cellWidth;
       const y1 = y0 + cellHeight;
 
-      context.lineWidth = 2;
-      context.strokeStyle = 'rgba(0, 0, 0, 0.55)';
+      context.lineWidth = haloWidth;
+      context.strokeStyle = 'rgba(5, 12, 20, 0.88)';
       context.beginPath();
       if (hasTopGap) {
         context.moveTo(x0, y0);
@@ -771,8 +787,9 @@ function drawOverlayContour(context, outlineMask, outlineMode, rows, cols, drawW
       }
       context.stroke();
 
-      context.lineWidth = 1;
-      context.strokeStyle = 'rgba(200, 255, 255, 0.85)';
+      context.shadowBlur = 0;
+      context.lineWidth = primaryWidth;
+      context.strokeStyle = 'rgba(240, 252, 255, 0.96)';
       context.beginPath();
       if (hasTopGap) {
         context.moveTo(x0, y0);
@@ -791,13 +808,71 @@ function drawOverlayContour(context, outlineMask, outlineMode, rows, cols, drawW
         context.lineTo(x1, y1);
       }
       context.stroke();
+
+      context.lineWidth = accentWidth;
+      context.strokeStyle = 'rgba(136, 224, 255, 0.66)';
+      context.beginPath();
+      if (hasTopGap) {
+        context.moveTo(x0, y0);
+        context.lineTo(x1, y0);
+      }
+      if (hasBottomGap) {
+        context.moveTo(x0, y1);
+        context.lineTo(x1, y1);
+      }
+      if (hasLeftGap) {
+        context.moveTo(x0, y0);
+        context.lineTo(x0, y1);
+      }
+      if (hasRightGap) {
+        context.moveTo(x1, y0);
+        context.lineTo(x1, y1);
+      }
+      context.stroke();
+      context.shadowBlur = haloWidth * 0.8;
     }
   }
 
   context.restore();
 }
 
-function renderSpatialHeatmap(values, lowerBound, upperBound, overlayMask = null, outlineMask = null, outlineMode = null) {
+function clearSpatialOutline() {
+  if (!spatialOutlineCanvas) {
+    return;
+  }
+  const context = spatialOutlineCanvas.getContext('2d');
+  if (!context) {
+    return;
+  }
+  context.setTransform(1, 0, 0, 1, 0, 0);
+  context.clearRect(0, 0, spatialOutlineCanvas.width, spatialOutlineCanvas.height);
+}
+
+function renderSpatialOutline(values, outlineMask = null, outlineMode = null) {
+  if (!spatialOutlineCanvas) {
+    return;
+  }
+  const context = spatialOutlineCanvas.getContext('2d');
+  if (!context) {
+    return;
+  }
+
+  const pixelRatio = window.devicePixelRatio || 1;
+  context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+  const drawWidth = spatialOutlineCanvas.width / pixelRatio;
+  const drawHeight = spatialOutlineCanvas.height / pixelRatio;
+  context.clearRect(0, 0, drawWidth, drawHeight);
+
+  if (!outlineMask || outlineMode !== 'car_outline' || !Array.isArray(values) || !values.length || !values[0]?.length) {
+    return;
+  }
+
+  const rows = values.length;
+  const cols = values[0].length;
+  drawOverlayContour(context, outlineMask, outlineMode, rows, cols, drawWidth, drawHeight);
+}
+
+function renderSpatialHeatmap(values, lowerBound, upperBound, overlayMask = null) {
   const context = spatialHeatmapCanvas.getContext('2d');
   if (!context) {
     return;
@@ -815,8 +890,6 @@ function renderSpatialHeatmap(values, lowerBound, upperBound, overlayMask = null
     lowerBound,
     upperBound,
     hasOverlayMask: Boolean(overlayMask),
-    hasOutlineMask: Boolean(outlineMask),
-    outlineMode,
   });
 
   values.forEach((row, rowIndex) => {
@@ -857,7 +930,6 @@ function renderSpatialHeatmap(values, lowerBound, upperBound, overlayMask = null
   context.clearRect(0, 0, drawWidth, drawHeight);
   context.imageSmoothingEnabled = false;
   context.drawImage(offscreen, 0, 0, drawWidth, drawHeight);
-  drawOverlayContour(context, outlineMask, outlineMode, rows, cols, drawWidth, drawHeight);
   logBrowser('Heatmap render complete: putImageData + upscale drawImage executed.', {
     drawWidth,
     drawHeight,
@@ -874,6 +946,9 @@ function rerenderSpatialHeatmapFromLastPayload(reason = 'unknown') {
     lastSpatialPayload.scaleLowerBound,
     lastSpatialPayload.scaleUpperBound,
     lastSpatialPayload.overlayMask,
+  );
+  renderSpatialOutline(
+    lastSpatialPayload.values,
     lastSpatialPayload.outlineMask,
     lastSpatialPayload.outlineMode,
   );
@@ -1059,6 +1134,7 @@ function resetSpatialOutput() {
     context.setTransform(1, 0, 0, 1, 0, 0);
     context.clearRect(0, 0, spatialHeatmapCanvas.width, spatialHeatmapCanvas.height);
   }
+  clearSpatialOutline();
   lastSpatialPayload = null;
 }
 
