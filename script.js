@@ -588,7 +588,8 @@ function buildSpatialAnalysis(values, overlayMaskPayload = null, maskMode = null
   const maskedValues = flattenValuesByMask(normalizedValues, overlayMask);
   const valuesForScaling = maskedValues.length > 0 ? maskedValues : flatValues;
 
-  const stats = computeSpatialStats(flatValues);
+  const valuesForStats = maskedValues.length > 0 ? maskedValues : flatValues;
+  const stats = computeSpatialStats(valuesForStats);
   const scalingStats = computeSpatialStats(valuesForScaling);
   if (!stats) {
     return null;
