@@ -1190,18 +1190,14 @@ function updateSpatialOutput(data) {
   lastSpatialPayload = analysis;
   spatialSection.hidden = false;
   let focusLabel = 'Global';
-  let focusInfo = '';
   if (analysis.maskMode === 'car_focus') {
     focusLabel = 'Car-Fokus aktiv';
-    focusInfo = ' | Car-Fokus aktiv: Bereiche außerhalb der Fahrzeugmaske werden nur visuell entsättigt';
   } else if (analysis.overlayMask) {
     focusLabel = 'Overlay-Fokus aktiv';
-    focusInfo = ' | Overlay-Fokus aktiv: Bereiche außerhalb der Overlay-Maske werden nur visuell entsättigt';
   } else if (analysis.outlineMask && analysis.outlineMode === 'car_outline') {
     focusLabel = 'Global + Fahrzeugkontur';
-    focusInfo = ' | Globale Heatmap mit zusätzlicher Fahrzeugkontur';
   }
-  spatialMeta.textContent = `Matrix: ${analysis.rows}x${analysis.cols} | Bereich=${focusLabel} | Roh min=${formatSpatialValue(analysis.min)} | Roh max=${formatSpatialValue(analysis.max)} | Skala=q05–q99.5 (${formatSpatialValue(analysis.scaleLowerBound)}..${formatSpatialValue(analysis.scaleUpperBound)}) | Mean=${formatSpatialValue(analysis.mean)}${focusInfo}`;
+  spatialMeta.textContent = `Bereich=${focusLabel} | Min=${formatSpatialValue(analysis.min)} | Max=${formatSpatialValue(analysis.max)} | Mean=${formatSpatialValue(analysis.mean)}`;
   syncHeatmapPreviewSize({ rerenderOnResize: false, reason: 'update-spatial-output' });
   rerenderSpatialHeatmapFromLastPayload('update-spatial-output');
   renderSpatialSummary(analysis);
