@@ -24,7 +24,7 @@
         <section class="panel panel-input">
           <h2>Bilder vergleichen</h2>
           <p class="panel-intro">
-            Wähle Referenz- und Vergleichsbild aus und starte die Auswertung.
+            Lade ein Referenzbild und ein Vergleichsbild hoch, dann starte den Vergleich.
           </p>
 
           <label for="refImage">Referenzbild oder ZIP</label>
@@ -34,7 +34,7 @@
           <input id="genImage" type="file" accept="image/*,.zip,application/zip" />
 
           <div class="field-row">
-            <label for="lpipsNet">LPIPS Modell</label>
+            <label for="lpipsNet">LPIPS-Netzwerk</label>
             <select id="lpipsNet">
               <option value="alex">alex</option>
               <option value="vgg">vgg</option>
@@ -44,12 +44,12 @@
 
           <div class="toggle-row">
             <input id="enableHeatmap" type="checkbox" checked />
-            <label for="enableHeatmap">LPIPS Spatial-Matrix erzeugen</label>
+            <label for="enableHeatmap">Zusätzliche LPIPS-Heatmap berechnen</label>
           </div>
 
           <div class="toggle-row">
             <input id="carOnlyMode" type="checkbox" />
-            <label for="carOnlyMode">Fahrzeug-Modus aktivieren</label>
+            <label for="carOnlyMode">Nur das Fahrzeug bewerten</label>
           </div>
 
           <details>
@@ -57,19 +57,18 @@
             <div class="field-row">
               <label for="carMode">Fahrzeug-Modus</label>
               <select id="carMode">
-                <option value="neutralize_crop">neutralize_crop</option>
-                <option value="roi_crop">roi_crop</option>
+                <option value="neutralize_crop">Neutralisieren + Zuschneiden</option>
+                <option value="roi_crop">Direkt auf ROI zuschneiden</option>
               </select>
             </div>
             <div class="field-row">
               <label for="maskSource">Maskenquelle</label>
               <select id="maskSource">
-                <option value="ref">ref</option>
-                <option value="gen">gen</option>
-                <option value="union" selected>union</option>
+                <option value="ref">Referenzbild</option>
+                <option value="gen">Vergleichsbild</option>
+                <option value="union" selected>Kombination aus beiden</option>
               </select>
             </div>
-            <p class="field-hint">Standard: <code>union</code> für weniger Richtungsabhängigkeit im Fahrzeugmodus.</p>
           </details>
 
           <div class="actions">
@@ -176,7 +175,7 @@
                 <p class="stat-label">LPIPS (Wert + %)</p>
                 <details class="metric-info">
                   <summary aria-label="LPIPS Erklärung anzeigen">ⓘ</summary>
-                  <p>Zeigt die perzeptuelle Abweichung via offiziellem LPIPS-Forward auf dem vollständigen normalisierten Bildpaar.</p>
+                  <p>Wie unterschiedlich beide Bilder für das Auge wirken – berechnet über LPIPS auf dem normalisierten Gesamtbild.</p>
                 </details>
               </div>
               <p id="lpips" class="stat-value">--</p>
@@ -186,7 +185,7 @@
                 <p class="stat-label">SSIM (Wert + %)</p>
                 <details class="metric-info">
                   <summary aria-label="SSIM Erklärung anzeigen">ⓘ</summary>
-                  <p>Zeigt die strukturelle Ähnlichkeit im gültigen Bildinhalt. Letterbox-Ränder werden nicht mitbewertet.</p>
+                  <p>Vergleicht Strukturen wie Kanten und Flächen im relevanten Bildbereich. Letterbox-Ränder zählen nicht mit.</p>
                 </details>
               </div>
               <p id="ssim" class="stat-value">--</p>
@@ -196,7 +195,7 @@
                 <p class="stat-label">ΔE CIEDE2000 (Wert + %)</p>
                 <details class="metric-info">
                   <summary aria-label="DeltaE Erklärung anzeigen">ⓘ</summary>
-                  <p>Zeigt die sichtbare Farbabweichung im gültigen Bildinhalt. Gepaddete Randbereiche werden ignoriert.</p>
+                  <p>Zeigt, wie stark sich die sichtbaren Farben unterscheiden. Aufgefüllte Randbereiche bleiben außen vor.</p>
                 </details>
               </div>
               <p id="deltaE" class="stat-value">--</p>
@@ -206,7 +205,7 @@
                 <p class="stat-label">LPIPS car-only (Wert + %)</p>
                 <details class="metric-info">
                   <summary aria-label="LPIPS car-only Erklärung anzeigen">ⓘ</summary>
-                  <p>Bewertet die Fahrzeug-ROI per offiziellem LPIPS-Forward auf zugeschnittenem Bildbereich. Ist der Modus aus, bleibt der Wert leer.</p>
+                  <p>Misst die visuelle Abweichung nur im Fahrzeugbereich. Wenn der Modus aus ist, bleibt dieses Feld leer.</p>
                 </details>
               </div>
               <p id="lpipsCar" class="stat-value">--</p>
@@ -216,7 +215,7 @@
                 <p class="stat-label">Mask IoU</p>
                 <details class="metric-info">
                   <summary aria-label="Mask IoU Erklärung anzeigen">ⓘ</summary>
-                  <p>Zeigt die Überdeckung der segmentierten Fahrzeugflächen zwischen Referenz- und Vergleichsbild. Nur verfügbar, wenn Car-only/Fahrzeugsegmentierung erfolgreich war.</p>
+                  <p>Zeigt, wie gut sich die erkannten Fahrzeugflächen überdecken. Gibt es nur mit aktiver und erfolgreicher Fahrzeugsegmentierung.</p>
                 </details>
               </div>
               <p id="maskIou" class="stat-value">--</p>
