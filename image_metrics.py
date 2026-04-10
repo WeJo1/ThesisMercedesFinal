@@ -1032,6 +1032,7 @@ def evaluate_pair(
     mask_trim_px=1,
     include_hausdorff=True,
     lpips_heatmap_dir=None,
+    heatmap_focus_mode="global",
     roi_min_size_px=64,
     roi_square=True,
 ):
@@ -1125,16 +1126,22 @@ def evaluate_pair(
     gen_car_mask = car_masks.get("gen_mask")
     car_focus_mask = car_masks.get("car_mask")
 
+    valid_heatmap_focus_mode = {"global", "car_only"}
+    if heatmap_focus_mode not in valid_heatmap_focus_mode:
+        raise ValueError(
+            f"heatmap_focus_mode muss einer von {sorted(valid_heatmap_focus_mode)} sein. "
+            f"Aktuell: {heatmap_focus_mode}"
+        )
+
     heatmap_overlay_mask = None
     heatmap_mask_mode = None
     heatmap_outline_mask = None
     heatmap_outline_mode = None
-    if car_focus_mask is not None and np.any(car_focus_mask):
+    if heatmap_focus_mode == "car_only" and car_focus_mask is not None and np.any(car_focus_mask):
+        heatmap_overlay_mask = car_focus_mask
+        heatmap_mask_mode = "car_focus"
         heatmap_outline_mask = car_focus_mask
         heatmap_outline_mode = "car_outline"
-        if segmenter is not None and car_metrics.get("lpips_car_only") is not None:
-            heatmap_overlay_mask = car_focus_mask
-            heatmap_mask_mode = "car_focus"
 
     if lpips_heatmap_dir is not None and lpips_spatial_path and lpips_map_mean is not None and lpips_map is not None:
         save_lpips_spatial_map(
@@ -1258,6 +1265,7 @@ def evaluate_folders(
     mask_trim_px=1,
     include_hausdorff=True,
     lpips_heatmap_dir=None,
+    heatmap_focus_mode="global",
     roi_min_size_px=64,
     roi_square=True,
 ):
@@ -1308,6 +1316,7 @@ def evaluate_folders(
             mask_trim_px=mask_trim_px,
             include_hausdorff=include_hausdorff,
             lpips_heatmap_dir=lpips_heatmap_dir,
+            heatmap_focus_mode=heatmap_focus_mode,
             roi_min_size_px=roi_min_size_px,
             roi_square=roi_square,
         )
@@ -1492,6 +1501,7 @@ def main():
             car_only_dir=args.car_only_dir if args.enable_car_only else None,
             include_hausdorff=not args.skip_hausdorff,
             lpips_heatmap_dir=args.lpips_heatmap_dir,
+            heatmap_focus_mode="car_only" if args.enable_car_only else "global",
             roi_min_size_px=args.roi_min_size_px,
             roi_square=args.roi_square,
         )
@@ -1523,6 +1533,7 @@ def main():
         car_only_dir=args.car_only_dir if args.enable_car_only else None,
         include_hausdorff=not args.skip_hausdorff,
         lpips_heatmap_dir=args.lpips_heatmap_dir,
+        heatmap_focus_mode="car_only" if args.enable_car_only else "global",
         roi_min_size_px=args.roi_min_size_px,
         roi_square=args.roi_square,
     )
