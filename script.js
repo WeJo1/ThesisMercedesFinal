@@ -55,10 +55,8 @@ const heatmapHighlightGamma = 0.95;
 const heatmapDisplayBrightnessFloor = 0.18;
 const heatmapUpperStretchPivot = 0.85;
 const heatmapUpperStretchFactor = 1.45;
-const heatmapEdgeBoostStrength = 0.42;
-const heatmapEdgeBoostClamp = 0.55;
-const heatmapSobelBoostStrength = 0.65;
-const heatmapSobelBoostClamp = 0.75;
+const heatmapEdgeBoostStrength = 0.24;
+const heatmapEdgeBoostClamp = 0.32;
 
 const mercedesStarIconPath = 'icons/stern.svg';
 maskSource.value = 'union';
@@ -730,40 +728,17 @@ function buildEdgeAwareNormalizedGrid(values, lowerBound, upperBound) {
   const cols = values[0].length;
   const baseGrid = values.map((row) => row.map((cellValue) => normalizeHeatmapValue(Number(cellValue), lowerBound, upperBound)));
   const edgeAwareGrid = Array.from({ length: rows }, () => Array(cols).fill(0));
-  const getCell = (rowIndex, colIndex) => {
-    const safeRow = Math.max(0, Math.min(rows - 1, rowIndex));
-    const safeCol = Math.max(0, Math.min(cols - 1, colIndex));
-    return baseGrid[safeRow][safeCol];
-  };
 
   for (let rowIndex = 0; rowIndex < rows; rowIndex += 1) {
     for (let colIndex = 0; colIndex < cols; colIndex += 1) {
       const center = baseGrid[rowIndex][colIndex];
-      const left = getCell(rowIndex, colIndex - 1);
-      const right = getCell(rowIndex, colIndex + 1);
-      const up = getCell(rowIndex - 1, colIndex);
-      const down = getCell(rowIndex + 1, colIndex);
+      const left = baseGrid[rowIndex][Math.max(colIndex - 1, 0)];
+      const right = baseGrid[rowIndex][Math.min(colIndex + 1, cols - 1)];
+      const up = baseGrid[Math.max(rowIndex - 1, 0)][colIndex];
+      const down = baseGrid[Math.min(rowIndex + 1, rows - 1)][colIndex];
       const laplacian = (4 * center) - left - right - up - down;
       const clampedEdgeSignal = Math.max(-heatmapEdgeBoostClamp, Math.min(heatmapEdgeBoostClamp, laplacian));
-
-      const topLeft = getCell(rowIndex - 1, colIndex - 1);
-      const top = getCell(rowIndex - 1, colIndex);
-      const topRight = getCell(rowIndex - 1, colIndex + 1);
-      const midLeft = getCell(rowIndex, colIndex - 1);
-      const midRight = getCell(rowIndex, colIndex + 1);
-      const bottomLeft = getCell(rowIndex + 1, colIndex - 1);
-      const bottom = getCell(rowIndex + 1, colIndex);
-      const bottomRight = getCell(rowIndex + 1, colIndex + 1);
-
-      const sobelX = (-1 * topLeft) + (1 * topRight) + (-2 * midLeft) + (2 * midRight) + (-1 * bottomLeft) + (1 * bottomRight);
-      const sobelY = (-1 * topLeft) + (-2 * top) + (-1 * topRight) + (1 * bottomLeft) + (2 * bottom) + (1 * bottomRight);
-      const sobelMagnitude = Math.sqrt((sobelX * sobelX) + (sobelY * sobelY));
-      const clampedSobelSignal = Math.max(0, Math.min(heatmapSobelBoostClamp, sobelMagnitude));
-
-      const midpointEmphasis = 1 - Math.abs((center * 2) - 1);
-      const laplaceBoost = clampedEdgeSignal * heatmapEdgeBoostStrength;
-      const sobelBoost = clampedSobelSignal * heatmapSobelBoostStrength * midpointEmphasis;
-      const boosted = center + laplaceBoost + sobelBoost;
+      const boosted = center + clampedEdgeSignal * heatmapEdgeBoostStrength;
       edgeAwareGrid[rowIndex][colIndex] = Math.min(1, Math.max(0, boosted));
     }
   }
