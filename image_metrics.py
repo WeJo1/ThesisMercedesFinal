@@ -461,6 +461,12 @@ def compute_lpips_on_roi(ref, gen, roi_bbox, lpips_model, use_gpu=False):
     return compute_lpips(ref_roi, gen_roi, lpips_model, use_gpu=use_gpu)
 
 
+def compute_lpips_with_map_on_roi(ref, gen, roi_bbox, lpips_model, use_gpu=False):
+    ref_roi = crop_image_to_bbox(ref, roi_bbox)
+    gen_roi = crop_image_to_bbox(gen, roi_bbox)
+    return compute_lpips_with_map(ref_roi, gen_roi, lpips_model, use_gpu=use_gpu)
+
+
 def resize_mask_to_spatial_map(mask, target_shape):
     if mask is None:
         return None
@@ -1068,18 +1074,6 @@ def evaluate_pair(
     lpips_spatial_path = None
     lpips_map_mean = None
     lpips_map = None
-    if lpips_heatmap_dir is not None:
-        lpips_map_mean, lpips_map = compute_lpips_with_map(
-            ref_norm,
-            gen_norm,
-            lpips_model,
-            use_gpu=use_gpu,
-        )
-    if lpips_heatmap_dir is not None:
-        heatmap_dir = Path(lpips_heatmap_dir)
-        heatmap_dir.mkdir(parents=True, exist_ok=True)
-        spatial_path = heatmap_dir / f"{basename}_lpips_spatial.json"
-        lpips_spatial_path = str(spatial_path)
 
     foreground_mask = compute_foreground_mask_union(ref_norm, gen_norm)
     if valid_content_mask is not None:
@@ -1126,6 +1120,30 @@ def evaluate_pair(
     gen_car_mask = car_masks.get("gen_mask")
     car_focus_mask = car_masks.get("car_mask")
 
+    heatmap_roi_bbox = None
+    has_valid_car_focus_mask = car_focus_mask is not None and np.any(car_focus_mask)
+    if lpips_heatmap_dir is not None:
+        if has_valid_car_focus_mask:
+            heatmap_roi_bbox = compute_mask_roi_bbox(car_focus_mask, ref_norm.shape[:2])
+            lpips_map_mean, lpips_map = compute_lpips_with_map_on_roi(
+                ref_norm,
+                gen_norm,
+                heatmap_roi_bbox,
+                lpips_model,
+                use_gpu=use_gpu,
+            )
+        else:
+            lpips_map_mean, lpips_map = compute_lpips_with_map(
+                ref_norm,
+                gen_norm,
+                lpips_model,
+                use_gpu=use_gpu,
+            )
+        heatmap_dir = Path(lpips_heatmap_dir)
+        heatmap_dir.mkdir(parents=True, exist_ok=True)
+        spatial_path = heatmap_dir / f"{basename}_lpips_spatial.json"
+        lpips_spatial_path = str(spatial_path)
+
     valid_heatmap_focus_mode = {"global", "car_only"}
     if heatmap_focus_mode not in valid_heatmap_focus_mode:
         raise ValueError(
@@ -1137,11 +1155,14 @@ def evaluate_pair(
     heatmap_mask_mode = None
     heatmap_outline_mask = None
     heatmap_outline_mode = None
-    if heatmap_focus_mode == "car_only" and car_focus_mask is not None and np.any(car_focus_mask):
+    if heatmap_focus_mode == "car_only" and has_valid_car_focus_mask:
         heatmap_overlay_mask = car_focus_mask
         heatmap_mask_mode = "car_focus"
         heatmap_outline_mask = car_focus_mask
         heatmap_outline_mode = "car_outline"
+        if heatmap_roi_bbox is not None:
+            heatmap_overlay_mask = crop_mask_to_bbox(heatmap_overlay_mask, heatmap_roi_bbox)
+            heatmap_outline_mask = crop_mask_to_bbox(heatmap_outline_mask, heatmap_roi_bbox)
 
     if lpips_heatmap_dir is not None and lpips_spatial_path and lpips_map_mean is not None and lpips_map is not None:
         save_lpips_spatial_map(
