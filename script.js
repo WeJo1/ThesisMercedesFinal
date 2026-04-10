@@ -55,6 +55,8 @@ const heatmapHighlightGamma = 0.95;
 const heatmapDisplayBrightnessFloor = 0.18;
 const heatmapUpperStretchPivot = 0.85;
 const heatmapUpperStretchFactor = 1.45;
+const heatmapEdgeBoostStrength = 0.24;
+const heatmapEdgeBoostClamp = 0.32;
 
 const mercedesStarIconPath = 'icons/stern.svg';
 maskSource.value = 'union';
@@ -721,6 +723,29 @@ function normalizeHeatmapValue(value, lowerBound, upperBound) {
   return Math.min(1, heatmapUpperStretchPivot + stretchedTail * tailSpan);
 }
 
+function buildEdgeAwareNormalizedGrid(values, lowerBound, upperBound) {
+  const rows = values.length;
+  const cols = values[0].length;
+  const baseGrid = values.map((row) => row.map((cellValue) => normalizeHeatmapValue(Number(cellValue), lowerBound, upperBound)));
+  const edgeAwareGrid = Array.from({ length: rows }, () => Array(cols).fill(0));
+
+  for (let rowIndex = 0; rowIndex < rows; rowIndex += 1) {
+    for (let colIndex = 0; colIndex < cols; colIndex += 1) {
+      const center = baseGrid[rowIndex][colIndex];
+      const left = baseGrid[rowIndex][Math.max(colIndex - 1, 0)];
+      const right = baseGrid[rowIndex][Math.min(colIndex + 1, cols - 1)];
+      const up = baseGrid[Math.max(rowIndex - 1, 0)][colIndex];
+      const down = baseGrid[Math.min(rowIndex + 1, rows - 1)][colIndex];
+      const laplacian = (4 * center) - left - right - up - down;
+      const clampedEdgeSignal = Math.max(-heatmapEdgeBoostClamp, Math.min(heatmapEdgeBoostClamp, laplacian));
+      const boosted = center + clampedEdgeSignal * heatmapEdgeBoostStrength;
+      edgeAwareGrid[rowIndex][colIndex] = Math.min(1, Math.max(0, boosted));
+    }
+  }
+
+  return edgeAwareGrid;
+}
+
 function drawOverlayContour(context, outlineMask, outlineMode, rows, cols, drawWidth, drawHeight) {
   if (!outlineMask || outlineMode !== 'car_outline') {
     return;
@@ -809,6 +834,7 @@ function renderSpatialHeatmap(values, lowerBound, upperBound, overlayMask = null
   const rows = values.length;
   const cols = values[0].length;
   const imageData = context.createImageData(cols, rows);
+  const edgeAwareGrid = buildEdgeAwareNormalizedGrid(values, lowerBound, upperBound);
   logBrowser('Rendering heatmap.', {
     rows,
     cols,
@@ -821,11 +847,10 @@ function renderSpatialHeatmap(values, lowerBound, upperBound, overlayMask = null
 
   values.forEach((row, rowIndex) => {
     row.forEach((cellValue, colIndex) => {
-      const numericValue = Number(cellValue);
       const isMaskedIn = !overlayMask || Boolean(overlayMask[rowIndex]?.[colIndex]);
       const idx = (rowIndex * cols + colIndex) * 4;
-      const normalizedLinear = normalizeHeatmapValue(numericValue, lowerBound, upperBound);
-      const normalizedGamma = normalizedLinear ** heatmapHighlightGamma;
+      const normalizedEdgeAware = edgeAwareGrid[rowIndex][colIndex];
+      const normalizedGamma = normalizedEdgeAware ** heatmapHighlightGamma;
       const normalizedDisplay = heatmapDisplayBrightnessFloor
         + (1 - heatmapDisplayBrightnessFloor) * normalizedGamma;
       const [baseR, baseG, baseB] = getHeatmapColor(normalizedDisplay);
