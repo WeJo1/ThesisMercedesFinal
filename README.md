@@ -13,10 +13,28 @@ cd /workspace/ThesisMercedesFinal
 python3 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
-pip install numpy pandas pillow scikit-image tqdm lpips torch torchvision
+pip install -r requirements.txt
 ```
 
 > Hinweis: Für `--enable-car-only` brauchst du ein funktionierendes `torch` + `torchvision` Setup.
+
+### Windows (PowerShell)
+
+Führe diese Befehle im Projektordner aus:
+
+```powershell
+cd C:\Users\Johannes\Documents\Studium\Wintersemester25\Thesis\Projekt\BestimmungProduktgenauigkeit
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+Wenn du den Fehler `ModuleNotFoundError: No module named 'PIL'` siehst, installiere Abhängigkeiten erneut in der **aktiven** Umgebung:
+
+```powershell
+python -m pip install -r requirements.txt
+```
 
 ## 2) Web-GUI starten
 
