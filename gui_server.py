@@ -24,6 +24,32 @@ MAX_ZIP_SINGLE_IMAGE_BYTES = 25 * 1024 * 1024
 
 
 class MetricsHandler(SimpleHTTPRequestHandler):
+    @staticmethod
+    def build_dependency_hint(stderr_text):
+        if "No module named" not in stderr_text:
+            return None
+
+        missing_module = None
+        for line in stderr_text.splitlines():
+            if "No module named" not in line:
+                continue
+            parts = line.split("No module named", maxsplit=1)
+            if len(parts) != 2:
+                continue
+            missing_module = parts[1].strip().strip("'\"")
+            if missing_module:
+                break
+
+        if not missing_module:
+            return None
+
+        package_name = "scikit-image" if missing_module == "skimage" else missing_module
+        return (
+            f"Installiere das fehlende Python-Paket '{package_name}'. "
+            "Führe danach im Projektordner `python -m pip install -r requirements.txt` aus "
+            "und starte gui_server.py neu."
+        )
+
     def build_preview_payload(self, row, include_previews=True):
         payload = {
             "filename": row.get("filename"),
@@ -170,6 +196,9 @@ class MetricsHandler(SimpleHTTPRequestHandler):
 
             process = subprocess.run(command, cwd=BASE_DIR, capture_output=True, text=True)
             if process.returncode != 0:
+                dependency_hint = self.build_dependency_hint(process.stderr)
+                if dependency_hint:
+                    raise RuntimeError(dependency_hint)
                 raise RuntimeError(process.stderr.strip() or process.stdout.strip() or "image_metrics.py fehlgeschlagen")
 
             with csv_path.open("r", encoding="utf-8") as csv_file:
