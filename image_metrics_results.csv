@@ -1,2 +1,2 @@
-filename,ssim,lpips,deltaE00_mean
-schwarz.png,0.000100,0.646969,99.967552
+filename,reference_width,reference_height,generated_width,generated_height,normalized_width,normalized_height,normalization_mode,ssim,lpips,delta_e_ciede2000,mask_iou,mask_dice,mask_area_ratio,centroid_distance_px,centroid_distance_norm,hausdorff_px,hausdorff_norm,ref_norm_path,gen_norm_path
+schwarz.png,6912,3456,6912,3456,6912,3456,letterbox,0.000100,0.646969,99.967552,0.000000,0.000000,0.000000,93.116905,0.012050,inf,inf,normalized\schwarz_ref_norm.png,normalized\schwarz_gen_norm.png
