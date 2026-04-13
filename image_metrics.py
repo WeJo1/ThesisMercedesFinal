@@ -42,6 +42,7 @@ CSV_COLUMN_ORDER = [
     "generated_height",
     "normalized_width",
     "normalized_height",
+    "metric_scale_factor",
     "normalization_mode",
     "main_metric_scope",
     "content_mask_area_px",
@@ -98,6 +99,7 @@ CSV_FLOAT_COLUMNS = [
     "hausdorff_px",
     "hausdorff_norm",
     "car_mask_area_ratio",
+    "metric_scale_factor",
 ]
 
 
@@ -209,6 +211,43 @@ def normalize_pair(ref_img, gen_img, mode="letterbox", pad_color=LETTERBOX_PAD_C
     content_mask = np.zeros((ref_h, ref_w), dtype=bool)
     content_mask[offset_y : offset_y + scaled_h, offset_x : offset_x + scaled_w] = True
     return ref_norm, gen_norm, content_mask
+
+
+def downscale_pair_for_metrics(ref_img, gen_img, content_mask=None, max_long_edge_px=1600):
+    if max_long_edge_px is None:
+        return ref_img, gen_img, content_mask, 1.0
+
+    limit = int(max_long_edge_px)
+    if limit <= 0:
+        raise ValueError("max_long_edge_px muss > 0 sein.")
+
+    h, w = ref_img.shape[:2]
+    current_long_edge = max(h, w)
+    if current_long_edge <= limit:
+        return ref_img, gen_img, content_mask, 1.0
+
+    scale = float(limit / current_long_edge)
+    target_w = max(1, int(round(w * scale)))
+    target_h = max(1, int(round(h * scale)))
+
+    ref_resized = np.asarray(
+        np_to_pil_uint8(ref_img).resize((target_w, target_h), resample=Image.Resampling.LANCZOS),
+        dtype=np.float32,
+    ) / 255.0
+    gen_resized = np.asarray(
+        np_to_pil_uint8(gen_img).resize((target_w, target_h), resample=Image.Resampling.LANCZOS),
+        dtype=np.float32,
+    ) / 255.0
+
+    resized_mask = None
+    if content_mask is not None:
+        mask_img = Image.fromarray(np.asarray(content_mask, dtype=np.uint8) * 255, mode="L")
+        resized_mask = np.asarray(
+            mask_img.resize((target_w, target_h), resample=Image.Resampling.NEAREST),
+            dtype=np.uint8,
+        ).astype(bool)
+
+    return ref_resized, gen_resized, resized_mask, scale
 
 
 def save_normalized_pair(ref_norm, gen_norm, basename, out_dir):
@@ -1035,6 +1074,7 @@ def evaluate_pair(
     heatmap_focus_mode="global",
     roi_min_size_px=64,
     roi_square=True,
+    max_metric_long_edge=1600,
 ):
     ref_img = load_image(ref_path)
     gen_img = load_image(gen_path)
@@ -1045,6 +1085,12 @@ def evaluate_pair(
     gen_h, gen_w = gen_img.shape[:2]
 
     ref_norm, gen_norm, content_mask = normalize_pair(ref_img, gen_img, mode=mode)
+    ref_norm, gen_norm, content_mask, metric_scale = downscale_pair_for_metrics(
+        ref_norm,
+        gen_norm,
+        content_mask=content_mask,
+        max_long_edge_px=max_metric_long_edge,
+    )
     validate_image_for_metrics(ref_norm, image_name="ref_norm")
     validate_image_for_metrics(gen_norm, image_name="gen_norm")
     norm_h, norm_w = ref_norm.shape[:2]
@@ -1164,6 +1210,7 @@ def evaluate_pair(
     print(f"  Reference original : {ref_w}x{ref_h}")
     print(f"  Generated original : {gen_w}x{gen_h}")
     print(f"  Normalized sizes   : {norm_w}x{norm_h}")
+    print(f"  Metric scale factor: {metric_scale:.6f}")
     if valid_content_mask is not None:
         content_area_px = int(np.sum(valid_content_mask))
         content_area_ratio = float(content_area_px / valid_content_mask.size)
@@ -1209,6 +1256,7 @@ def evaluate_pair(
         "generated_height": gen_h,
         "normalized_width": norm_w,
         "normalized_height": norm_h,
+        "metric_scale_factor": metric_scale,
         "normalization_mode": mode,
         "main_metric_scope": "content_mask" if valid_content_mask is not None else "full_frame_fallback",
         "content_mask_area_px": content_area_px,
@@ -1268,6 +1316,7 @@ def evaluate_folders(
     heatmap_focus_mode="global",
     roi_min_size_px=64,
     roi_square=True,
+    max_metric_long_edge=1600,
 ):
     ref_dir = Path(reference_dir)
     gen_dir = Path(generated_dir)
@@ -1319,6 +1368,7 @@ def evaluate_folders(
             heatmap_focus_mode=heatmap_focus_mode,
             roi_min_size_px=roi_min_size_px,
             roi_square=roi_square,
+            max_metric_long_edge=max_metric_long_edge,
         )
         results.append(result)
 
@@ -1389,6 +1439,12 @@ def parse_args():
     parser.add_argument("--mask-trim-px", type=int, default=1, help="Schneide Maskenrand um X Pixel ein für sauberere Konturen")
     parser.add_argument("--roi-min-size-px", type=int, default=64, help="Minimale Kantenlänge der Car-ROI in Pixel")
     parser.add_argument("--roi-square", action="store_true", help="Erzwinge quadratische Car-ROI für stabilere Vergleiche")
+    parser.add_argument(
+        "--max-metric-long-edge",
+        type=int,
+        default=1600,
+        help="Skaliere normalisierte Bilder vor der Metrik-Berechnung auf diese maximale Kantenlänge (Performance-Schutz).",
+    )
     parser.add_argument("--eps", type=float, default=1e-8, help="Deprecated: ohne produktive Wirkung")
     parser.add_argument("--mask-score-threshold", type=float, default=0.5, help="Score-Schwelle für Vehicle-Segmentierung")
     parser.add_argument("--mask-threshold", type=float, default=0.5, help="Pixel-Schwelle der Segmentierungsmaske [0..1]")
@@ -1450,6 +1506,7 @@ def main():
     print(f"[INFO] Deterministisch : {args.deterministic}")
     print(f"[INFO] ROI min-size px : {args.roi_min_size_px}")
     print(f"[INFO] ROI square      : {args.roi_square}")
+    print(f"[INFO] Max metric edge : {args.max_metric_long_edge}")
     print(f"[INFO] Car-only aktiv  : {args.enable_car_only}")
     print("============================================================")
     run_lpips_pipeline_sanity_checks()
@@ -1504,6 +1561,7 @@ def main():
             heatmap_focus_mode="car_only" if args.enable_car_only else "global",
             roi_min_size_px=args.roi_min_size_px,
             roi_square=args.roi_square,
+            max_metric_long_edge=args.max_metric_long_edge,
         )
         build_result_dataframe([result]).to_csv(args.output_csv, index=False, float_format="%.6f", na_rep="")
         print(f"[INFO] Einzelvergleich gespeichert: {args.output_csv}")
@@ -1536,6 +1594,7 @@ def main():
         heatmap_focus_mode="car_only" if args.enable_car_only else "global",
         roi_min_size_px=args.roi_min_size_px,
         roi_square=args.roi_square,
+        max_metric_long_edge=args.max_metric_long_edge,
     )
 
 
