@@ -47,6 +47,8 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             "norm_dir": run_root / "normalized",
             "car_only_dir": run_root / "car_only",
             "spatial_dir": run_root / "lpips_spatial",
+            "reflection_dir": run_root / "reflection_tolerant_diagnostics",
+            "reflection_json_dir": run_root / "reflection_tolerant_json",
             "uploads_dir": run_root / "uploads",
         }
 
@@ -64,6 +66,12 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             "delta_e_similarity_percent": row.get("delta_e_similarity_percent"),
             "lpips_car_only": row.get("lpips_car_only"),
             "lpips_car_only_similarity_percent": row.get("lpips_car_only_similarity_percent"),
+            "reflection_tolerant_lpips": row.get("reflection_tolerant_lpips"),
+            "product_detail_lpips": row.get("product_detail_lpips"),
+            "structure_integrity_score": row.get("structure_integrity_score"),
+            "final_similarity_status": row.get("final_similarity_status"),
+            "reflection_tolerant_json": row.get("reflection_tolerant_json"),
+            "reflection_tolerant_enabled": row.get("reflection_tolerant_lpips") not in (None, "", "None", "nan"),
             "mask_iou": row.get("mask_iou"),
             "mask_dice": row.get("mask_dice"),
             "mask_metric_scope": row.get("mask_metric_scope", "none"),
@@ -143,6 +151,7 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             "lpips_net": form.getfirst("lpips_net", "alex"),
             "enable_heatmap": form.getfirst("enable_heatmap", "true") == "true",
             "enable_car_only": form.getfirst("enable_car_only", "false") == "true",
+            "enable_reflection_tolerant": form.getfirst("enable_reflection_tolerant", "true") == "true",
             "car_mode": form.getfirst("car_mode", "neutralize_crop"),
             "mask_source": form.getfirst("mask_source", "union"),
         }
@@ -193,7 +202,7 @@ class MetricsHandler(SimpleHTTPRequestHandler):
                 ]
             )
 
-        if payload["enable_car_only"]:
+        if payload["enable_car_only"] or payload["enable_reflection_tolerant"]:
             command.extend(
                 [
                     "--enable-car-only",
@@ -203,6 +212,17 @@ class MetricsHandler(SimpleHTTPRequestHandler):
                     payload["mask_source"],
                     "--car-only-dir",
                     str(run_paths["car_only_dir"]),
+                ]
+            )
+
+        if payload["enable_reflection_tolerant"]:
+            command.extend(
+                [
+                    "--enable-reflection-tolerant-lpips",
+                    "--reflection-diagnostic-dir",
+                    str(run_paths["reflection_dir"]),
+                    "--reflection-json",
+                    str(run_paths["reflection_json_dir"]),
                 ]
             )
 

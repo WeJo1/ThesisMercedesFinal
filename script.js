@@ -3,6 +3,7 @@ const genImage = document.getElementById('genImage');
 const lpipsNet = document.getElementById('lpipsNet');
 const enableHeatmap = document.getElementById('enableHeatmap');
 const carOnlyMode = document.getElementById('carOnlyMode');
+const reflectionTolerantMode = document.getElementById('reflectionTolerantMode');
 const carMode = document.getElementById('carMode');
 const maskSource = document.getElementById('maskSource');
 
@@ -39,6 +40,8 @@ const contentGrid = document.querySelector('.content-grid');
 const lpipsValue = document.getElementById('lpips');
 const ssim = document.getElementById('ssim');
 const deltaE = document.getElementById('deltaE');
+const reflectionLpips = document.getElementById('reflectionLpips');
+const reflectionStatus = document.getElementById('reflectionStatus');
 const lpipsCar = document.getElementById('lpipsCar');
 const maskIou = document.getElementById('maskIou');
 const maskDice = document.getElementById('maskDice');
@@ -1259,6 +1262,12 @@ function renderMetrics(data) {
   lpipsValue.textContent = formatMetricPair(data.lpips, data.lpips_similarity_percent);
   ssim.textContent = formatMetricPair(data.ssim, data.ssim_percent);
   deltaE.textContent = formatMetricPair(data.delta_e_ciede2000, data.delta_e_similarity_percent);
+  reflectionLpips.textContent = data?.reflection_tolerant_enabled
+    ? formatNumeric(data.reflection_tolerant_lpips)
+    : '--';
+  reflectionStatus.textContent = data?.reflection_tolerant_enabled
+    ? (data.final_similarity_status || '--')
+    : '--';
   lpipsCar.textContent = hasCarOnlyMetric
     ? formatMetricPair(data.lpips_car_only, data.lpips_car_only_similarity_percent)
     : '--';
@@ -1309,6 +1318,8 @@ function renderComparisonList(comparisons) {
       }
       <ul>
         <li>LPIPS: ${formatMetricPair(item.lpips, item.lpips_similarity_percent)}</li>
+        <li>Reflection-tolerant LPIPS: ${item.reflection_tolerant_enabled ? formatNumeric(item.reflection_tolerant_lpips) : '--'}</li>
+        <li>Reflection Status: ${item.reflection_tolerant_enabled ? (item.final_similarity_status || '--') : '--'}</li>
         <li>SSIM: ${formatMetricPair(item.ssim, item.ssim_percent)}</li>
         <li>ΔE CIEDE2000: ${formatMetricPair(item.delta_e_ciede2000, item.delta_e_similarity_percent)}</li>
       </ul>
@@ -1493,6 +1504,7 @@ async function runComparison() {
   payload.append('lpips_net', lpipsNet.value);
   payload.append('enable_heatmap', String(enableHeatmap.checked));
   payload.append('enable_car_only', String(carOnlyMode.checked));
+  payload.append('enable_reflection_tolerant', String(reflectionTolerantMode.checked));
   payload.append('car_mode', carMode.value);
   payload.append('mask_source', maskSource.value);
 
@@ -1503,6 +1515,7 @@ async function runComparison() {
       lpipsNet: lpipsNet.value,
       enableHeatmap: enableHeatmap.checked,
       enableCarOnly: carOnlyMode.checked,
+      enableReflectionTolerant: reflectionTolerantMode.checked,
       carMode: carMode.value,
       maskSource: maskSource.value,
     });
@@ -1547,6 +1560,7 @@ function resetInterface() {
   lpipsNet.value = 'alex';
   enableHeatmap.checked = true;
   carOnlyMode.checked = false;
+  reflectionTolerantMode.checked = true;
   carMode.value = 'neutralize_crop';
   maskSource.value = 'union';
 
@@ -1557,7 +1571,7 @@ function resetInterface() {
   comparisonSection.hidden = true;
   comparisonList.innerHTML = '';
 
-  [lpipsValue, ssim, deltaE, lpipsCar, maskIou, maskDice].forEach((node) => {
+  [lpipsValue, ssim, deltaE, reflectionLpips, reflectionStatus, lpipsCar, maskIou, maskDice].forEach((node) => {
     node.textContent = node.id.includes('Similarity') ? '-- %' : '--';
   });
 
