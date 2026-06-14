@@ -58,7 +58,7 @@ const heatmapUpperStretchFactor = 1.45;
 const heatmapEdgeBoostStrength = 0.24;
 const heatmapEdgeBoostClamp = 0.32;
 
-const mercedesStarIconPath = 'icons/stern.svg';
+const mercedesStarIconPath = 'icons/stern1.png';
 maskSource.value = 'union';
 
 function logBrowser(message, details = null) {
