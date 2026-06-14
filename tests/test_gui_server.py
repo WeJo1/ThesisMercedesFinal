@@ -12,6 +12,15 @@ def test_preview_payload_exposes_weighted_reflection_lpips_to_ui():
         {
             "filename": "pair.png",
             "reflection_tolerant_lpips": "0.1234",
+            "raw_lpips_distance": "0.2000",
+            "raw_lpips_similarity_percent": "80.0000",
+            "weighted_lpips_distance": "0.1234",
+            "weighted_lpips_similarity_percent": "87.6600",
+            "final_similarity_percent": "87.6600",
+            "final_metric": "weighted_lpips_similarity_percent",
+            "weighting_enabled": "True",
+            "active_weight_profile": "generic_mercedes",
+            "weighting_mode": "mercedes_reflection_tolerant_lpips",
             "product_detail_lpips": "0.0100",
             "structure_integrity_score": "0.0200",
             "final_similarity_status": "pass",
@@ -21,6 +30,12 @@ def test_preview_payload_exposes_weighted_reflection_lpips_to_ui():
     )
 
     assert payload["reflection_tolerant_enabled"] is True
+    assert payload["metrics"]["weighted_lpips_distance"] == "0.1234"
+    assert payload["metrics"]["final_metric"] == "weighted_lpips_similarity_percent"
+    assert payload["metrics"]["final_similarity_percent"] == "87.6600"
+    assert payload["metrics"]["final_similarity_percent"] != payload["metrics"]["raw_lpips_similarity_percent"]
+    assert payload["weighting_enabled"] is True
+    assert payload["active_weight_profile"] == "generic_mercedes"
     assert payload["reflection_tolerant_lpips"] == "0.1234"
     assert payload["product_detail_lpips"] == "0.0100"
     assert payload["structure_integrity_score"] == "0.0200"

@@ -55,9 +55,24 @@ class MetricsHandler(SimpleHTTPRequestHandler):
     def build_preview_payload(self, row, include_previews=True):
         lpips_car_only = row.get("lpips_car_only")
         has_car_only_value = lpips_car_only not in (None, "", "None", "nan")
+        weighting_enabled = str(row.get("weighting_enabled", "")).lower() == "true"
+        metrics = {
+            "raw_lpips_distance": row.get("raw_lpips_distance") or row.get("lpips"),
+            "weighted_lpips_distance": row.get("weighted_lpips_distance") or row.get("reflection_tolerant_lpips"),
+            "raw_lpips_similarity_percent": row.get("raw_lpips_similarity_percent") or row.get("lpips_similarity_percent"),
+            "weighted_lpips_similarity_percent": row.get("weighted_lpips_similarity_percent"),
+            "final_similarity_percent": row.get("final_similarity_percent") or row.get("lpips_similarity_percent"),
+            "final_metric": row.get("final_metric") or "raw_lpips_similarity_percent",
+            "weighting_enabled": weighting_enabled,
+            "active_weight_profile": row.get("active_weight_profile"),
+            "weighting_mode": row.get("weighting_mode"),
+            "weight_map_source": row.get("weight_map_source"),
+        }
         payload = {
             "filename": row.get("filename"),
             "lpips": row.get("lpips"),
+            **metrics,
+            "metrics": metrics,
             "lpips_map_mean": row.get("lpips_map_mean"),
             "lpips_similarity_percent": row.get("lpips_similarity_percent"),
             "ssim": row.get("ssim"),
@@ -71,7 +86,7 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             "structure_integrity_score": row.get("structure_integrity_score"),
             "final_similarity_status": row.get("final_similarity_status"),
             "reflection_tolerant_json": row.get("reflection_tolerant_json"),
-            "reflection_tolerant_enabled": row.get("reflection_tolerant_lpips") not in (None, "", "None", "nan"),
+            "reflection_tolerant_enabled": weighting_enabled or row.get("reflection_tolerant_lpips") not in (None, "", "None", "nan"),
             "mask_iou": row.get("mask_iou"),
             "mask_dice": row.get("mask_dice"),
             "mask_metric_scope": row.get("mask_metric_scope", "none"),

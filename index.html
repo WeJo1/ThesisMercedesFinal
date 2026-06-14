@@ -178,10 +178,10 @@
           <div class="stats-grid">
             <article class="metric-card metric-card-priority">
               <div class="stat-label-row">
-                <p class="stat-label">LPIPS (Wert + %)</p>
+                <p class="stat-label">Weighted LPIPS Similarity (final)</p>
                 <details class="metric-info">
                   <summary aria-label="LPIPS Erklärung anzeigen">ⓘ</summary>
-                  <p>Zeigt die perzeptuelle Abweichung via offiziellem LPIPS-Forward auf dem vollständigen normalisierten Bildpaar.</p>
+                  <p>Zeigt bei aktiver Mercedes-Gewichtung den finalen gewichteten Similarity-Prozentwert. Ohne Gewichtung fällt die Anzeige auf Raw LPIPS Similarity zurück.</p>
                 </details>
               </div>
               <p id="lpips" class="stat-value">--</p>
@@ -208,13 +208,33 @@
             </article>
             <article class="metric-card metric-card-priority">
               <div class="stat-label-row">
-                <p class="stat-label">Reflection-tolerant LPIPS (gewichtet)</p>
+                <p class="stat-label">Weighted LPIPS Distance</p>
                 <details class="metric-info">
                   <summary aria-label="Reflection-tolerant LPIPS Erklärung anzeigen">ⓘ</summary>
                   <p>Zeigt den gewichteten Mercedes-LPIPS-Wert: Reflexionsflächen zählen weniger, Produktdetails und Struktur bleiben hoch gewichtet.</p>
                 </details>
               </div>
               <p id="reflectionLpips" class="stat-value">--</p>
+            </article>
+            <article class="metric-card">
+              <div class="stat-label-row">
+                <p class="stat-label">Raw LPIPS Distance</p>
+                <details class="metric-info">
+                  <summary aria-label="Raw LPIPS Erklärung anzeigen">ⓘ</summary>
+                  <p>Ungewichtete LPIPS-Distanz auf dem normalisierten Bildinhalt. Niedriger ist ähnlicher.</p>
+                </details>
+              </div>
+              <p id="rawLpipsDistance" class="stat-value">--</p>
+            </article>
+            <article class="metric-card">
+              <div class="stat-label-row">
+                <p class="stat-label">Mercedes Weighting</p>
+                <details class="metric-info">
+                  <summary aria-label="Mercedes Gewichtung Erklärung anzeigen">ⓘ</summary>
+                  <p>Zeigt, ob die Mercedes-spezifische Gewichtung aktiv ist, welches Profil genutzt wird und welcher Wert final angezeigt wird.</p>
+                </details>
+              </div>
+              <p id="weightingInfo" class="stat-value stat-value-small">--</p>
             </article>
             <article class="metric-card">
               <div class="stat-label-row">
