@@ -1,0 +1,58 @@
+{
+  "weights": {
+    "background_outside_vehicle": 0.0,
+    "broad_smooth_paint_reflection_zone": 0.25,
+    "glass_or_window_reflection_zone": 0.10,
+    "normal_vehicle_surface": 0.60,
+    "structural_edge_zone": 1.00,
+    "product_detail_zone": 1.20,
+    "brand_critical_zone": 1.50
+  },
+  "heuristics": {
+    "edge_sigma": 1.2,
+    "structure_dilation_px": 2,
+    "low_texture_percentile": 35,
+    "low_edge_percentile": 45,
+    "minimum_reflection_component_area_px": 32,
+    "glass_dark_luminance_max": 0.38,
+    "glass_saturation_max": 0.35,
+    "glass_upper_vehicle_fraction": 0.58
+  },
+  "profiles": {
+    "generic_mercedes": {
+      "region_priorities": ["brand_critical_zone", "product_detail_zone", "structural_edge_zone", "normal_vehicle_surface", "broad_smooth_paint_reflection_zone", "glass_or_window_reflection_zone"],
+      "product_detail_masks": ["grille", "front_panel", "emblem", "headlights", "drl", "taillights", "wheels", "wheel_center_star", "silhouette", "roofline", "shoulder_line", "beltline", "side_character_lines", "wheel_arches", "hood_creases", "bumpers", "door_handles", "mirrors", "panel_gaps"],
+      "brand_critical_masks": ["emblem", "wheel_center_star"]
+    },
+    "cla_shooting_brake_or_coupe": {
+      "extends": "generic_mercedes",
+      "product_detail_masks": ["sloping_roofline", "shooting_brake_rear_roof_extension", "coupe_side_window_outline", "descending_window_line", "front_headlight_shape", "compact_front_grille", "side_character_line", "rear_light_signature"]
+    },
+    "c_class_e_class_s_class": {
+      "extends": "generic_mercedes",
+      "product_detail_masks": ["sedan_estate_proportions", "long_hood_impression", "clean_side_shoulder_line", "front_grille_geometry", "headlight_signature", "taillight_signature", "chrome_trim_lines", "wheel_design", "rear_bumper", "trunk_shape"]
+    },
+    "glc_gle_gls_suv": {
+      "extends": "generic_mercedes",
+      "product_detail_masks": ["upright_suv_proportions", "wheel_arch_geometry", "roof_rails", "front_grille_geometry", "headlight_signature", "large_rear_tailgate_shape", "suv_bumper_geometry", "side_window_outline", "rear_light_signature", "stance", "ride_height"]
+    },
+    "g_class": {
+      "extends": "generic_mercedes",
+      "product_detail_masks": ["boxy_silhouette", "vertical_windshield", "flat_side_panels", "round_headlights", "front_indicator_units", "external_hinges", "spare_wheel_cover", "upright_grille", "wheel_arch_extensions", "rectangular_body_geometry", "door_handles", "protective_side_strips"]
+    },
+    "eq_electric": {
+      "extends": "generic_mercedes",
+      "product_detail_masks": ["closed_front_panel", "star_pattern_panel", "illuminated_panel_elements", "smooth_aerodynamic_front_fascia", "flush_door_handles", "aero_wheel_design", "connected_light_signatures", "smooth_roofline", "aerodynamic_silhouette"]
+    },
+    "amg": {
+      "extends": "generic_mercedes",
+      "product_detail_masks": ["amg_grille_pattern", "large_lower_air_intakes", "front_splitter", "aggressive_bumper_geometry", "amg_wheels", "wider_stance_cues", "side_skirts", "rear_diffuser", "exhaust_outlets", "amg_badges"],
+      "brand_critical_masks": ["emblem", "wheel_center_star", "amg_badges", "amg_grille_pattern"]
+    },
+    "maybach": {
+      "extends": "generic_mercedes",
+      "product_detail_masks": ["maybach_grille_treatment", "chrome_emphasis", "hood_ornament", "maybach_badges", "two_tone_paint_separation_line", "luxury_multi_spoke_wheel_design", "distinctive_rear_pillar", "side_trim", "high_chrome_bumper", "window_trim"],
+      "brand_critical_masks": ["emblem", "hood_ornament", "maybach_badges", "maybach_grille_treatment"]
+    }
+  }
+}
