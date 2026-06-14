@@ -188,3 +188,9 @@ Nutze diese Leitlinie:
 2. Starte `python3 gui_server.py` **oder** führe `python3 image_metrics.py ...` aus.
 3. Prüfe `image_metrics_results.csv`.
 4. Wiederhole den Lauf mit angepassten Optionen.
+
+## 11) Mercedes Reflection-tolerant Similarity
+
+Siehe die ausführliche Dokumentation unter [`docs/mercedes_reflection_tolerant_pipeline.md`](docs/mercedes_reflection_tolerant_pipeline.md).
+
+Kurz gesagt: Die Pipeline entfernt keine Reflexionen aus dem Bild. Sie bewertet Ähnlichkeit transparenter, indem sie reflexionsartige Flächen niedriger gewichtet und Mercedes-relevante Struktur- und Produktdetails schützt. Speichere Diagnose-Heatmaps und JSON-Reports, damit jeder finale Score auf Masken, Gewichte und Schwellwerte zurückführbar bleibt.
