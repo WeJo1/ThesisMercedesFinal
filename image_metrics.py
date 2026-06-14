@@ -7,10 +7,13 @@ import numpy as np
 import pandas as pd
 from PIL import Image
 from skimage import color
+from skimage.feature import canny
 from skimage.filters import threshold_otsu
 from skimage.metrics import hausdorff_distance, structural_similarity
 from skimage.morphology import binary_closing, binary_dilation, binary_erosion, disk, remove_small_holes, remove_small_objects
 from tqdm import tqdm
+
+from mercedes_weighting import MercedesWeightMapBuilder
 
 TORCH_IMPORT_ERROR = None
 
@@ -34,6 +37,12 @@ except Exception:
 SUPPORTED_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff")
 LETTERBOX_PAD_COLOR = (127, 127, 127)
 COCO_VEHICLE_CLASSES = {3, 4, 6, 8}
+DEFAULT_REFLECTION_TOLERANT_THRESHOLDS = {
+    "reflection_tolerant_lpips": 0.18,
+    "product_detail_lpips": 0.14,
+    "structure_integrity_score": 0.22,
+    "standard_vehicle_lpips_warning": 0.30,
+}
 CSV_COLUMN_ORDER = [
     "filename",
     "reference_width",
@@ -58,6 +67,11 @@ CSV_COLUMN_ORDER = [
     "delta_e_similarity_percent",
     "lpips_car_only",
     "lpips_car_only_similarity_percent",
+    "reflection_tolerant_lpips",
+    "product_detail_lpips",
+    "structure_integrity_score",
+    "final_similarity_status",
+    "reflection_tolerant_json",
     "ssim_car_only",
     "mask_metric_scope",
     "mask_iou",
@@ -90,6 +104,9 @@ CSV_FLOAT_COLUMNS = [
     "delta_e_similarity_percent",
     "lpips_car_only",
     "lpips_car_only_similarity_percent",
+    "reflection_tolerant_lpips",
+    "product_detail_lpips",
+    "structure_integrity_score",
     "ssim_car_only",
     "mask_iou",
     "mask_dice",
@@ -411,6 +428,244 @@ def compute_lpips_with_map(ref, gen, lpips_model, use_gpu=False):
     if dist_map.ndim == 0:
         dist_map = np.array([[float(dist_map)]], dtype=np.float32)
     return dist_value, dist_map
+
+
+def normalize_metric_mask(mask, expected_shape, mask_name):
+    arr = np.asarray(mask, dtype=np.float32)
+    if arr.ndim == 3:
+        arr = np.mean(arr, axis=2)
+    if arr.shape != expected_shape:
+        raise ValueError(f"{mask_name} hat Form {arr.shape}, erwartet ist {expected_shape}.")
+    if arr.size == 0:
+        return arr.astype(np.float32)
+    if float(np.nanmax(arr)) > 1.0:
+        arr = arr / 255.0
+    arr = np.nan_to_num(arr, nan=0.0, posinf=1.0, neginf=0.0)
+    arr = np.clip(arr, 0.0, 1.0)
+    unique = np.unique(arr)
+    if unique.size > 2 or not np.all(np.isin(unique, [0.0, 1.0])):
+        arr = (arr >= 0.5).astype(np.float32)
+    return arr.astype(np.float32)
+
+
+def normalize_weight_map(weight_map, expected_shape):
+    arr = np.asarray(weight_map, dtype=np.float32)
+    if arr.ndim == 3:
+        arr = np.mean(arr, axis=2)
+    if arr.shape != expected_shape:
+        raise ValueError(f"weight_map hat Form {arr.shape}, erwartet ist {expected_shape}.")
+    arr = np.nan_to_num(arr, nan=0.0, posinf=1.0, neginf=0.0)
+    if arr.size and float(np.nanmax(arr)) > 1.5:
+        arr = arr / 255.0
+    return np.clip(arr, 0.0, None).astype(np.float32)
+
+
+def resize_float_map_to_shape(value_map, target_shape, resample=Image.Resampling.BILINEAR):
+    value_map = np.asarray(value_map, dtype=np.float32)
+    if value_map.ndim == 0:
+        value_map = value_map.reshape(1, 1)
+    if value_map.ndim == 1:
+        value_map = value_map[np.newaxis, :]
+    target_h, target_w = target_shape
+    if value_map.shape == (target_h, target_w):
+        return value_map
+    source = value_map
+    min_val = float(np.min(source))
+    max_val = float(np.max(source))
+    if max_val > min_val:
+        normalized = (source - min_val) / (max_val - min_val)
+    else:
+        normalized = np.zeros_like(source, dtype=np.float32)
+    image = Image.fromarray((normalized * 255.0).astype(np.uint8), mode="L")
+    resized = np.asarray(image.resize((target_w, target_h), resample=resample), dtype=np.float32) / 255.0
+    return resized * (max_val - min_val) + min_val
+
+
+def weighted_mean_map(value_map, weight_map, eps=1e-8):
+    values = np.asarray(value_map, dtype=np.float32)
+    weights = np.asarray(weight_map, dtype=np.float32)
+    if values.shape != weights.shape:
+        raise ValueError(f"value_map und weight_map brauchen dieselbe Form ({values.shape} vs. {weights.shape}).")
+    denom = float(np.sum(weights))
+    if denom <= float(eps):
+        return None
+    return float(np.sum(values * weights) / (denom + float(eps)))
+
+
+def save_float_heatmap_png(value_map, path):
+    arr = np.asarray(value_map, dtype=np.float32)
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if arr.ndim == 0:
+        arr = arr.reshape(1, 1)
+    min_val = float(np.min(arr))
+    max_val = float(np.max(arr))
+    if max_val > min_val:
+        arr = (arr - min_val) / (max_val - min_val)
+    else:
+        arr = np.zeros_like(arr, dtype=np.float32)
+    Image.fromarray((np.clip(arr, 0.0, 1.0) * 255.0).astype(np.uint8), mode="L").save(path)
+    return str(path)
+
+
+def compute_structure_integrity_score(
+    reference_image,
+    candidate_image,
+    vehicle_mask,
+    structure_mask,
+    low_weight_mask=None,
+    edge_sigma=1.2,
+    dilation_radius=5,
+):
+    ref_gray = color.rgb2gray(reference_image)
+    cand_gray = color.rgb2gray(candidate_image)
+    vehicle = np.asarray(vehicle_mask, dtype=bool)
+    protected = np.asarray(structure_mask, dtype=bool) & vehicle
+    ref_edges = canny(ref_gray, sigma=float(edge_sigma)) & vehicle
+    cand_edges = canny(cand_gray, sigma=float(edge_sigma)) & vehicle
+    radius = max(0, int(dilation_radius))
+    if radius > 0:
+        ref_neighborhood = binary_dilation(ref_edges, footprint=disk(radius))
+        cand_neighborhood = binary_dilation(cand_edges, footprint=disk(radius))
+    else:
+        ref_neighborhood = ref_edges
+        cand_neighborhood = cand_edges
+    protected_area = (binary_dilation(ref_edges, footprint=disk(radius)) if radius > 0 else ref_edges) | protected
+    protected_area &= vehicle
+    if low_weight_mask is not None:
+        protected_area |= (np.asarray(low_weight_mask, dtype=bool) & vehicle & (ref_edges | cand_edges | ref_neighborhood | cand_neighborhood))
+
+    missing = ref_edges & ~cand_neighborhood & protected_area
+    introduced = cand_edges & ~ref_neighborhood & protected_area
+    changed = missing | introduced
+    edge_union = (ref_edges | cand_edges) & protected_area
+    denom = max(1, int(np.sum(edge_union)))
+    score = float(np.sum(changed) / denom)
+    return {
+        "score": score,
+        "reference_edges": ref_edges.astype(np.float32),
+        "candidate_edges": cand_edges.astype(np.float32),
+        "protected_structure_area": protected_area.astype(np.float32),
+        "structure_change_map": changed.astype(np.float32),
+        "missing_edge_ratio": float(np.sum(missing) / max(1, int(np.sum(ref_edges & protected_area)))),
+        "introduced_edge_ratio": float(np.sum(introduced) / max(1, int(np.sum(cand_edges & protected_area)))),
+    }
+
+
+def compute_reflection_tolerant_lpips_scores(
+    reference_image,
+    candidate_image,
+    vehicle_mask,
+    weight_map,
+    product_detail_mask,
+    structure_mask,
+    lpips_model,
+    thresholds=None,
+    use_gpu=False,
+    diagnostic_dir=None,
+    basename="pair",
+    legacy_mode=False,
+    structure_dilation_radius=5,
+):
+    if reference_image.shape != candidate_image.shape:
+        raise ValueError(f"reference_image und candidate_image brauchen dieselbe Form ({reference_image.shape} vs. {candidate_image.shape}).")
+    validate_image_for_metrics(reference_image, image_name="reference_image")
+    validate_image_for_metrics(candidate_image, image_name="candidate_image")
+    shape = reference_image.shape[:2]
+    vehicle = normalize_metric_mask(vehicle_mask, shape, "vehicle_mask")
+    weights = normalize_weight_map(weight_map, shape)
+    product = normalize_metric_mask(product_detail_mask, shape, "product_detail_mask")
+    structure = normalize_metric_mask(structure_mask, shape, "structure_mask")
+    weights = np.maximum(weights, structure)
+    weights = np.maximum(weights, product)
+    weights *= vehicle
+
+    if legacy_mode:
+        legacy_value = masked_lpips(reference_image, candidate_image, vehicle > 0.0, lpips_model, use_gpu=use_gpu)
+        return {"standard_vehicle_lpips": legacy_value, "legacy_mode": True, "warnings": ["legacy_mode aktiv: neue Reflection-tolerant-Auswertung übersprungen."]}
+
+    _, lpips_map_raw = compute_lpips_with_map(reference_image, candidate_image, lpips_model, use_gpu=use_gpu)
+    lpips_map = resize_float_map_to_shape(lpips_map_raw, shape)
+    standard_vehicle_lpips = weighted_mean_map(lpips_map, vehicle)
+    reflection_tolerant_lpips = weighted_mean_map(lpips_map, weights)
+    product_detail_lpips = weighted_mean_map(lpips_map, product)
+    warnings = []
+    if product_detail_lpips is None:
+        warnings.append("product_detail_mask ist leer; product_detail_lpips wurde auf null gesetzt.")
+
+    low_weight_mask = (weights > 0.0) & (weights < 0.5) & (vehicle > 0.0)
+    structure_result = compute_structure_integrity_score(
+        reference_image,
+        candidate_image,
+        vehicle,
+        structure,
+        low_weight_mask=low_weight_mask,
+        dilation_radius=structure_dilation_radius,
+    )
+    structure_score = structure_result["score"]
+    active_thresholds = dict(DEFAULT_REFLECTION_TOLERANT_THRESHOLDS)
+    if thresholds:
+        active_thresholds.update(thresholds)
+
+    reasons = []
+    status = "pass"
+    if product_detail_lpips is not None and product_detail_lpips > active_thresholds["product_detail_lpips"]:
+        status = "fail"
+        reasons.append("product_detail_lpips liegt über dem Schwellwert.")
+    if structure_score > active_thresholds["structure_integrity_score"]:
+        status = "fail"
+        reasons.append("structure_integrity_score liegt über dem Schwellwert.")
+    if reflection_tolerant_lpips is not None and reflection_tolerant_lpips > active_thresholds["reflection_tolerant_lpips"]:
+        status = "fail"
+        reasons.append("reflection_tolerant_lpips liegt über dem Schwellwert.")
+    if status == "pass" and standard_vehicle_lpips is not None and standard_vehicle_lpips > active_thresholds["standard_vehicle_lpips_warning"]:
+        status = "warning"
+        reasons.append("standard_vehicle_lpips ist hoch, strukturgeschützte Scores sind aber akzeptabel; wahrscheinlich Reflexionsänderung.")
+    if not reasons:
+        reasons.append("Alle konfigurierten Schwellwerte sind erfüllt.")
+
+    fail_warning_map = ((lpips_map * weights) > active_thresholds["reflection_tolerant_lpips"]).astype(np.float32)
+    fail_warning_map = np.maximum(fail_warning_map, structure_result["structure_change_map"])
+    diagnostic_paths = {}
+    if diagnostic_dir is not None:
+        diag = Path(diagnostic_dir)
+        diagnostic_paths = {
+            "standard_lpips_difference_map": save_float_heatmap_png(lpips_map, diag / f"{basename}_standard_lpips_difference_map.png"),
+            "weighted_lpips_difference_map": save_float_heatmap_png(lpips_map * weights, diag / f"{basename}_weighted_lpips_difference_map.png"),
+            "mercedes_final_weight_map": save_float_heatmap_png(weights, diag / f"{basename}_mercedes_final_weight_map.png"),
+            "product_detail_mask": save_float_heatmap_png(product, diag / f"{basename}_product_detail_mask.png"),
+            "reflection_tolerant_mask": save_float_heatmap_png(((weights > 0.0) & (weights < 0.5)).astype(np.float32), diag / f"{basename}_reflection_tolerant_mask.png"),
+            "structure_mask": save_float_heatmap_png(structure, diag / f"{basename}_structure_mask.png"),
+            "fail_or_warning_regions": save_float_heatmap_png(fail_warning_map, diag / f"{basename}_fail_or_warning_regions.png"),
+        }
+
+    coverage = {
+        "vehicle_mask": float(np.mean(vehicle > 0.0)),
+        "product_detail_mask_within_vehicle": float(np.sum((product > 0.0) & (vehicle > 0.0)) / max(1, int(np.sum(vehicle > 0.0)))),
+        "structure_mask_within_vehicle": float(np.sum((structure > 0.0) & (vehicle > 0.0)) / max(1, int(np.sum(vehicle > 0.0)))),
+        "low_weight_reflection_mask_within_vehicle": float(np.sum(low_weight_mask) / max(1, int(np.sum(vehicle > 0.0)))),
+    }
+    result = {
+        "standard_vehicle_lpips": standard_vehicle_lpips,
+        "reflection_tolerant_lpips": reflection_tolerant_lpips,
+        "product_detail_lpips": product_detail_lpips,
+        "structure_integrity_score": structure_score,
+        "final_similarity_status": status,
+        "warnings": warnings,
+        "diagnostic_info": {
+            "thresholds": active_thresholds,
+            "mask_coverage_ratios": coverage,
+            "reasons": reasons,
+            "diagnostic_paths": diagnostic_paths,
+            "structure": {
+                "missing_edge_ratio": structure_result["missing_edge_ratio"],
+                "introduced_edge_ratio": structure_result["introduced_edge_ratio"],
+                "lower_structure_integrity_score_is_better": True,
+            },
+            "weight_rule": "final_pixel_weight_is_maximum_relevant_weight",
+        },
+    }
+    return result
 
 
 def masked_lpips(ref, gen, mask, lpips_model, use_gpu=False, mask_downsample="bilinear", eps=1e-8):
@@ -1075,6 +1330,11 @@ def evaluate_pair(
     roi_min_size_px=64,
     roi_square=True,
     max_metric_long_edge=1600,
+    enable_reflection_tolerant=False,
+    reflection_tolerant_dir="reflection_tolerant_diagnostics",
+    reflection_tolerant_json=None,
+    reflection_thresholds=None,
+    reflection_legacy_mode=False,
 ):
     ref_img = load_image(ref_path)
     gen_img = load_image(gen_path)
@@ -1205,6 +1465,36 @@ def evaluate_pair(
     else:
         geometric = build_empty_car_mask_metrics()
 
+    reflection_result = None
+    if enable_reflection_tolerant:
+        if car_focus_mask is None or not np.any(car_focus_mask):
+            raise ValueError("Reflection-tolerant LPIPS braucht eine gültige vehicle_mask. Aktiviere/verifiziere die Fahrzeugsegmentierung.")
+        builder_result = MercedesWeightMapBuilder().build(ref_norm, gen_norm, car_focus_mask.astype(np.float32))
+        reflection_result = compute_reflection_tolerant_lpips_scores(
+            ref_norm,
+            gen_norm,
+            car_focus_mask.astype(np.float32),
+            builder_result["weight_map"],
+            builder_result["product_detail_mask"],
+            builder_result["structure_mask"],
+            lpips_model,
+            thresholds=reflection_thresholds,
+            use_gpu=use_gpu,
+            diagnostic_dir=reflection_tolerant_dir,
+            basename=basename,
+            legacy_mode=reflection_legacy_mode,
+        )
+        reflection_result["diagnostic_info"]["mercedes_weight_builder"] = builder_result["diagnostic_info"]
+        if reflection_tolerant_json is not None:
+            json_path = Path(reflection_tolerant_json)
+            if json_path.suffix.lower() != ".json":
+                json_path.mkdir(parents=True, exist_ok=True)
+                json_path = json_path / f"{basename}_reflection_tolerant_lpips.json"
+            else:
+                json_path.parent.mkdir(parents=True, exist_ok=True)
+            json_path.write_text(json.dumps(reflection_result, indent=2), encoding="utf-8")
+            reflection_result["diagnostic_info"]["json_output_path"] = str(json_path)
+
     print("------------------------------------------------------------")
     print(f"Pair: {basename}")
     print(f"  Reference original : {ref_w}x{ref_h}")
@@ -1245,6 +1535,10 @@ def evaluate_pair(
     print(f"  Mask metric scope  : {geometric['mask_metric_scope']}")
     print(f"  Delta E (CIEDE2000): {delta_e_val:.6f}")
     print(f"  Delta E Similarity %: {percent_metrics['delta_e_similarity_percent']:.2f}%")
+    if reflection_result is not None:
+        print(f"  Reflection status  : {reflection_result['final_similarity_status']}")
+        print(f"  Refl.-tol. LPIPS   : {reflection_result.get('reflection_tolerant_lpips')}")
+        print(f"  Structure score    : {reflection_result.get('structure_integrity_score')}")
     print(f"  Saved ref_norm     : {ref_norm_path}")
     print(f"  Saved gen_norm     : {gen_norm_path}")
 
@@ -1286,6 +1580,16 @@ def evaluate_pair(
         "car_only_gen_path": car_metrics["car_only_paths"]["gen"] if car_metrics.get("car_only_paths") else None,
     }
     result.update(geometric)
+    if reflection_result is not None:
+        result.update(
+            {
+                "reflection_tolerant_lpips": reflection_result.get("reflection_tolerant_lpips"),
+                "product_detail_lpips": reflection_result.get("product_detail_lpips"),
+                "structure_integrity_score": reflection_result.get("structure_integrity_score"),
+                "final_similarity_status": reflection_result.get("final_similarity_status"),
+                "reflection_tolerant_json": reflection_result.get("diagnostic_info", {}).get("json_output_path"),
+            }
+        )
     return result
 
 
@@ -1317,6 +1621,11 @@ def evaluate_folders(
     roi_min_size_px=64,
     roi_square=True,
     max_metric_long_edge=1600,
+    enable_reflection_tolerant=False,
+    reflection_tolerant_dir="reflection_tolerant_diagnostics",
+    reflection_tolerant_json=None,
+    reflection_thresholds=None,
+    reflection_legacy_mode=False,
 ):
     ref_dir = Path(reference_dir)
     gen_dir = Path(generated_dir)
@@ -1369,6 +1678,11 @@ def evaluate_folders(
             roi_min_size_px=roi_min_size_px,
             roi_square=roi_square,
             max_metric_long_edge=max_metric_long_edge,
+            enable_reflection_tolerant=enable_reflection_tolerant,
+            reflection_tolerant_dir=reflection_tolerant_dir,
+            reflection_tolerant_json=reflection_tolerant_json,
+            reflection_thresholds=reflection_thresholds,
+            reflection_legacy_mode=reflection_legacy_mode,
         )
         results.append(result)
 
@@ -1417,6 +1731,11 @@ def parse_args():
     parser.add_argument("--output-csv", default="image_metrics_results.csv", help="CSV-Datei für Metrikergebnisse")
     parser.add_argument("--lpips-net", default="alex", choices=["alex", "vgg", "squeeze"], help="Backbone für LPIPS")
     parser.add_argument("--lpips-heatmap-dir", default="lpips_heatmaps", help="Ausgabeordner für LPIPS-Heatmaps (setze 'none' zum Deaktivieren)")
+    parser.add_argument("--enable-reflection-tolerant-lpips", action="store_true", help="Aktiviere Mercedes Reflection-tolerant LPIPS mit Struktur-Schutz")
+    parser.add_argument("--reflection-legacy-mode", action="store_true", help="Nutze altes Verhalten nur mit standard_vehicle_lpips")
+    parser.add_argument("--reflection-diagnostic-dir", default="reflection_tolerant_diagnostics", help="Ordner für Reflection-tolerant Diagnose-Heatmaps")
+    parser.add_argument("--reflection-json", default=None, help="JSON-Ausgabepfad oder Ordner für Reflection-tolerant Ergebnis")
+    parser.add_argument("--reflection-thresholds-json", default=None, help="Optionaler JSON-Pfad mit kalibrierten Reflection-tolerant Schwellwerten")
     parser.add_argument("--use-gpu", action="store_true", help="Nutze CUDA, falls verfügbar")
     parser.add_argument("--seed", type=int, default=None, help="Setze optionalen Zufalls-Seed für reproduzierbare Läufe")
     parser.add_argument("--deterministic", action="store_true", help="Aktiviere deterministische Backends (langsamer, aber reproduzierbarer)")
@@ -1486,7 +1805,11 @@ def parse_args():
         ]
     )
 
-    args.enable_car_only = args.enable_car_only or args.car_only or use_car_specific_option
+    args.enable_car_only = args.enable_car_only or args.car_only or use_car_specific_option or args.enable_reflection_tolerant_lpips
+    if args.reflection_thresholds_json:
+        args.reflection_thresholds = json.loads(Path(args.reflection_thresholds_json).read_text(encoding="utf-8"))
+    else:
+        args.reflection_thresholds = None
     return args
 
 
@@ -1562,6 +1885,11 @@ def main():
             roi_min_size_px=args.roi_min_size_px,
             roi_square=args.roi_square,
             max_metric_long_edge=args.max_metric_long_edge,
+            enable_reflection_tolerant=args.enable_reflection_tolerant_lpips,
+            reflection_tolerant_dir=args.reflection_diagnostic_dir,
+            reflection_tolerant_json=args.reflection_json,
+            reflection_thresholds=args.reflection_thresholds,
+            reflection_legacy_mode=args.reflection_legacy_mode,
         )
         build_result_dataframe([result]).to_csv(args.output_csv, index=False, float_format="%.6f", na_rep="")
         print(f"[INFO] Einzelvergleich gespeichert: {args.output_csv}")
@@ -1595,6 +1923,11 @@ def main():
         roi_min_size_px=args.roi_min_size_px,
         roi_square=args.roi_square,
         max_metric_long_edge=args.max_metric_long_edge,
+        enable_reflection_tolerant=args.enable_reflection_tolerant_lpips,
+        reflection_tolerant_dir=args.reflection_diagnostic_dir,
+        reflection_tolerant_json=args.reflection_json,
+        reflection_thresholds=args.reflection_thresholds,
+        reflection_legacy_mode=args.reflection_legacy_mode,
     )
 
 
