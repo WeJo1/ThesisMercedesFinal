@@ -60,6 +60,16 @@ CSV_COLUMN_ORDER = [
     "ssim_percent",
     "lpips",
     "lpips_similarity_percent",
+    "raw_lpips_distance",
+    "raw_lpips_similarity_percent",
+    "weighted_lpips_distance",
+    "weighted_lpips_similarity_percent",
+    "final_similarity_percent",
+    "final_metric",
+    "weighting_enabled",
+    "active_weight_profile",
+    "weighting_mode",
+    "weight_map_source",
     "lpips_map_mean",
     "lpips_foreground",
     "lpips_foreground_similarity_percent",
@@ -97,6 +107,11 @@ CSV_FLOAT_COLUMNS = [
     "ssim_percent",
     "lpips",
     "lpips_similarity_percent",
+    "raw_lpips_distance",
+    "raw_lpips_similarity_percent",
+    "weighted_lpips_distance",
+    "weighted_lpips_similarity_percent",
+    "final_similarity_percent",
     "lpips_map_mean",
     "lpips_foreground",
     "lpips_foreground_similarity_percent",
@@ -533,7 +548,7 @@ def compute_structure_integrity_score(
     protected_area = (binary_dilation(ref_edges, footprint=disk(radius)) if radius > 0 else ref_edges) | protected
     protected_area &= vehicle
     if low_weight_mask is not None:
-        protected_area |= (np.asarray(low_weight_mask, dtype=bool) & vehicle & (ref_edges | cand_edges | ref_neighborhood | cand_neighborhood))
+        protected_area |= (np.asarray(low_weight_mask, dtype=bool) & vehicle & (ref_edges | ref_neighborhood))
 
     missing = ref_edges & ~cand_neighborhood & protected_area
     introduced = cand_edges & ~ref_neighborhood & protected_area
@@ -648,6 +663,8 @@ def compute_reflection_tolerant_lpips_scores(
     result = {
         "standard_vehicle_lpips": standard_vehicle_lpips,
         "reflection_tolerant_lpips": reflection_tolerant_lpips,
+        "weighted_lpips_distance": reflection_tolerant_lpips,
+        "weighted_lpips_similarity_percent": convert_lpips_to_similarity_percent(reflection_tolerant_lpips),
         "product_detail_lpips": product_detail_lpips,
         "structure_integrity_score": structure_score,
         "final_similarity_status": status,
@@ -663,6 +680,7 @@ def compute_reflection_tolerant_lpips_scores(
                 "lower_structure_integrity_score_is_better": True,
             },
             "weight_rule": "final_pixel_weight_is_maximum_relevant_weight",
+            "weight_map_source": "mercedes_weight_map",
         },
     }
     return result
@@ -1558,9 +1576,11 @@ def evaluate_pair(
         "ssim": ssim_val,
         "ssim_percent": percent_metrics["ssim_percent"],
         "lpips": lpips_val,
+        "raw_lpips_distance": lpips_val,
         "lpips_map_mean": lpips_map_mean,
         "lpips_spatial_path": lpips_spatial_path,
         "lpips_similarity_percent": percent_metrics["lpips_similarity_percent"],
+        "raw_lpips_similarity_percent": percent_metrics["lpips_similarity_percent"],
         "lpips_foreground": lpips_foreground,
         "lpips_foreground_similarity_percent": lpips_foreground_similarity_percent,
         "delta_e_ciede2000": delta_e_val,
@@ -1581,13 +1601,39 @@ def evaluate_pair(
     }
     result.update(geometric)
     if reflection_result is not None:
+        weighted_lpips_distance = reflection_result.get("weighted_lpips_distance", reflection_result.get("reflection_tolerant_lpips"))
+        weighted_lpips_similarity_percent = reflection_result.get(
+            "weighted_lpips_similarity_percent",
+            convert_lpips_to_similarity_percent(weighted_lpips_distance),
+        )
         result.update(
             {
                 "reflection_tolerant_lpips": reflection_result.get("reflection_tolerant_lpips"),
+                "weighted_lpips_distance": weighted_lpips_distance,
+                "weighted_lpips_similarity_percent": weighted_lpips_similarity_percent,
+                "final_similarity_percent": weighted_lpips_similarity_percent,
+                "final_metric": "weighted_lpips_similarity_percent",
+                "weighting_enabled": True,
+                "active_weight_profile": "generic_mercedes",
+                "weighting_mode": "mercedes_reflection_tolerant_lpips",
+                "weight_map_source": reflection_result.get("diagnostic_info", {}).get("weight_map_source", "mercedes_weight_map"),
                 "product_detail_lpips": reflection_result.get("product_detail_lpips"),
                 "structure_integrity_score": reflection_result.get("structure_integrity_score"),
                 "final_similarity_status": reflection_result.get("final_similarity_status"),
                 "reflection_tolerant_json": reflection_result.get("diagnostic_info", {}).get("json_output_path"),
+            }
+        )
+    else:
+        result.update(
+            {
+                "weighted_lpips_distance": None,
+                "weighted_lpips_similarity_percent": None,
+                "final_similarity_percent": percent_metrics["lpips_similarity_percent"],
+                "final_metric": "raw_lpips_similarity_percent",
+                "weighting_enabled": False,
+                "active_weight_profile": None,
+                "weighting_mode": "none",
+                "weight_map_source": None,
             }
         )
     return result

@@ -95,11 +95,34 @@ class MercedesWeightMapBuilder:
     def _load_configuration(self, configuration: str | Path | dict[str, Any] | None) -> dict[str, Any]:
         if configuration is None:
             path = DEFAULT_CONFIG_PATH
-            return json.loads(path.read_text(encoding="utf-8"))
+            if not path.exists():
+                raise FileNotFoundError(f"Mercedes Weight-Profil fehlt: {path}")
+            config = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(configuration, dict):
-            return configuration
-        path = Path(configuration)
-        return json.loads(path.read_text(encoding="utf-8"))
+            config = configuration
+        elif configuration is not None:
+            path = Path(configuration)
+            if not path.exists():
+                raise FileNotFoundError(f"Mercedes Weight-Profil fehlt: {path}")
+            config = json.loads(path.read_text(encoding="utf-8"))
+        self._validate_configuration(config)
+        return config
+
+    def _validate_configuration(self, config: dict[str, Any]) -> None:
+        required_weights = {
+            "background_outside_vehicle",
+            "broad_smooth_paint_reflection_zone",
+            "glass_or_window_reflection_zone",
+            "normal_vehicle_surface",
+            "structural_edge_zone",
+            "product_detail_zone",
+            "brand_critical_zone",
+        }
+        missing = required_weights - set(config.get("weights", {}))
+        if missing:
+            raise ValueError(f"Mercedes Weight-Profil ist unvollständig. Fehlende weights: {sorted(missing)}")
+        if "generic_mercedes" not in config.get("profiles", {}):
+            raise ValueError("Mercedes Weight-Profil ist ungültig: Profil 'generic_mercedes' fehlt.")
 
     def _resolve_profile(self, model_profile: str) -> dict[str, Any]:
         profiles = self.configuration.get("profiles", {})
@@ -198,11 +221,63 @@ class MercedesWeightMapBuilder:
 
     def _build_raw_product_detail_mask(self, profile: dict[str, Any], part_masks: dict[str, np.ndarray], outer_mask: np.ndarray) -> np.ndarray:
         detail_names = profile.get("product_detail_masks", [])
-        return self._union_exact_or_contains(part_masks, detail_names) & (outer_mask > 0.0)
+        manual = self._union_exact_or_contains(part_masks, detail_names) & (outer_mask > 0.0)
+        if np.any(manual) or part_masks:
+            return manual
+        return self._build_normalized_mercedes_detail_fallback(outer_mask)
 
     def _build_brand_critical_mask(self, profile: dict[str, Any], part_masks: dict[str, np.ndarray], outer_mask: np.ndarray) -> np.ndarray:
         brand_names = profile.get("brand_critical_masks", [])
-        return self._union_exact_or_contains(part_masks, brand_names) & (outer_mask > 0.0)
+        manual = self._union_exact_or_contains(part_masks, brand_names) & (outer_mask > 0.0)
+        if np.any(manual) or part_masks:
+            return manual
+        return self._build_normalized_brand_fallback(outer_mask)
+
+    def _vehicle_bbox(self, outer_mask: np.ndarray) -> tuple[int, int, int, int] | None:
+        ys, xs = np.where(outer_mask > 0.0)
+        if len(xs) == 0:
+            return None
+        return int(np.min(ys)), int(np.max(ys)) + 1, int(np.min(xs)), int(np.max(xs)) + 1
+
+    def _build_normalized_mercedes_detail_fallback(self, outer_mask: np.ndarray) -> np.ndarray:
+        """Approximate Mercedes product ROIs when no explicit part masks are available."""
+        bbox = self._vehicle_bbox(outer_mask)
+        detail = np.zeros_like(outer_mask, dtype=bool)
+        if bbox is None:
+            return detail
+        y0, y1, x0, x1 = bbox
+        h = max(1, y1 - y0)
+        w = max(1, x1 - x0)
+        roi_defs = [
+            (0.34, 0.62, 0.38, 0.70),  # grille / emblem / front center fallback
+            (0.24, 0.50, 0.72, 0.98),  # headlight/front signature fallback
+            (0.68, 0.98, 0.08, 0.30),  # front/left wheel fallback
+            (0.68, 0.98, 0.70, 0.92),  # rear/right wheel fallback
+            (0.40, 0.56, 0.08, 0.95),  # side character/belt line fallback
+            (0.05, 0.28, 0.12, 0.90),  # roofline/window silhouette fallback
+        ]
+        for ry0, ry1, rx0, rx1 in roi_defs:
+            yy0 = y0 + int(round(ry0 * h))
+            yy1 = y0 + int(round(ry1 * h))
+            xx0 = x0 + int(round(rx0 * w))
+            xx1 = x0 + int(round(rx1 * w))
+            detail[yy0:yy1, xx0:xx1] = True
+        return detail & (outer_mask > 0.0)
+
+    def _build_normalized_brand_fallback(self, outer_mask: np.ndarray) -> np.ndarray:
+        bbox = self._vehicle_bbox(outer_mask)
+        brand = np.zeros_like(outer_mask, dtype=bool)
+        if bbox is None:
+            return brand
+        y0, y1, x0, x1 = bbox
+        h = max(1, y1 - y0)
+        w = max(1, x1 - x0)
+        yy0 = y0 + int(round(0.38 * h))
+        yy1 = y0 + int(round(0.53 * h))
+        xx0 = x0 + int(round(0.48 * w))
+        xx1 = x0 + int(round(0.58 * w))
+        brand[yy0:yy1, xx0:xx1] = True
+        return brand & (outer_mask > 0.0)
 
     def _union_masks(self, part_masks: dict[str, np.ndarray], tokens: list[str]) -> np.ndarray:
         if not part_masks:

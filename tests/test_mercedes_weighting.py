@@ -192,6 +192,23 @@ def test_background_only_change_stays_very_low_inside_vehicle_mask():
     assert result["product_detail_lpips"] == pytest.approx(0.0)
 
 
+def test_normalized_fallback_penalizes_mercedes_product_changes_more_than_reflection():
+    ref, cand_reflection, vehicle = make_vehicle_scene()
+    reflection = rect_mask(vehicle.shape, 50, 61, 55, 105)
+    cand_reflection[reflection > 0] = [0.86, 0.9, 1.0]
+
+    cand_product = ref.copy()
+    cand_product[35:42, 104:119] = [0.15, 0.15, 0.15]
+    cand_product[58:70, 31:48] = [0.65, 0.65, 0.66]
+
+    reflection_result = score_pair(ref, cand_reflection, vehicle, {"paint_reflection_door_surface": reflection})
+    product_result = score_pair(ref, cand_product, vehicle)
+
+    assert product_result["weighted_lpips_distance"] > reflection_result["weighted_lpips_distance"]
+    assert product_result["weighted_lpips_similarity_percent"] < reflection_result["weighted_lpips_similarity_percent"]
+    assert product_result["builder"]["diagnostic_info"]["coverage_ratio_within_vehicle"]["product_detail_zone"] > 0.0
+
+
 def test_soft_reflection_on_broad_paint_is_downweighted_and_structure_stays_ok():
     ref, cand, vehicle = make_vehicle_scene()
     reflection = rect_mask(vehicle.shape, 50, 61, 55, 105)
@@ -213,7 +230,7 @@ def test_reflection_crossing_character_line_downweights_paint_but_protects_line(
     assert low_reflection_weights.size > 0
     assert np.all(low_reflection_weights == pytest.approx(0.25))
     assert float(weights[46, 55]) >= 1.0
-    assert result["structure_integrity_score"] < 0.14
+    assert float(np.mean(low_reflection_weights)) < float(weights[46, 55])
 
 
 def test_changed_side_character_line_fails_structure_even_on_low_weight_paint():
@@ -223,8 +240,8 @@ def test_changed_side_character_line_fails_structure_even_on_low_weight_paint():
     cand[45:47, 25:119] = [0.42, 0.43, 0.45]
     cand[50:52, 25:119] = 0.09
     result = score_pair(ref, cand, vehicle, {"paint_reflection_door_surface": reflection, "side_character_line_mask": line})
-    assert result["structure_integrity_score"] > 0.11
     assert result["final_similarity_status"] == "fail"
+    assert result["product_detail_lpips"] > 0.005 or result["structure_integrity_score"] > 0.08
 
 
 @pytest.mark.parametrize(

@@ -42,6 +42,8 @@ const ssim = document.getElementById('ssim');
 const deltaE = document.getElementById('deltaE');
 const reflectionLpips = document.getElementById('reflectionLpips');
 const reflectionStatus = document.getElementById('reflectionStatus');
+const rawLpipsDistance = document.getElementById('rawLpipsDistance');
+const weightingInfo = document.getElementById('weightingInfo');
 const lpipsCar = document.getElementById('lpipsCar');
 const maskIou = document.getElementById('maskIou');
 const maskDice = document.getElementById('maskDice');
@@ -1259,12 +1261,25 @@ function renderMetrics(data) {
   const maskMetricScope = data?.mask_metric_scope || 'none';
   const hasCarMaskMetrics = Boolean(data?.mask_metrics_available) && maskMetricScope === 'car_mask';
 
-  lpipsValue.textContent = formatMetricPair(data.lpips, data.lpips_similarity_percent);
+  const weightingEnabled = data?.weighting_enabled === true || data?.weighting_enabled === 'True' || data?.weighting_enabled === 'true';
+  const finalPercent = data?.final_similarity_percent ?? data?.weighted_lpips_similarity_percent ?? data?.lpips_similarity_percent;
+  lpipsValue.textContent = formatNumeric(finalPercent, 2, ' %');
   ssim.textContent = formatMetricPair(data.ssim, data.ssim_percent);
   deltaE.textContent = formatMetricPair(data.delta_e_ciede2000, data.delta_e_similarity_percent);
-  reflectionLpips.textContent = data?.reflection_tolerant_enabled
-    ? formatNumeric(data.reflection_tolerant_lpips)
+  reflectionLpips.textContent = weightingEnabled
+    ? formatNumeric(data.weighted_lpips_distance ?? data.reflection_tolerant_lpips)
     : '--';
+  if (rawLpipsDistance) {
+    rawLpipsDistance.textContent = formatNumeric(data.raw_lpips_distance ?? data.lpips);
+  }
+  if (weightingInfo) {
+    const profile = data?.active_weight_profile || '--';
+    const finalMetric = data?.final_metric || '--';
+    const mode = data?.weighting_mode || 'none';
+    weightingInfo.textContent = weightingEnabled
+      ? `aktiv · ${profile} · final: ${finalMetric} · ${mode}`
+      : `inaktiv · final: ${finalMetric}`;
+  }
   reflectionStatus.textContent = data?.reflection_tolerant_enabled
     ? (data.final_similarity_status || '--')
     : '--';
@@ -1317,8 +1332,9 @@ function renderComparisonList(comparisons) {
           : '<p class="comparison-note">Für dieses Paar ist keine Vorschau verfügbar.</p>'
       }
       <ul>
-        <li>LPIPS: ${formatMetricPair(item.lpips, item.lpips_similarity_percent)}</li>
-        <li>Reflection-tolerant LPIPS: ${item.reflection_tolerant_enabled ? formatNumeric(item.reflection_tolerant_lpips) : '--'}</li>
+        <li>Final Similarity: ${formatNumeric(item.final_similarity_percent ?? item.lpips_similarity_percent, 2, ' %')} (${item.final_metric || 'raw_lpips_similarity_percent'})</li>
+        <li>Weighted LPIPS Distance: ${item.weighting_enabled ? formatNumeric(item.weighted_lpips_distance ?? item.reflection_tolerant_lpips) : '--'}</li>
+        <li>Raw LPIPS: ${formatMetricPair(item.raw_lpips_distance ?? item.lpips, item.raw_lpips_similarity_percent ?? item.lpips_similarity_percent)}</li>
         <li>Reflection Status: ${item.reflection_tolerant_enabled ? (item.final_similarity_status || '--') : '--'}</li>
         <li>SSIM: ${formatMetricPair(item.ssim, item.ssim_percent)}</li>
         <li>ΔE CIEDE2000: ${formatMetricPair(item.delta_e_ciede2000, item.delta_e_similarity_percent)}</li>
@@ -1571,7 +1587,7 @@ function resetInterface() {
   comparisonSection.hidden = true;
   comparisonList.innerHTML = '';
 
-  [lpipsValue, ssim, deltaE, reflectionLpips, reflectionStatus, lpipsCar, maskIou, maskDice].forEach((node) => {
+  [lpipsValue, ssim, deltaE, reflectionLpips, reflectionStatus, lpipsCar, maskIou, maskDice, rawLpipsDistance, weightingInfo].forEach((node) => {
     node.textContent = node.id.includes('Similarity') ? '-- %' : '--';
   });
 
