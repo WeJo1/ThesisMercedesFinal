@@ -45,10 +45,12 @@ class MercedesWeightMapBuilder:
 
         normal_surface_mask = outer_mask > 0.0
         structure_mask = self._build_structure_mask(ref, cand, outer_mask, part_masks)
-        reflection_mask = self._build_reflection_tolerant_mask(ref, cand, outer_mask, structure_mask, part_masks)
-        glass_mask = self._build_glass_mask(ref, cand, outer_mask, structure_mask, part_masks)
-        product_detail_mask = self._build_product_detail_mask(profile, part_masks, structure_mask, outer_mask)
+        raw_product_detail_mask = self._build_raw_product_detail_mask(profile, part_masks, outer_mask)
         brand_critical_mask = self._build_brand_critical_mask(profile, part_masks, outer_mask)
+        protected_vehicle_shape_mask = structure_mask | raw_product_detail_mask | brand_critical_mask
+        reflection_mask = self._build_reflection_tolerant_mask(ref, cand, outer_mask, protected_vehicle_shape_mask, part_masks)
+        glass_mask = self._build_glass_mask(ref, cand, outer_mask, protected_vehicle_shape_mask, part_masks)
+        product_detail_mask = (raw_product_detail_mask | structure_mask) & (outer_mask > 0.0)
         normal_surface_mask = normal_surface_mask & ~reflection_mask & ~glass_mask
 
         weight_map = np.zeros(outer_mask.shape, dtype=np.float32)
@@ -164,7 +166,7 @@ class MercedesWeightMapBuilder:
             edges = binary_dilation(edges, footprint=disk(radius))
         return edges & (outer_mask > 0.0)
 
-    def _build_reflection_tolerant_mask(self, ref: np.ndarray, cand: np.ndarray, outer_mask: np.ndarray, structure_mask: np.ndarray, part_masks: dict[str, np.ndarray]) -> np.ndarray:
+    def _build_reflection_tolerant_mask(self, ref: np.ndarray, cand: np.ndarray, outer_mask: np.ndarray, protected_vehicle_shape_mask: np.ndarray, part_masks: dict[str, np.ndarray]) -> np.ndarray:
         manual = self._union_masks(part_masks, ["paint_reflection", "reflection", "smooth_paint", "door_surface", "hood_center", "roof_paint", "side_panel", "bumper_paint", "mirror_cap"])
         gray_ref = color.rgb2gray(ref)
         gray_cand = color.rgb2gray(cand)
@@ -178,9 +180,9 @@ class MercedesWeightMapBuilder:
             texture_limit = edge_limit = 0.0
         heuristic = (texture <= texture_limit) & (edge_density_proxy <= edge_limit) & vehicle_pixels
         heuristic = remove_small_objects(heuristic, min_size=int(self.heuristics.get("minimum_reflection_component_area_px", 32)))
-        return (manual | heuristic) & vehicle_pixels & ~structure_mask
+        return (manual | heuristic) & vehicle_pixels & ~protected_vehicle_shape_mask
 
-    def _build_glass_mask(self, ref: np.ndarray, cand: np.ndarray, outer_mask: np.ndarray, structure_mask: np.ndarray, part_masks: dict[str, np.ndarray]) -> np.ndarray:
+    def _build_glass_mask(self, ref: np.ndarray, cand: np.ndarray, outer_mask: np.ndarray, protected_vehicle_shape_mask: np.ndarray, part_masks: dict[str, np.ndarray]) -> np.ndarray:
         manual = self._union_masks(part_masks, ["glass", "window", "windshield", "side_window", "rear_window", "glossy_black_trim"])
         hsv = color.rgb2hsv((ref + cand) / 2.0)
         h, _ = outer_mask.shape
@@ -192,12 +194,11 @@ class MercedesWeightMapBuilder:
             & upper
             & (outer_mask > 0.0)
         )
-        return (manual | heuristic) & (outer_mask > 0.0) & ~structure_mask
+        return (manual | heuristic) & (outer_mask > 0.0) & ~protected_vehicle_shape_mask
 
-    def _build_product_detail_mask(self, profile: dict[str, Any], part_masks: dict[str, np.ndarray], structure_mask: np.ndarray, outer_mask: np.ndarray) -> np.ndarray:
+    def _build_raw_product_detail_mask(self, profile: dict[str, Any], part_masks: dict[str, np.ndarray], outer_mask: np.ndarray) -> np.ndarray:
         detail_names = profile.get("product_detail_masks", [])
-        detail = self._union_exact_or_contains(part_masks, detail_names)
-        return (detail | structure_mask) & (outer_mask > 0.0)
+        return self._union_exact_or_contains(part_masks, detail_names) & (outer_mask > 0.0)
 
     def _build_brand_critical_mask(self, profile: dict[str, Any], part_masks: dict[str, np.ndarray], outer_mask: np.ndarray) -> np.ndarray:
         brand_names = profile.get("brand_critical_masks", [])

@@ -1,3 +1,4 @@
+from pathlib import Path
 import numpy as np
 import pytest
 
@@ -269,3 +270,63 @@ def test_model_profile_specific_details_are_detected(profile, mask_name):
     result = score_pair(ref, cand, vehicle, {mask_name: mask}, profile=profile)
     assert result["product_detail_lpips"] > 0.005 or result["structure_integrity_score"] > 0.12
     assert result["final_similarity_status"] == "fail"
+
+
+def test_product_detail_is_removed_from_reflection_tolerance_diagnostics():
+    ref, cand, vehicle = make_vehicle_scene()
+    reflection = rect_mask(vehicle.shape, 30, 55, 25, 110)
+    headlight = rect_mask(vehicle.shape, 35, 42, 104, 119)
+    result = MercedesWeightMapBuilder().build(
+        ref,
+        cand,
+        vehicle,
+        optional_part_masks={"paint_reflection_zone_mask": reflection, "headlights": headlight},
+    )
+    assert np.all(result["product_detail_mask"][headlight > 0] == 1.0)
+    assert np.all(result["reflection_tolerant_mask"][headlight > 0] == 0.0)
+    assert np.all(result["weight_map"][headlight > 0] >= 1.2)
+
+
+@pytest.mark.parametrize(
+    "mask_name, protected_mask",
+    [
+        ("wheel_arches", rect_mask((96, 144), 58, 70, 31, 48)),
+        ("roofline", rect_mask((96, 144), 25, 28, 25, 119)),
+        ("hood_creases", rect_mask((96, 144), 31, 34, 70, 104)),
+        ("panel_gaps", rect_mask((96, 144), 28, 68, 51, 53)),
+    ],
+)
+def test_structural_mercedes_shape_masks_override_reflection_zone(mask_name, protected_mask):
+    ref, cand, vehicle = make_vehicle_scene()
+    reflection = rect_mask(vehicle.shape, 25, 72, 16, 128)
+    result = MercedesWeightMapBuilder().build(
+        ref,
+        cand,
+        vehicle,
+        optional_part_masks={"paint_reflection_zone_mask": reflection, mask_name: protected_mask},
+    )
+    assert np.all(result["structure_mask"][protected_mask > 0] == 1.0)
+    assert np.all(result["reflection_tolerant_mask"][protected_mask > 0] == 0.0)
+    assert np.all(result["weight_map"][protected_mask > 0] >= 1.0)
+
+
+def test_diagnostics_write_product_detail_and_structure_masks(tmp_path):
+    ref, cand, vehicle = make_vehicle_scene()
+    line = rect_mask(vehicle.shape, 45, 47, 25, 119)
+    headlight = rect_mask(vehicle.shape, 35, 42, 104, 119)
+    result = score_pair(ref, cand, vehicle, {"side_character_line_mask": line, "headlights": headlight})
+    scored = compute_reflection_tolerant_lpips_scores(
+        ref,
+        cand,
+        vehicle,
+        result["builder"]["weight_map"],
+        result["builder"]["product_detail_mask"],
+        result["builder"]["structure_mask"],
+        PixelDifferenceModel(),
+        diagnostic_dir=tmp_path,
+        basename="diag",
+    )
+    paths = scored["diagnostic_info"]["diagnostic_paths"]
+    assert Path(paths["product_detail_mask"]).is_file()
+    assert Path(paths["structure_mask"]).is_file()
+    assert Path(paths["mercedes_final_weight_map"]).is_file()
