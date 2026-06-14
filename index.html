@@ -52,6 +52,11 @@
             <label for="carOnlyMode">Fahrzeug-Modus aktivieren</label>
           </div>
 
+          <div class="toggle-row">
+            <input id="reflectionTolerantMode" type="checkbox" checked />
+            <label for="reflectionTolerantMode">Mercedes Reflection-tolerant LPIPS ausgeben</label>
+          </div>
+
           <details>
             <summary>Erweiterte Fahrzeug-Einstellungen</summary>
             <div class="field-row">
@@ -200,6 +205,26 @@
                 </details>
               </div>
               <p id="deltaE" class="stat-value">--</p>
+            </article>
+            <article class="metric-card metric-card-priority">
+              <div class="stat-label-row">
+                <p class="stat-label">Reflection-tolerant LPIPS (gewichtet)</p>
+                <details class="metric-info">
+                  <summary aria-label="Reflection-tolerant LPIPS Erklärung anzeigen">ⓘ</summary>
+                  <p>Zeigt den gewichteten Mercedes-LPIPS-Wert: Reflexionsflächen zählen weniger, Produktdetails und Struktur bleiben hoch gewichtet.</p>
+                </details>
+              </div>
+              <p id="reflectionLpips" class="stat-value">--</p>
+            </article>
+            <article class="metric-card">
+              <div class="stat-label-row">
+                <p class="stat-label">Reflection Status</p>
+                <details class="metric-info">
+                  <summary aria-label="Reflection Status Erklärung anzeigen">ⓘ</summary>
+                  <p>Zeigt pass, warning oder fail für die Mercedes Reflection-tolerant Prüfung inklusive Struktur- und Produktdetail-Guards.</p>
+                </details>
+              </div>
+              <p id="reflectionStatus" class="stat-value">--</p>
             </article>
             <article class="metric-card metric-card-priority">
               <div class="stat-label-row">
