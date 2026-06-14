@@ -1,6 +1,7 @@
 import numpy as np
 
 from mercedes_weighting import MercedesWeightMapBuilder
+from image_metrics import compute_structure_integrity_score, normalize_metric_mask
 
 
 def rect_mask(shape, y0, y1, x0, x1):
@@ -100,3 +101,24 @@ def test_unknown_profile_fails_clearly():
         assert "Unbekanntes Mercedes-Profil" in str(exc)
     else:
         raise AssertionError("unknown profile should fail")
+
+
+def test_normalize_metric_mask_binarizes_255_mask_safely():
+    mask = np.array([[0, 128], [255, 1]], dtype=np.uint8)
+    normalized = normalize_metric_mask(mask, (2, 2), "vehicle_mask")
+    assert normalized.dtype == np.float32
+    assert set(np.unique(normalized).tolist()) <= {0.0, 1.0}
+    assert normalized[0, 1] == 1.0
+
+
+def test_structure_integrity_worsens_when_character_line_moves():
+    ref, cand, vehicle = make_vehicle_scene()
+    stable = compute_structure_integrity_score(ref, cand, vehicle, vehicle, dilation_radius=2)
+
+    moved = cand.copy()
+    moved[38:40, 20:100] = [0.45, 0.45, 0.47]
+    moved[44:46, 20:100] = 0.1
+    shifted = compute_structure_integrity_score(ref, moved, vehicle, vehicle, dilation_radius=2)
+
+    assert stable["score"] < 0.05
+    assert shifted["score"] > stable["score"]
