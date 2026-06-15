@@ -188,9 +188,22 @@ function closeMetricInfoBoxes(exceptBox = null) {
   });
 }
 
-function formatMetricPair(mainValue, percentValue) {
+function deriveLpipsSimilarityPercent(lpipsValueForPercent) {
+  const numericLpips = Number(lpipsValueForPercent);
+  if (Number.isNaN(numericLpips)) {
+    return null;
+  }
+
+  return Math.min(Math.max((1 - numericLpips) * 100, 0), 100);
+}
+
+function formatMetricPair(mainValue, percentValue, fallbackPercentValue = null) {
   const numericMain = Number(mainValue);
-  const numericPercent = Number(percentValue);
+  let numericPercent = Number(percentValue);
+
+  if (Number.isNaN(numericPercent) && fallbackPercentValue !== null) {
+    numericPercent = Number(fallbackPercentValue);
+  }
 
   if (Number.isNaN(numericMain) || Number.isNaN(numericPercent)) {
     return '--';
@@ -1272,6 +1285,7 @@ function renderMetrics(data) {
   weightedMercedesLpips.textContent = formatMetricPair(
     data.weighted_mercedes_lpips,
     data.weighted_mercedes_lpips_similarity_percent,
+    deriveLpipsSimilarityPercent(data.weighted_mercedes_lpips),
   );
   reflectionRobustLpips.textContent = formatMetricPair(
     data.reflection_robust_lpips,

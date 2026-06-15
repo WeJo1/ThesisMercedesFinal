@@ -888,6 +888,26 @@ button {
   color: #f3f8ff;
   font-size: 1.14rem;
 }
+
+.metric-card-weighted-lpips {
+  border-color: rgba(91, 205, 255, 0.95) !important;
+  background: linear-gradient(180deg, rgba(13, 42, 66, 0.98) 0%, rgba(7, 22, 38, 0.98) 100%);
+  box-shadow: 0 10px 24px rgba(0, 92, 168, 0.28);
+}
+
+.metric-card-weighted-lpips .stat-label::before {
+  content: "★ ";
+  color: #7fd8ff;
+}
+
+.metric-card-weighted-lpips .stat-value {
+  color: #ffffff;
+  font-size: 1.2rem;
+}
+
+.metric-card-profile .stat-value {
+  font-size: 0.98rem;
+}
 @media (prefers-reduced-motion: reduce) {
   .stats-grid article,
   .stats-grid article::after {
