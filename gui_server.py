@@ -14,7 +14,10 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
-import cgi
+try:
+    import cgi
+except ModuleNotFoundError:
+    cgi = None
 
 BASE_DIR = Path(__file__).resolve().parent
 SUPPORTED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
@@ -47,6 +50,7 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             "norm_dir": run_root / "normalized",
             "car_only_dir": run_root / "car_only",
             "spatial_dir": run_root / "lpips_spatial",
+            "debug_dir": run_root / "debug",
             "uploads_dir": run_root / "uploads",
         }
 
@@ -56,6 +60,7 @@ class MetricsHandler(SimpleHTTPRequestHandler):
         payload = {
             "filename": row.get("filename"),
             "lpips": row.get("lpips"),
+            "raw_lpips": row.get("raw_lpips") or row.get("lpips"),
             "lpips_map_mean": row.get("lpips_map_mean"),
             "lpips_similarity_percent": row.get("lpips_similarity_percent"),
             "ssim": row.get("ssim"),
@@ -63,7 +68,26 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             "delta_e_ciede2000": row.get("delta_e_ciede2000"),
             "delta_e_similarity_percent": row.get("delta_e_similarity_percent"),
             "lpips_car_only": row.get("lpips_car_only"),
+            "car_only_lpips": row.get("car_only_lpips") or row.get("lpips_car_only"),
             "lpips_car_only_similarity_percent": row.get("lpips_car_only_similarity_percent"),
+            "weighted_mercedes_lpips": row.get("weighted_mercedes_lpips"),
+            "weighted_mercedes_lpips_similarity_percent": row.get("weighted_mercedes_lpips_similarity_percent"),
+            "reflection_robust_lpips": row.get("reflection_robust_lpips"),
+            "reflection_robust_lpips_similarity_percent": row.get("reflection_robust_lpips_similarity_percent"),
+            "final_similarity_score": row.get("final_similarity_score"),
+            "mercedes_profile_enabled": row.get("mercedes_profile_enabled"),
+            "used_weight_profile": row.get("used_weight_profile"),
+            "reflection_weight_mean": row.get("reflection_weight_mean"),
+            "reflection_weight_min": row.get("reflection_weight_min"),
+            "reflection_downweight_area_ratio": row.get("reflection_downweight_area_ratio"),
+            "reflection_weight_map_preview": None,
+            "mercedes_weight_map_preview": None,
+            "weight_debug_paths": {
+                "mercedes_weight_map": row.get("mercedes_weight_map_path"),
+            },
+            "reflection_debug_paths": {
+                "reflection_downweight_map": row.get("reflection_weight_map_path"),
+            },
             "mask_iou": row.get("mask_iou"),
             "mask_dice": row.get("mask_dice"),
             "mask_metric_scope": row.get("mask_metric_scope", "none"),
@@ -85,6 +109,8 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             payload["car_only_ref_preview"] = self.image_file_to_data_url(row.get("car_only_ref_path"))
             payload["car_only_gen_preview"] = self.image_file_to_data_url(row.get("car_only_gen_path"))
             payload["lpips_spatial_map"] = self.read_lpips_spatial_map(row.get("lpips_spatial_path"))
+            payload["reflection_weight_map_preview"] = self.image_file_to_data_url(row.get("reflection_weight_map_path"))
+            payload["mercedes_weight_map_preview"] = self.image_file_to_data_url(row.get("mercedes_weight_map_path"))
 
         return payload
 
@@ -122,6 +148,8 @@ class MetricsHandler(SimpleHTTPRequestHandler):
         content_type = self.headers.get("Content-Type", "")
         if "multipart/form-data" not in content_type:
             raise ValueError("Erwarte multipart/form-data")
+        if cgi is None:
+            raise RuntimeError("Python-Modul 'cgi' ist nicht verfügbar. Nutze Python <= 3.12 oder installiere einen kompatiblen Multipart-Parser.")
 
         form = cgi.FieldStorage(
             fp=self.rfile,
@@ -205,6 +233,8 @@ class MetricsHandler(SimpleHTTPRequestHandler):
                     str(run_paths["car_only_dir"]),
                 ]
             )
+
+        command.extend(["--debug-dir", str(run_paths["debug_dir"])])
 
         process = subprocess.run(command, cwd=BASE_DIR, capture_output=True, text=True)
         if process.returncode != 0:

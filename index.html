@@ -173,6 +173,16 @@
           <div class="stats-grid">
             <article class="metric-card metric-card-priority">
               <div class="stat-label-row">
+                <p class="stat-label">Mercedes-Profil</p>
+                <details class="metric-info">
+                  <summary aria-label="Mercedes-Profil Erklärung anzeigen">ⓘ</summary>
+                  <p>Zeigt, ob das Mercedes Weight Profile für die fachliche LPIPS-Gewichtung aktiv ist und welches Profil verwendet wurde.</p>
+                </details>
+              </div>
+              <p id="mercedesProfileStatus" class="stat-value">--</p>
+            </article>
+            <article class="metric-card metric-card-priority">
+              <div class="stat-label-row">
                 <p class="stat-label">LPIPS (Wert + %)</p>
                 <details class="metric-info">
                   <summary aria-label="LPIPS Erklärung anzeigen">ⓘ</summary>
@@ -210,6 +220,36 @@
                 </details>
               </div>
               <p id="lpipsCar" class="stat-value">--</p>
+            </article>
+            <article class="metric-card metric-card-priority">
+              <div class="stat-label-row">
+                <p class="stat-label">Mercedes LPIPS gewichtet</p>
+                <details class="metric-info">
+                  <summary aria-label="Mercedes LPIPS Erklärung anzeigen">ⓘ</summary>
+                  <p>Gewichtet Stern, Scheinwerfer, Grill, Felgen, Silhouette und Linienführung höher als glatte Lackflächen.</p>
+                </details>
+              </div>
+              <p id="weightedMercedesLpips" class="stat-value">--</p>
+            </article>
+            <article class="metric-card metric-card-priority">
+              <div class="stat-label-row">
+                <p class="stat-label">Reflection-robust LPIPS</p>
+                <details class="metric-info">
+                  <summary aria-label="Reflection-robust Erklärung anzeigen">ⓘ</summary>
+                  <p>Reduziert den Einfluss heller, glatter Reflexionen, erhält aber Kanten, Bauteilgrenzen und Produktdetails.</p>
+                </details>
+              </div>
+              <p id="reflectionRobustLpips" class="stat-value">--</p>
+            </article>
+            <article class="metric-card metric-card-priority">
+              <div class="stat-label-row">
+                <p class="stat-label">Final Similarity Score</p>
+                <details class="metric-info">
+                  <summary aria-label="Final Score Erklärung anzeigen">ⓘ</summary>
+                  <p>Fachlicher Mercedes-Score auf Basis der reflexionsrobusten Gewichtung. Der rohe LPIPS-Wert bleibt separat erhalten.</p>
+                </details>
+              </div>
+              <p id="finalSimilarityScore" class="stat-value">--</p>
             </article>
             <article class="metric-card">
               <div class="stat-label-row">
