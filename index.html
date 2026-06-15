@@ -173,16 +173,6 @@
           <div class="stats-grid">
             <article class="metric-card metric-card-priority">
               <div class="stat-label-row">
-                <p class="stat-label">Mercedes-Profil</p>
-                <details class="metric-info">
-                  <summary aria-label="Mercedes-Profil Erklärung anzeigen">ⓘ</summary>
-                  <p>Zeigt, ob das Mercedes Weight Profile für die fachliche LPIPS-Gewichtung aktiv ist und welches Profil verwendet wurde.</p>
-                </details>
-              </div>
-              <p id="mercedesProfileStatus" class="stat-value">--</p>
-            </article>
-            <article class="metric-card metric-card-priority">
-              <div class="stat-label-row">
                 <p class="stat-label">LPIPS (Wert + %)</p>
                 <details class="metric-info">
                   <summary aria-label="LPIPS Erklärung anzeigen">ⓘ</summary>
@@ -190,6 +180,26 @@
                 </details>
               </div>
               <p id="lpips" class="stat-value">--</p>
+            </article>
+            <article class="metric-card metric-card-priority metric-card-weighted-lpips">
+              <div class="stat-label-row">
+                <p class="stat-label">Mercedes LPIPS gewichtet (Wert + %)</p>
+                <details class="metric-info">
+                  <summary aria-label="Mercedes LPIPS gewichtet Erklärung anzeigen">ⓘ</summary>
+                  <p>Zeige den gewichteten LPIPS sichtbar direkt neben dem rohen LPIPS: Stern, Scheinwerfer, Grill, Felgen, Silhouette, Fensterkontur und Linienführung zählen stärker als Scheibeninhalte oder glatte Lackreflexe.</p>
+                </details>
+              </div>
+              <p id="weightedMercedesLpips" class="stat-value">--</p>
+            </article>
+            <article class="metric-card metric-card-profile">
+              <div class="stat-label-row">
+                <p class="stat-label">Mercedes-Profil</p>
+                <details class="metric-info">
+                  <summary aria-label="Mercedes-Profil Erklärung anzeigen">ⓘ</summary>
+                  <p>Zeigt, ob das Mercedes Weight Profile für die fachliche LPIPS-Gewichtung aktiv ist und welches Profil verwendet wurde.</p>
+                </details>
+              </div>
+              <p id="mercedesProfileStatus" class="stat-value">--</p>
             </article>
             <article class="metric-card">
               <div class="stat-label-row">
@@ -220,16 +230,6 @@
                 </details>
               </div>
               <p id="lpipsCar" class="stat-value">--</p>
-            </article>
-            <article class="metric-card metric-card-priority">
-              <div class="stat-label-row">
-                <p class="stat-label">Mercedes LPIPS gewichtet</p>
-                <details class="metric-info">
-                  <summary aria-label="Mercedes LPIPS Erklärung anzeigen">ⓘ</summary>
-                  <p>Gewichtet Stern, Scheinwerfer, Grill, Felgen, Silhouette, Fensterkontur und Linienführung höher als Scheibeninhalte oder glatte Lackreflexe.</p>
-                </details>
-              </div>
-              <p id="weightedMercedesLpips" class="stat-value">--</p>
             </article>
             <article class="metric-card metric-card-priority">
               <div class="stat-label-row">
