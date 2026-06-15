@@ -1,4 +1,5 @@
 import argparse
+import inspect
 import json
 import random
 from pathlib import Path
@@ -385,6 +386,20 @@ def compute_masked_ssim(ref, gen, mask, neutral_value=0.5):
     return compute_ssim(masked_ref, masked_gen)
 
 
+def remove_objects_smaller_than(mask, min_size):
+    min_size = max(1, int(min_size))
+    if "max_size" in inspect.signature(remove_small_objects).parameters:
+        return remove_small_objects(mask, max_size=max(0, min_size - 1))
+    return remove_small_objects(mask, min_size=min_size)
+
+
+def fill_holes_smaller_than(mask, area_threshold):
+    area_threshold = max(1, int(area_threshold))
+    if "max_size" in inspect.signature(remove_small_holes).parameters:
+        return remove_small_holes(mask, max_size=max(0, area_threshold - 1))
+    return remove_small_holes(mask, area_threshold=area_threshold)
+
+
 def prepare_metric_mask(mask, ref, gen):
     if mask is None:
         return None
@@ -665,8 +680,8 @@ def build_glass_region_masks(ref, gen, car_mask=None, profile=None):
         candidate &= np.asarray(car_mask, dtype=bool)
 
     min_area = max(8, int(float(profile.get("glass_min_area_ratio", 0.002)) * h * w))
-    candidate = remove_small_objects(candidate, max_size=min_area)
-    candidate = remove_small_holes(closing(candidate, disk(2)), max_size=min_area)
+    candidate = remove_objects_smaller_than(candidate, min_area + 1)
+    candidate = fill_holes_smaller_than(closing(candidate, disk(2)), min_area + 1)
 
     if not np.any(candidate):
         empty = np.zeros((h, w), dtype=bool)
@@ -915,16 +930,16 @@ def refine_car_mask(
 
     if np.any(merged_mask):
         grow_disk = disk(max(1, int(grow_px)))
-        grown_mask = binary_dilation(refined_mask, footprint=grow_disk)
+        grown_mask = dilation(refined_mask, footprint=grow_disk)
         refined_mask = refined_mask | (merged_mask & grown_mask)
 
-    refined_mask = binary_closing(refined_mask, footprint=disk(2))
-    refined_mask = remove_small_objects(refined_mask, min_size=max(1, int(min_object_area)))
-    refined_mask = remove_small_holes(refined_mask, area_threshold=max(1, int(max_hole_area)))
+    refined_mask = closing(refined_mask, footprint=disk(2))
+    refined_mask = remove_objects_smaller_than(refined_mask, min_object_area)
+    refined_mask = fill_holes_smaller_than(refined_mask, max_hole_area)
 
     if trim_px > 0:
-        refined_mask = binary_erosion(refined_mask, footprint=disk(int(trim_px)))
-        refined_mask = remove_small_objects(refined_mask, min_size=max(1, int(min_object_area)))
+        refined_mask = erosion(refined_mask, footprint=disk(int(trim_px)))
+        refined_mask = remove_objects_smaller_than(refined_mask, min_object_area)
 
     return refined_mask.astype(bool)
 
@@ -1255,8 +1270,8 @@ def create_foreground_mask(img, min_coverage=0.01, min_object_area=256, max_hole
     else:
         base_mask = mask_light.astype(bool)
 
-    base_mask = remove_small_objects(base_mask, min_size=max(1, int(min_object_area)))
-    base_mask = remove_small_holes(base_mask, area_threshold=max(1, int(max_hole_area)))
+    base_mask = remove_objects_smaller_than(base_mask, min_object_area)
+    base_mask = fill_holes_smaller_than(base_mask, max_hole_area)
     return base_mask.astype(bool)
 
 
