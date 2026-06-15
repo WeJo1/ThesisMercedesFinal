@@ -80,6 +80,8 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             "reflection_weight_mean": row.get("reflection_weight_mean"),
             "reflection_weight_min": row.get("reflection_weight_min"),
             "reflection_downweight_area_ratio": row.get("reflection_downweight_area_ratio"),
+            "glass_interior_area_ratio": row.get("glass_interior_area_ratio"),
+            "glass_contour_area_ratio": row.get("glass_contour_area_ratio"),
             "reflection_weight_map_preview": None,
             "mercedes_weight_map_preview": None,
             "weight_debug_paths": {

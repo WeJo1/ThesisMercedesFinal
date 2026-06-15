@@ -9,7 +9,7 @@ from PIL import Image
 from skimage import color
 from skimage.filters import threshold_otsu
 from skimage.metrics import hausdorff_distance, structural_similarity
-from skimage.morphology import binary_closing, binary_dilation, binary_erosion, disk, remove_small_holes, remove_small_objects
+from skimage.morphology import closing, dilation, disk, erosion, remove_small_holes, remove_small_objects
 from tqdm import tqdm
 
 TORCH_IMPORT_ERROR = None
@@ -48,6 +48,16 @@ DEFAULT_MERCEDES_WEIGHT_PROFILE = {
     "reflection_low_saturation_limit": 0.55,
     "reflection_highlight_weight": 0.65,
     "reflection_low_saturation_weight": 0.35,
+    "glass_interior_weight": 0.08,
+    "glass_contour_weight_floor": 0.92,
+    "glass_contour_edge_boost": 0.32,
+    "glass_zone_y_min": 0.18,
+    "glass_zone_y_max": 0.58,
+    "glass_zone_x_margin": 0.10,
+    "glass_saturation_limit": 0.50,
+    "glass_dark_limit": 0.34,
+    "glass_bright_start": 0.58,
+    "glass_min_area_ratio": 0.002,
     "downweight_threshold": 0.75,
     "zones": {
         "star_grill_front_center": {"cx": 0.50, "cy": 0.55, "sx": 0.16, "sy": 0.18, "weight": 0.55},
@@ -92,6 +102,8 @@ CSV_COLUMN_ORDER = [
     "reflection_weight_mean",
     "reflection_weight_min",
     "reflection_downweight_area_ratio",
+    "glass_interior_area_ratio",
+    "glass_contour_area_ratio",
     "reflection_weight_map_path",
     "mercedes_weight_map_path",
     "ssim_car_only",
@@ -610,7 +622,63 @@ def build_mercedes_importance_map(ref, gen, car_mask=None, profile=None):
         vehicle = np.asarray(car_mask, dtype=bool)
         weight = np.where(vehicle, weight, 0.0)
 
+    glass_masks = build_glass_region_masks(ref, gen, car_mask=car_mask, profile=profile)
+    glass_interior = glass_masks["interior"]
+    glass_contour = glass_masks["contour"]
+    if np.any(glass_interior):
+        # Bewerte in Scheiben primär die Kontur/Fensterlinie, nicht Spiegelungsinhalte.
+        interior_cap = float(profile.get("base_vehicle_weight", 0.82)) * float(profile.get("glass_interior_weight", 0.08))
+        weight = np.where(glass_interior, np.minimum(weight, interior_cap), weight)
+    if np.any(glass_contour):
+        contour_floor = float(profile.get("glass_contour_weight_floor", 0.92))
+        contour_boost = float(profile.get("glass_contour_edge_boost", 0.32))
+        weight = np.where(glass_contour, np.maximum(weight, contour_floor + contour_boost * edge), weight)
+
     return np.clip(weight, 0.0, float(profile.get("max_weight", 2.4))).astype(np.float32)
+
+
+def build_glass_region_masks(ref, gen, car_mask=None, profile=None):
+    """Trenne Fahrzeugscheiben heuristisch in Innenfläche und produktrelevante Kontur."""
+    profile = profile or DEFAULT_MERCEDES_WEIGHT_PROFILE
+    h, w = ref.shape[:2]
+    yy, xx = np.mgrid[0:h, 0:w]
+    x = xx / max(1, w - 1)
+    y = yy / max(1, h - 1)
+
+    brightness = np.maximum(color.rgb2gray(ref), color.rgb2gray(gen)).astype(np.float32)
+    saturation = np.maximum(color.rgb2hsv(ref)[..., 1], color.rgb2hsv(gen)[..., 1]).astype(np.float32)
+    edge = np.clip(np.maximum(compute_edge_strength(ref), compute_edge_strength(gen)), 0.0, 1.0)
+    smooth = edge < float(profile.get("glass_smooth_edge_limit", 0.42))
+
+    glass_band = (
+        (y >= float(profile.get("glass_zone_y_min", 0.18)))
+        & (y <= float(profile.get("glass_zone_y_max", 0.58)))
+        & (x >= float(profile.get("glass_zone_x_margin", 0.10)))
+        & (x <= 1.0 - float(profile.get("glass_zone_x_margin", 0.10)))
+    )
+    low_saturation = saturation <= float(profile.get("glass_saturation_limit", 0.50))
+    dark_glass = brightness <= float(profile.get("glass_dark_limit", 0.34))
+    bright_reflection = brightness >= float(profile.get("glass_bright_start", 0.58))
+    candidate = glass_band & low_saturation & (dark_glass | bright_reflection | smooth)
+
+    if car_mask is not None and np.any(car_mask):
+        candidate &= np.asarray(car_mask, dtype=bool)
+
+    min_area = max(8, int(float(profile.get("glass_min_area_ratio", 0.002)) * h * w))
+    candidate = remove_small_objects(candidate, max_size=min_area)
+    candidate = remove_small_holes(closing(candidate, disk(2)), max_size=min_area)
+
+    if not np.any(candidate):
+        empty = np.zeros((h, w), dtype=bool)
+        return {"candidate": empty, "interior": empty, "contour": empty}
+
+    radius = max(1, int(round(min(h, w) * float(profile.get("glass_contour_width_ratio", 0.018)))))
+    eroded = erosion(candidate, disk(radius))
+    contour = candidate & ~eroded
+    contour |= dilation(candidate & (edge > float(profile.get("glass_contour_edge_limit", 0.30))), disk(1))
+    interior = candidate & ~contour
+
+    return {"candidate": candidate.astype(bool), "interior": interior.astype(bool), "contour": contour.astype(bool)}
 
 
 def build_reflection_downweight_map(ref, gen, car_mask=None, content_mask=None, profile=None):
@@ -641,6 +709,18 @@ def build_reflection_downweight_map(ref, gen, car_mask=None, content_mask=None, 
     # Kanten/Bauteilgrenzen ausdrücklich zurückholen.
     edge_floor = float(profile.get("reflection_edge_floor", 0.78))
     weight = np.maximum(weight, edge_floor + (1.0 - edge_floor) * edge)
+
+    glass_masks = build_glass_region_masks(ref, gen, car_mask=car_mask, profile=profile)
+    glass_interior = glass_masks["interior"]
+    glass_contour = glass_masks["contour"]
+    if np.any(glass_interior):
+        # Dämpfe rein photometrische LPIPS-Signale in Scheibeninnenflächen sehr stark.
+        glass_weight = float(profile.get("glass_interior_weight", 0.08))
+        weight = np.where(glass_interior, np.minimum(weight, glass_weight), weight)
+    if np.any(glass_contour):
+        # A-/B-/C-Säule, Dachlinie und Fensterlinie bleiben produktrelevant.
+        contour_floor = float(profile.get("glass_contour_weight_floor", 0.92))
+        weight = np.where(glass_contour, np.maximum(weight, contour_floor), weight)
 
     if car_mask is not None and np.any(car_mask):
         vehicle = np.asarray(car_mask, dtype=bool)
@@ -1403,6 +1483,12 @@ def evaluate_pair(
         content_mask=valid_content_mask,
         profile=mercedes_weight_profile,
     )
+    glass_region_masks = build_glass_region_masks(
+        ref_norm,
+        gen_norm,
+        car_mask=reflection_scope_mask,
+        profile=mercedes_weight_profile,
+    )
     combined_weight_map = mercedes_weight_map * reflection_weight_map if mercedes_profile_enabled else mercedes_weight_map
     weighted_mercedes_lpips = compute_weighted_lpips_from_map(lpips_map, combined_weight_map, eps=eps)
     reflection_robust_lpips = weighted_mercedes_lpips
@@ -1414,6 +1500,9 @@ def evaluate_pair(
     reflection_weight_min = float(np.min(active_weights)) if active_weights.size else None
     downweight_threshold = float(mercedes_weight_profile.get("downweight_threshold", 0.75))
     reflection_downweight_area_ratio = float(np.mean((reflection_weight_map > 0) & (reflection_weight_map < downweight_threshold)))
+    scope_area = max(float(np.sum(reflection_scope_mask > 0)), 1.0)
+    glass_interior_area_ratio = float(np.sum(glass_region_masks["interior"]) / scope_area)
+    glass_contour_area_ratio = float(np.sum(glass_region_masks["contour"]) / scope_area)
     reflection_weight_map_path = None
     mercedes_weight_map_path = None
     if debug_dir:
@@ -1542,6 +1631,8 @@ def evaluate_pair(
         "reflection_weight_mean": reflection_weight_mean,
         "reflection_weight_min": reflection_weight_min,
         "reflection_downweight_area_ratio": reflection_downweight_area_ratio,
+        "glass_interior_area_ratio": glass_interior_area_ratio,
+        "glass_contour_area_ratio": glass_contour_area_ratio,
         "reflection_weight_map_path": reflection_weight_map_path,
         "mercedes_weight_map_path": mercedes_weight_map_path,
         "ssim_car_only": car_metrics["ssim_car_only"],

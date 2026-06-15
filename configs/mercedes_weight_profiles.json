@@ -14,6 +14,17 @@
       "reflection_low_saturation_limit": 0.55,
       "reflection_highlight_weight": 0.65,
       "reflection_low_saturation_weight": 0.35,
+      "glass_interior_weight": 0.08,
+      "glass_contour_weight_floor": 0.92,
+      "glass_contour_edge_boost": 0.32,
+      "glass_zone_y_min": 0.18,
+      "glass_zone_y_max": 0.58,
+      "glass_zone_x_margin": 0.10,
+      "glass_saturation_limit": 0.50,
+      "glass_dark_limit": 0.34,
+      "glass_bright_start": 0.58,
+      "glass_min_area_ratio": 0.002,
+      "glass_contour_width_ratio": 0.018,
       "downweight_threshold": 0.75,
       "zones": {
         "star_grill_front_center": {
