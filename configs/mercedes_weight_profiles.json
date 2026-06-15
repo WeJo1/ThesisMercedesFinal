@@ -1,0 +1,54 @@
+{
+  "default_profile": "mercedes_reflection_robust_v1",
+  "profiles": {
+    "mercedes_reflection_robust_v1": {
+      "name": "mercedes_reflection_robust_v1",
+      "enabled": true,
+      "base_vehicle_weight": 0.82,
+      "edge_weight": 0.38,
+      "max_weight": 2.4,
+      "reflection_min_weight": 0.38,
+      "reflection_edge_floor": 0.78,
+      "reflection_highlight_start": 0.62,
+      "reflection_highlight_width": 0.32,
+      "reflection_low_saturation_limit": 0.55,
+      "reflection_highlight_weight": 0.65,
+      "reflection_low_saturation_weight": 0.35,
+      "downweight_threshold": 0.75,
+      "zones": {
+        "star_grill_front_center": {
+          "description": "Mercedes-Stern, Emblem, Kühlergrill und Frontmitte",
+          "cx": 0.50,
+          "cy": 0.55,
+          "sx": 0.16,
+          "sy": 0.18,
+          "weight": 0.55
+        },
+        "headlights_light_signature": {
+          "description": "Scheinwerfer, Lichtsignatur und vordere/seitliche Leuchtenzonen",
+          "x_offset": 0.26,
+          "cy": 0.50,
+          "sx": 0.11,
+          "sy": 0.13,
+          "weight": 0.45
+        },
+        "wheels_tires": {
+          "description": "Felgen, Reifenform und Radposition",
+          "x_offset": 0.29,
+          "cy": 0.76,
+          "sx": 0.12,
+          "sy": 0.12,
+          "weight": 0.42
+        },
+        "side_body_character_line": {
+          "description": "Fensterlinie, Seitenlinie, Türfugen und charakteristische Karosseriekanten",
+          "cx": 0.50,
+          "cy": 0.67,
+          "sx": 0.42,
+          "sy": 0.10,
+          "weight": 0.22
+        }
+      }
+    }
+  }
+}

@@ -34,6 +34,28 @@ except Exception:
 SUPPORTED_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff")
 LETTERBOX_PAD_COLOR = (127, 127, 127)
 COCO_VEHICLE_CLASSES = {3, 4, 6, 8}
+DEFAULT_MERCEDES_WEIGHT_PROFILE_NAME = "mercedes_reflection_robust_v1"
+DEFAULT_MERCEDES_WEIGHT_PROFILE = {
+    "enabled": True,
+    "name": DEFAULT_MERCEDES_WEIGHT_PROFILE_NAME,
+    "base_vehicle_weight": 0.82,
+    "edge_weight": 0.38,
+    "max_weight": 2.4,
+    "reflection_min_weight": 0.38,
+    "reflection_edge_floor": 0.78,
+    "reflection_highlight_start": 0.62,
+    "reflection_highlight_width": 0.32,
+    "reflection_low_saturation_limit": 0.55,
+    "reflection_highlight_weight": 0.65,
+    "reflection_low_saturation_weight": 0.35,
+    "downweight_threshold": 0.75,
+    "zones": {
+        "star_grill_front_center": {"cx": 0.50, "cy": 0.55, "sx": 0.16, "sy": 0.18, "weight": 0.55},
+        "headlights_light_signature": {"x_offset": 0.26, "cy": 0.50, "sx": 0.11, "sy": 0.13, "weight": 0.45},
+        "wheels_tires": {"x_offset": 0.29, "cy": 0.76, "sx": 0.12, "sy": 0.12, "weight": 0.42},
+        "side_body_character_line": {"cx": 0.50, "cy": 0.67, "sx": 0.42, "sy": 0.10, "weight": 0.22},
+    },
+}
 CSV_COLUMN_ORDER = [
     "filename",
     "reference_width",
@@ -49,6 +71,7 @@ CSV_COLUMN_ORDER = [
     "content_mask_area_ratio",
     "ssim",
     "ssim_percent",
+    "raw_lpips",
     "lpips",
     "lpips_similarity_percent",
     "lpips_map_mean",
@@ -57,7 +80,20 @@ CSV_COLUMN_ORDER = [
     "delta_e_ciede2000",
     "delta_e_similarity_percent",
     "lpips_car_only",
+    "car_only_lpips",
     "lpips_car_only_similarity_percent",
+    "weighted_mercedes_lpips",
+    "weighted_mercedes_lpips_similarity_percent",
+    "reflection_robust_lpips",
+    "reflection_robust_lpips_similarity_percent",
+    "final_similarity_score",
+    "mercedes_profile_enabled",
+    "used_weight_profile",
+    "reflection_weight_mean",
+    "reflection_weight_min",
+    "reflection_downweight_area_ratio",
+    "reflection_weight_map_path",
+    "mercedes_weight_map_path",
     "ssim_car_only",
     "mask_metric_scope",
     "mask_iou",
@@ -82,6 +118,7 @@ CSV_FLOAT_COLUMNS = [
     "ssim",
     "ssim_percent",
     "lpips",
+    "raw_lpips",
     "lpips_similarity_percent",
     "lpips_map_mean",
     "lpips_foreground",
@@ -89,7 +126,16 @@ CSV_FLOAT_COLUMNS = [
     "delta_e_ciede2000",
     "delta_e_similarity_percent",
     "lpips_car_only",
+    "car_only_lpips",
     "lpips_car_only_similarity_percent",
+    "weighted_mercedes_lpips",
+    "weighted_mercedes_lpips_similarity_percent",
+    "reflection_robust_lpips",
+    "reflection_robust_lpips_similarity_percent",
+    "final_similarity_score",
+    "reflection_weight_mean",
+    "reflection_weight_min",
+    "reflection_downweight_area_ratio",
     "ssim_car_only",
     "mask_iou",
     "mask_dice",
@@ -120,6 +166,50 @@ def build_result_dataframe(results):
             df[column] = pd.to_numeric(df[column], errors="coerce")
 
     return df
+
+
+def merge_profile_defaults(default_profile, loaded_profile):
+    merged = json.loads(json.dumps(default_profile))
+    for key, value in loaded_profile.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key].update(value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def load_mercedes_weight_profile(config_path=None, profile_name=None):
+    """Lade ein Mercedes-Gewichtungsprofil. Nutze ein robustes Default-Profil als Fallback."""
+    profile = json.loads(json.dumps(DEFAULT_MERCEDES_WEIGHT_PROFILE))
+    source = "default"
+
+    if config_path is None:
+        config_path = Path(__file__).resolve().parent / "configs" / "mercedes_weight_profiles.json"
+    config_path = Path(config_path)
+
+    try:
+        if config_path.exists():
+            payload = json.loads(config_path.read_text(encoding="utf-8"))
+            profiles = payload.get("profiles", {})
+            selected_name = profile_name or payload.get("default_profile") or DEFAULT_MERCEDES_WEIGHT_PROFILE_NAME
+            loaded_profile = profiles.get(selected_name)
+            if loaded_profile is None:
+                print(
+                    f"[WARN] Mercedes Weight Profile '{selected_name}' nicht gefunden. "
+                    f"Nutze Default-Profil '{DEFAULT_MERCEDES_WEIGHT_PROFILE_NAME}'."
+                )
+            else:
+                profile = merge_profile_defaults(profile, loaded_profile)
+                profile["name"] = loaded_profile.get("name", selected_name)
+                source = str(config_path)
+        else:
+            print(f"[WARN] Mercedes Weight Profile Datei fehlt: {config_path}. Nutze Default-Profil.")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[WARN] Mercedes Weight Profile konnte nicht geladen werden ({exc}). Nutze Default-Profil.")
+
+    profile["enabled"] = bool(profile.get("enabled", True))
+    profile["source"] = source
+    return profile
 
 
 def load_image(path):
@@ -450,6 +540,131 @@ def masked_lpips(ref, gen, mask, lpips_model, use_gpu=False, mask_downsample="bi
     if mask_sum <= float(eps):
         return float(np.mean(dist_map))
     return float(weighted_sum / (mask_sum + float(eps)))
+
+
+def resize_float_map_to_shape(value_map, target_shape, resample=Image.Resampling.BILINEAR):
+    value_map = np.asarray(value_map, dtype=np.float32)
+    target_rows, target_cols = target_shape
+    if value_map.shape == (target_rows, target_cols):
+        return value_map.astype(np.float32)
+
+    map_min = float(np.min(value_map))
+    map_max = float(np.max(value_map))
+    normalized = (value_map - map_min) / (map_max - map_min + 1e-8)
+    img = Image.fromarray(np.clip(normalized * 255.0, 0, 255).astype(np.uint8), mode="L")
+    resized = np.asarray(img.resize((target_cols, target_rows), resample=resample), dtype=np.float32) / 255.0
+    return (resized * (map_max - map_min) + map_min).astype(np.float32)
+
+
+def compute_edge_strength(img):
+    gray = color.rgb2gray(img)
+    gy, gx = np.gradient(gray.astype(np.float32))
+    edge = np.hypot(gx, gy)
+    return edge / (float(np.percentile(edge, 98)) + 1e-8)
+
+
+def gaussian_zone(x, y, zone):
+    cx = float(zone.get("cx", 0.5))
+    cy = float(zone.get("cy", 0.5))
+    sx = max(float(zone.get("sx", 0.1)), 1e-6)
+    sy = max(float(zone.get("sy", 0.1)), 1e-6)
+    return np.exp(-(((x - cx) / sx) ** 2 + ((y - cy) / sy) ** 2))
+
+
+def symmetric_gaussian_zone(x, y, zone):
+    x_offset = float(zone.get("x_offset", 0.25))
+    cy = float(zone.get("cy", 0.5))
+    sx = max(float(zone.get("sx", 0.1)), 1e-6)
+    sy = max(float(zone.get("sy", 0.1)), 1e-6)
+    return np.exp(-(((np.abs(x - 0.50) - x_offset) / sx) ** 2 + ((y - cy) / sy) ** 2))
+
+
+def build_mercedes_importance_map(ref, gen, car_mask=None, profile=None):
+    """Gewichte produktkritische Fahrzeugstrukturen höher als glatte Flächen."""
+    profile = profile or DEFAULT_MERCEDES_WEIGHT_PROFILE
+    h, w = ref.shape[:2]
+    yy, xx = np.mgrid[0:h, 0:w]
+    x = xx / max(1, w - 1)
+    y = yy / max(1, h - 1)
+
+    edge = np.clip(np.maximum(compute_edge_strength(ref), compute_edge_strength(gen)), 0.0, 1.0)
+    weight = np.full((h, w), float(profile.get("base_vehicle_weight", 0.82)), dtype=np.float32)
+
+    # Silhouette, Fensterlinie, Türfugen, Linienführung und Bauteilkanten bleiben wichtig.
+    weight += float(profile.get("edge_weight", 0.38)) * edge.astype(np.float32)
+
+    # Heuristische Mercedes-/Fahrzeugzonen: Stern/Grill/Frontmitte, Scheinwerfer, Felgen.
+    zones = profile.get("zones", {})
+    center_front = gaussian_zone(x, y, zones.get("star_grill_front_center", {}))
+    lights = symmetric_gaussian_zone(x, y, zones.get("headlights_light_signature", {}))
+    wheels = symmetric_gaussian_zone(x, y, zones.get("wheels_tires", {}))
+    side_line = gaussian_zone(x, y, zones.get("side_body_character_line", {}))
+    weight += (
+        float(zones.get("star_grill_front_center", {}).get("weight", 0.55)) * center_front
+        + float(zones.get("headlights_light_signature", {}).get("weight", 0.45)) * lights
+        + float(zones.get("wheels_tires", {}).get("weight", 0.42)) * wheels
+        + float(zones.get("side_body_character_line", {}).get("weight", 0.22)) * side_line
+    )
+
+    if car_mask is not None and np.any(car_mask):
+        vehicle = np.asarray(car_mask, dtype=bool)
+        weight = np.where(vehicle, weight, 0.0)
+
+    return np.clip(weight, 0.0, float(profile.get("max_weight", 2.4))).astype(np.float32)
+
+
+def build_reflection_downweight_map(ref, gen, car_mask=None, content_mask=None, profile=None):
+    """Reduziere helle/glatte Reflexionsflächen, erhalte aber Kanten und Geometrie."""
+    profile = profile or DEFAULT_MERCEDES_WEIGHT_PROFILE
+    brightness = np.maximum(color.rgb2gray(ref), color.rgb2gray(gen)).astype(np.float32)
+    saturation = np.maximum(color.rgb2hsv(ref)[..., 1], color.rgb2hsv(gen)[..., 1]).astype(np.float32)
+    edge = np.clip(np.maximum(compute_edge_strength(ref), compute_edge_strength(gen)), 0.0, 1.0)
+
+    smooth = 1.0 - edge
+    highlight_start = float(profile.get("reflection_highlight_start", 0.62))
+    highlight_width = max(float(profile.get("reflection_highlight_width", 0.32)), 1e-6)
+    saturation_limit = max(float(profile.get("reflection_low_saturation_limit", 0.55)), 1e-6)
+    highlights = np.clip((brightness - highlight_start) / highlight_width, 0.0, 1.0)
+    low_saturation_gloss = np.clip((saturation_limit - saturation) / saturation_limit, 0.0, 1.0)
+    reflection_likelihood = np.clip(
+        (
+            float(profile.get("reflection_highlight_weight", 0.65)) * highlights
+            + float(profile.get("reflection_low_saturation_weight", 0.35)) * low_saturation_gloss
+        )
+        * smooth,
+        0.0,
+        1.0,
+    )
+
+    min_weight = float(profile.get("reflection_min_weight", 0.38))
+    weight = 1.0 - (1.0 - min_weight) * reflection_likelihood
+    # Kanten/Bauteilgrenzen ausdrücklich zurückholen.
+    edge_floor = float(profile.get("reflection_edge_floor", 0.78))
+    weight = np.maximum(weight, edge_floor + (1.0 - edge_floor) * edge)
+
+    if car_mask is not None and np.any(car_mask):
+        vehicle = np.asarray(car_mask, dtype=bool)
+        weight = np.where(vehicle, weight, 0.0)
+    elif content_mask is not None and np.any(content_mask):
+        weight = np.where(np.asarray(content_mask, dtype=bool), weight, 0.0)
+
+    return np.clip(weight, 0.0, 1.0).astype(np.float32)
+
+
+def compute_weighted_lpips_from_map(dist_map, weight_map, eps=1e-8):
+    dist_map = np.asarray(dist_map, dtype=np.float32)
+    weights = resize_float_map_to_shape(weight_map, dist_map.shape)
+    weight_sum = float(np.sum(weights))
+    if weight_sum <= float(eps):
+        return float(np.mean(dist_map))
+    return float(np.sum(dist_map * weights) / (weight_sum + float(eps)))
+
+
+def save_weight_debug_map(weight_map, path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    arr = np.clip(np.asarray(weight_map, dtype=np.float32), 0.0, None)
+    arr = arr / (float(np.max(arr)) + 1e-8)
+    Image.fromarray(np.clip(arr * 255.0, 0, 255).astype(np.uint8), mode="L").save(path)
 
 
 def compute_lpips_on_content(ref, gen, content_mask, lpips_model, use_gpu=False, mask_downsample="bilinear", eps=1e-8):
@@ -1075,6 +1290,7 @@ def evaluate_pair(
     roi_min_size_px=64,
     roi_square=True,
     max_metric_long_edge=1600,
+    mercedes_weight_profile=None,
 ):
     ref_img = load_image(ref_path)
     gen_img = load_image(gen_path)
@@ -1112,15 +1328,12 @@ def evaluate_pair(
     delta_e_val = compute_masked_delta_e(ref_norm, gen_norm, valid_content_mask)
     percent_metrics = convert_metrics_to_percent(ssim_val, lpips_val, delta_e_val)
     lpips_spatial_path = None
-    lpips_map_mean = None
-    lpips_map = None
-    if lpips_heatmap_dir is not None:
-        lpips_map_mean, lpips_map = compute_lpips_with_map(
-            ref_norm,
-            gen_norm,
-            lpips_model,
-            use_gpu=use_gpu,
-        )
+    lpips_map_mean, lpips_map = compute_lpips_with_map(
+        ref_norm,
+        gen_norm,
+        lpips_model,
+        use_gpu=use_gpu,
+    )
     if lpips_heatmap_dir is not None:
         heatmap_dir = Path(lpips_heatmap_dir)
         heatmap_dir.mkdir(parents=True, exist_ok=True)
@@ -1171,6 +1384,45 @@ def evaluate_pair(
     ref_car_mask = car_masks.get("ref_mask")
     gen_car_mask = car_masks.get("gen_mask")
     car_focus_mask = car_masks.get("car_mask")
+
+    reflection_scope_mask = car_focus_mask if car_focus_mask is not None and np.any(car_focus_mask) else valid_content_mask
+    mercedes_weight_profile = mercedes_weight_profile or load_mercedes_weight_profile()
+    mercedes_profile_enabled = bool(mercedes_weight_profile.get("enabled", True))
+    used_weight_profile = str(mercedes_weight_profile.get("name", DEFAULT_MERCEDES_WEIGHT_PROFILE_NAME))
+
+    mercedes_weight_map = build_mercedes_importance_map(
+        ref_norm,
+        gen_norm,
+        car_mask=reflection_scope_mask,
+        profile=mercedes_weight_profile,
+    )
+    reflection_weight_map = build_reflection_downweight_map(
+        ref_norm,
+        gen_norm,
+        car_mask=reflection_scope_mask,
+        content_mask=valid_content_mask,
+        profile=mercedes_weight_profile,
+    )
+    combined_weight_map = mercedes_weight_map * reflection_weight_map if mercedes_profile_enabled else mercedes_weight_map
+    weighted_mercedes_lpips = compute_weighted_lpips_from_map(lpips_map, combined_weight_map, eps=eps)
+    reflection_robust_lpips = weighted_mercedes_lpips
+    weighted_mercedes_lpips_similarity_percent = convert_lpips_to_similarity_percent(weighted_mercedes_lpips)
+    reflection_robust_lpips_similarity_percent = convert_lpips_to_similarity_percent(reflection_robust_lpips)
+    final_similarity_score = reflection_robust_lpips_similarity_percent
+    active_weights = combined_weight_map[combined_weight_map > 0]
+    reflection_weight_mean = float(np.mean(active_weights)) if active_weights.size else None
+    reflection_weight_min = float(np.min(active_weights)) if active_weights.size else None
+    downweight_threshold = float(mercedes_weight_profile.get("downweight_threshold", 0.75))
+    reflection_downweight_area_ratio = float(np.mean((reflection_weight_map > 0) & (reflection_weight_map < downweight_threshold)))
+    reflection_weight_map_path = None
+    mercedes_weight_map_path = None
+    if debug_dir:
+        debug_path = Path(debug_dir)
+        stem = Path(ref_path).stem
+        reflection_weight_map_path = str(debug_path / f"{stem}_reflection_downweight.png")
+        mercedes_weight_map_path = str(debug_path / f"{stem}_mercedes_weight.png")
+        save_weight_debug_map(reflection_weight_map, Path(reflection_weight_map_path))
+        save_weight_debug_map(mercedes_weight_map, Path(mercedes_weight_map_path))
 
     valid_heatmap_focus_mode = {"global", "car_only"}
     if heatmap_focus_mode not in valid_heatmap_focus_mode:
@@ -1230,6 +1482,9 @@ def evaluate_pair(
         print(f"  LPIPS Spatial map  : {lpips_spatial_path}")
     print(f"  LPIPS foreground   : {lpips_foreground:.6f}")
     print(f"  LPIPS foreground % : {format_percent(lpips_foreground_similarity_percent)}")
+    print(f"  Weighted Mercedes LPIPS : {weighted_mercedes_lpips:.6f}")
+    print(f"  Reflection robust LPIPS : {reflection_robust_lpips:.6f}")
+    print(f"  Final similarity score  : {format_percent(final_similarity_score)}")
     if segmenter is not None:
         print(f"  Mask area (%)      : {car_metrics['debug']['mask_area_ratio'] * 100.0:.2f}%")
         print(f"  BBox (Metrik)      : {car_metrics['debug']['metric_bbox']}")
@@ -1264,6 +1519,7 @@ def evaluate_pair(
         "ssim": ssim_val,
         "ssim_percent": percent_metrics["ssim_percent"],
         "lpips": lpips_val,
+        "raw_lpips": lpips_val,
         "lpips_map_mean": lpips_map_mean,
         "lpips_spatial_path": lpips_spatial_path,
         "lpips_similarity_percent": percent_metrics["lpips_similarity_percent"],
@@ -1274,7 +1530,20 @@ def evaluate_pair(
         "ref_norm_path": ref_norm_path,
         "gen_norm_path": gen_norm_path,
         "lpips_car_only": car_metrics["lpips_car_only"],
+        "car_only_lpips": car_metrics["lpips_car_only"],
         "lpips_car_only_similarity_percent": lpips_car_only_similarity_percent,
+        "weighted_mercedes_lpips": weighted_mercedes_lpips,
+        "weighted_mercedes_lpips_similarity_percent": weighted_mercedes_lpips_similarity_percent,
+        "reflection_robust_lpips": reflection_robust_lpips,
+        "reflection_robust_lpips_similarity_percent": reflection_robust_lpips_similarity_percent,
+        "final_similarity_score": final_similarity_score,
+        "mercedes_profile_enabled": mercedes_profile_enabled,
+        "used_weight_profile": used_weight_profile,
+        "reflection_weight_mean": reflection_weight_mean,
+        "reflection_weight_min": reflection_weight_min,
+        "reflection_downweight_area_ratio": reflection_downweight_area_ratio,
+        "reflection_weight_map_path": reflection_weight_map_path,
+        "mercedes_weight_map_path": mercedes_weight_map_path,
         "ssim_car_only": car_metrics["ssim_car_only"],
         "car_mask_area_ratio": car_metrics["debug"]["mask_area_ratio"],
         "car_bbox": json.dumps(car_metrics["debug"]["bbox"]) if car_metrics["debug"]["bbox"] else None,
@@ -1317,6 +1586,7 @@ def evaluate_folders(
     roi_min_size_px=64,
     roi_square=True,
     max_metric_long_edge=1600,
+    mercedes_weight_profile=None,
 ):
     ref_dir = Path(reference_dir)
     gen_dir = Path(generated_dir)
@@ -1369,6 +1639,7 @@ def evaluate_folders(
             roi_min_size_px=roi_min_size_px,
             roi_square=roi_square,
             max_metric_long_edge=max_metric_long_edge,
+            mercedes_weight_profile=mercedes_weight_profile,
         )
         results.append(result)
 
@@ -1394,6 +1665,9 @@ def evaluate_folders(
                 "delta_e_similarity_percent",
                 "lpips_car_only",
                 "lpips_car_only_similarity_percent",
+                "weighted_mercedes_lpips",
+                "reflection_robust_lpips",
+                "final_similarity_score",
                 "mask_iou",
                 "mask_dice",
             ]
@@ -1450,6 +1724,8 @@ def parse_args():
     parser.add_argument("--mask-threshold", type=float, default=0.5, help="Pixel-Schwelle der Segmentierungsmaske [0..1]")
     parser.add_argument("--debug-dir", default=None, help="Optionales Debug-Verzeichnis für Masken/Crops")
     parser.add_argument("--car-only-dir", default="car_only", help="Verzeichnis für gespeicherte Car-only-Crops")
+    parser.add_argument("--weight-profile-config", default=None, help="Pfad zu configs/mercedes_weight_profiles.json")
+    parser.add_argument("--weight-profile", default=None, help="Name des Mercedes Weight Profiles")
     parser.add_argument(
         "--skip-hausdorff",
         action="store_true",
@@ -1482,7 +1758,6 @@ def parse_args():
             args.eps != 1e-8,
             args.mask_score_threshold != 0.5,
             args.mask_threshold != 0.5,
-            args.debug_dir is not None,
         ]
     )
 
@@ -1511,6 +1786,11 @@ def main():
     print("============================================================")
     run_lpips_pipeline_sanity_checks()
     print("[INFO] Sanity-Check     : LPIPS-Pipeline geprüft")
+    mercedes_weight_profile = load_mercedes_weight_profile(
+        config_path=args.weight_profile_config,
+        profile_name=args.weight_profile,
+    )
+    print(f"[INFO] Weight Profile   : {mercedes_weight_profile.get('name')} ({mercedes_weight_profile.get('source')})")
 
     lpips_model = init_lpips_model(net=args.lpips_net, use_gpu=args.use_gpu)
     verify_lpips_forward(lpips_model, net=args.lpips_net, use_gpu=args.use_gpu)
@@ -1562,6 +1842,7 @@ def main():
             roi_min_size_px=args.roi_min_size_px,
             roi_square=args.roi_square,
             max_metric_long_edge=args.max_metric_long_edge,
+            mercedes_weight_profile=mercedes_weight_profile,
         )
         build_result_dataframe([result]).to_csv(args.output_csv, index=False, float_format="%.6f", na_rep="")
         print(f"[INFO] Einzelvergleich gespeichert: {args.output_csv}")
@@ -1595,6 +1876,7 @@ def main():
         roi_min_size_px=args.roi_min_size_px,
         roi_square=args.roi_square,
         max_metric_long_edge=args.max_metric_long_edge,
+        mercedes_weight_profile=mercedes_weight_profile,
     )
 
 
