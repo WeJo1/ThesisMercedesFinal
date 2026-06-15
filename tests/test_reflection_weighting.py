@@ -36,6 +36,30 @@ def test_product_critical_regions_keep_high_mercedes_weight():
     assert grill_star_zone > 1.0
 
 
+def test_glass_interior_is_damped_but_window_contour_stays_relevant():
+    ref = np.full((100, 160, 3), 0.45, dtype=np.float32)
+    gen = ref.copy()
+    car_mask = np.zeros((100, 160), dtype=bool)
+    car_mask[15:85, 10:150] = True
+
+    ref[24:56, 36:124] = 0.22
+    gen[24:56, 36:124] = 0.78
+    ref[24:27, 36:124] = 0.04
+    gen[24:27, 36:124] = 0.04
+    ref[24:56, 36:39] = 0.04
+    gen[24:56, 36:39] = 0.04
+
+    glass_masks = im.build_glass_region_masks(ref, gen, car_mask=car_mask)
+    reflection_weights = im.build_reflection_downweight_map(ref, gen, car_mask=car_mask)
+    mercedes_weights = im.build_mercedes_importance_map(ref, gen, car_mask=car_mask)
+
+    assert np.any(glass_masks["interior"])
+    assert np.any(glass_masks["contour"])
+    assert float(np.mean(reflection_weights[glass_masks["interior"]])) <= 0.09
+    assert float(np.mean(reflection_weights[glass_masks["contour"]])) >= 0.90
+    assert float(np.mean(mercedes_weights[glass_masks["contour"]])) > float(np.mean(mercedes_weights[glass_masks["interior"]]))
+
+
 def test_weighted_lpips_differs_from_raw_when_weighting_is_active():
     dist_map = np.array([[1.0, 1.0], [0.1, 0.1]], dtype=np.float32)
     weight_map = np.array([[0.2, 0.2], [1.0, 1.0]], dtype=np.float32)
