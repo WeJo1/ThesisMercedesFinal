@@ -134,3 +134,96 @@ def test_missing_weight_profile_file_uses_default(tmp_path):
 
     assert profile["enabled"] is True
     assert profile["name"] == im.DEFAULT_MERCEDES_WEIGHT_PROFILE_NAME
+
+
+def synthetic_car_pair():
+    ref = np.full((80, 140, 3), 0.18, dtype=np.float32)
+    ref[28:58, 20:120] = 0.52
+    ref[20:35, 42:96] = 0.24
+    ref[48:66, 30:48] = 0.06
+    ref[48:66, 92:110] = 0.06
+    ref[35:39, 20:36] = 0.9
+    ref[35:39, 104:120] = 0.9
+    mask = np.zeros((80, 140), dtype=bool)
+    mask[20:66, 20:120] = True
+    return ref, mask
+
+
+def test_product_integrity_identical_images_pass():
+    ref, mask = synthetic_car_pair()
+    result = im.compute_product_integrity_scores(ref, ref.copy(), car_mask=mask, car_only_lpips_score=100.0)
+
+    assert result["structure_only_score"] > 99
+    assert result["detail_zones_score"] > 99
+    assert result["color_reflection_score"] > 99
+    assert result["product_integrity_decision"] == "passed"
+
+
+def test_product_integrity_tolerates_brightness_reflection_change():
+    ref, mask = synthetic_car_pair()
+    gen = np.clip(ref * 1.15 + 0.05, 0.0, 1.0)
+    gen[32:46, 50:95] = np.clip(gen[32:46, 50:95] + 0.22, 0.0, 1.0)
+    result = im.compute_product_integrity_scores(ref, gen, car_mask=mask, car_only_lpips_score=85.0)
+
+    assert result["structure_only_score"] >= 90
+    assert result["detail_zones_score"] >= 88
+    assert result["color_reflection_score"] < result["structure_only_score"]
+    assert result["product_integrity_decision"] in {"passed", "warning"}
+    assert result["tolerated_findings"]
+
+
+def test_product_integrity_flags_detail_zone_change():
+    ref, mask = synthetic_car_pair()
+    gen = ref.copy()
+    gen[48:66, 92:110] = 0.52
+    result = im.compute_product_integrity_scores(ref, gen, car_mask=mask, car_only_lpips_score=70.0)
+
+    assert result["detail_zones_score"] < 95
+    assert any("Felgen" in item or "Reifen" in item for item in result["critical_findings"] + result["tolerated_findings"])
+    assert result["product_integrity_decision"] in {"warning", "failed"}
+
+
+def test_product_integrity_flags_shifted_vehicle_structure():
+    ref, mask = synthetic_car_pair()
+    gen = np.roll(ref, shift=8, axis=1)
+    result = im.compute_product_integrity_scores(ref, gen, car_mask=mask, car_only_lpips_score=65.0)
+
+    assert result["structure_only_score"] < 90
+    assert result["product_integrity_score"] < 90
+    assert result["product_integrity_decision"] in {"warning", "failed"}
+
+
+def test_product_integrity_ignores_background_with_vehicle_mask():
+    ref, mask = synthetic_car_pair()
+    gen = ref.copy()
+    gen[:18, :] = 0.95
+    gen[68:, :] = 0.02
+    result = im.compute_product_integrity_scores(ref, gen, car_mask=mask, car_only_lpips_score=100.0)
+
+    assert result["structure_only_score"] > 99
+    assert result["detail_zones_score"] > 99
+    assert result["product_integrity_decision"] == "passed"
+
+
+def test_csv_and_preview_include_product_integrity_values(tmp_path):
+    result = {
+        "filename": "demo.png",
+        "structure_only_score": 97.0,
+        "detail_zones_score": 95.0,
+        "color_reflection_score": 72.0,
+        "product_integrity_score": 94.0,
+        "product_integrity_decision": "passed",
+        "critical_findings": "[]",
+        "tolerated_findings": "[\"Reflexionsunterschiede erkannt\"]",
+    }
+    df = im.build_result_dataframe([result])
+    csv_path = tmp_path / "result.csv"
+    df.to_csv(csv_path, index=False)
+    with csv_path.open(newline="", encoding="utf-8") as fp:
+        row = next(csv.DictReader(fp))
+    handler = MetricsHandler.__new__(MetricsHandler)
+    payload = handler.build_preview_payload(row, include_previews=False)
+
+    assert row["product_integrity_decision"] == "passed"
+    assert payload["structure_only_score"] == row["structure_only_score"]
+    assert payload["tolerated_findings"] == row["tolerated_findings"]

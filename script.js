@@ -44,6 +44,13 @@ const lpipsCar = document.getElementById('lpipsCar');
 const weightedMercedesLpips = document.getElementById('weightedMercedesLpips');
 const reflectionRobustLpips = document.getElementById('reflectionRobustLpips');
 const finalSimilarityScore = document.getElementById('finalSimilarityScore');
+const structureOnlyScore = document.getElementById('structureOnlyScore');
+const detailZonesScore = document.getElementById('detailZonesScore');
+const colorReflectionScore = document.getElementById('colorReflectionScore');
+const productIntegrityScore = document.getElementById('productIntegrityScore');
+const productIntegrityDecision = document.getElementById('productIntegrityDecision');
+const criticalFindings = document.getElementById('criticalFindings');
+const toleratedFindings = document.getElementById('toleratedFindings');
 const maskIou = document.getElementById('maskIou');
 const maskDice = document.getElementById('maskDice');
 
@@ -1268,6 +1275,46 @@ function updateSpatialOutput(data) {
   });
 }
 
+
+function formatScore(value) {
+  const numberValue = Number(value);
+  return Number.isNaN(numberValue) ? '--' : `${numberValue.toFixed(2)} %`;
+}
+
+function normalizeFindings(value) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+  if (typeof value !== 'string' || !value.trim()) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [String(parsed)];
+  } catch (error) {
+    return value.split(';').map((item) => item.trim()).filter(Boolean);
+  }
+}
+
+function renderFindingsList(node, findings, emptyText) {
+  if (!node) {
+    return;
+  }
+  node.innerHTML = '';
+  const normalized = normalizeFindings(findings);
+  if (!normalized.length) {
+    const item = document.createElement('li');
+    item.textContent = emptyText;
+    node.append(item);
+    return;
+  }
+  normalized.forEach((finding) => {
+    const item = document.createElement('li');
+    item.textContent = finding;
+    node.append(item);
+  });
+}
+
 function renderMetrics(data) {
   const hasCarOnlyMetric = Boolean(data?.car_only_enabled);
   const maskMetricScope = data?.mask_metric_scope || 'none';
@@ -1291,6 +1338,13 @@ function renderMetrics(data) {
     data.reflection_robust_lpips,
     data.reflection_robust_lpips_similarity_percent,
   );
+  structureOnlyScore.textContent = formatScore(data.structure_only_score);
+  detailZonesScore.textContent = formatScore(data.detail_zones_score);
+  colorReflectionScore.textContent = formatScore(data.color_reflection_score);
+  productIntegrityScore.textContent = formatScore(data.product_integrity_score);
+  productIntegrityDecision.textContent = data.product_integrity_decision || '--';
+  renderFindingsList(criticalFindings, data.critical_findings, 'Keine kritischen Produktabweichungen erkannt.');
+  renderFindingsList(toleratedFindings, data.tolerated_findings, 'Keine tolerierten Reflexions-/Lichthinweise.');
   const finalScore = Number(data.final_similarity_score);
   finalSimilarityScore.textContent = Number.isNaN(finalScore) ? '--' : `${finalScore.toFixed(2)} %`;
   if (hasCarMaskMetrics) {
