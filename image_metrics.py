@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 from PIL import Image
 from skimage import color
-from skimage.filters import threshold_otsu
+from skimage.filters import gaussian, sobel, threshold_otsu
 from skimage.metrics import hausdorff_distance, structural_similarity
 from skimage.morphology import closing, dilation, disk, erosion, opening, remove_small_holes, remove_small_objects
 from tqdm import tqdm
@@ -67,6 +67,45 @@ DEFAULT_MERCEDES_WEIGHT_PROFILE = {
         "side_body_character_line": {"cx": 0.50, "cy": 0.67, "sx": 0.42, "sy": 0.10, "weight": 0.22},
     },
 }
+
+DEFAULT_PRODUCT_INTEGRITY_PROFILE_NAME = "mercedes_product_integrity_v1"
+DEFAULT_PRODUCT_INTEGRITY_PROFILE = {
+    "enabled_components": {
+        "structure_only_score": True,
+        "detail_zones_score": True,
+        "color_reflection_score": True,
+        "car_only_lpips_score": True,
+    },
+    "weights": {
+        "structure_only_score": 0.45,
+        "detail_zones_score": 0.40,
+        "color_reflection_score": 0.10,
+        "car_only_lpips_score": 0.05,
+    },
+    "thresholds": {
+        "passed_product_integrity_min": 90.0,
+        "passed_structure_min": 90.0,
+        "passed_detail_min": 88.0,
+        "failed_product_integrity_min": 80.0,
+        "failed_structure_min": 80.0,
+        "failed_detail_min": 80.0,
+        "warning_color_reflection_max": 78.0,
+        "critical_zone_score_max": 78.0,
+        "warning_zone_score_max": 90.0,
+    },
+    "reflection_tolerance": {
+        "low_edge_difference_bonus": 0.35,
+        "tolerated_score_below": 82.0,
+    },
+    "detail_zone_weights": {
+        "silhouette": 1.35,
+        "front_rear": 1.25,
+        "wheels_tires": 1.35,
+        "window_line": 1.20,
+        "body_lines": 1.00,
+        "center_grill_emblem": 1.20,
+    },
+}
 CSV_COLUMN_ORDER = [
     "filename",
     "reference_width",
@@ -98,6 +137,19 @@ CSV_COLUMN_ORDER = [
     "reflection_robust_lpips",
     "reflection_robust_lpips_similarity_percent",
     "final_similarity_score",
+    "lpips_raw",
+    "lpips_score",
+    "car_only_lpips_raw",
+    "car_only_lpips_score",
+    "structure_only_score",
+    "detail_zones_score",
+    "color_reflection_score",
+    "product_integrity_score",
+    "product_integrity_decision",
+    "critical_findings",
+    "tolerated_findings",
+    "product_integrity_profile",
+    "product_integrity_debug_paths",
     "mercedes_profile_enabled",
     "used_weight_profile",
     "reflection_weight_mean",
@@ -1269,6 +1321,197 @@ def compute_car_only_metrics(
     }
 
 
+
+def load_product_integrity_profile(config_path=None):
+    """Lade die Product-Integrity-Konfiguration; nutze Defaults bei fehlender Datei."""
+    profile = json.loads(json.dumps(DEFAULT_PRODUCT_INTEGRITY_PROFILE))
+    profile["name"] = DEFAULT_PRODUCT_INTEGRITY_PROFILE_NAME
+    profile["source"] = "default"
+    if config_path is None:
+        config_path = Path(__file__).resolve().parent / "configs" / "product_integrity_profile.json"
+    config_path = Path(config_path)
+    try:
+        if config_path.exists():
+            loaded = json.loads(config_path.read_text(encoding="utf-8"))
+            profile = merge_profile_defaults(profile, loaded)
+            profile["name"] = loaded.get("name", DEFAULT_PRODUCT_INTEGRITY_PROFILE_NAME)
+            profile["source"] = str(config_path)
+        else:
+            print(f"[WARN] Product-Integrity-Profil fehlt: {config_path}. Nutze Default-Profil.")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[WARN] Product-Integrity-Profil konnte nicht geladen werden ({exc}). Nutze Default-Profil.")
+    return profile
+
+
+def score_from_error(error, scale):
+    return float(np.clip(100.0 * (1.0 - float(error) / max(float(scale), 1e-8)), 0.0, 100.0))
+
+
+def masked_mean(values, mask=None, default=0.0):
+    arr = np.asarray(values, dtype=np.float32)
+    if mask is None:
+        return float(np.mean(arr))
+    valid = np.asarray(mask, dtype=bool)
+    if not np.any(valid):
+        return float(default)
+    return float(np.mean(arr[valid]))
+
+
+def bbox_mask_from_fraction(shape, bbox, fractions):
+    x0, y0, x1, y1 = bbox
+    fx0, fy0, fx1, fy1 = fractions
+    w = max(1, x1 - x0)
+    h = max(1, y1 - y0)
+    rx0 = int(round(x0 + fx0 * w)); rx1 = int(round(x0 + fx1 * w))
+    ry0 = int(round(y0 + fy0 * h)); ry1 = int(round(y0 + fy1 * h))
+    mask = np.zeros(shape, dtype=bool)
+    mask[max(0, ry0):min(shape[0], ry1), max(0, rx0):min(shape[1], rx1)] = True
+    return mask
+
+
+def build_detail_zone_masks(car_mask, fallback_shape):
+    """Erzeuge robuste Fallback-Zonen aus der Fahrzeug-Bounding-Box."""
+    scope = np.asarray(car_mask, dtype=bool) if car_mask is not None and np.any(car_mask) else np.ones(fallback_shape, dtype=bool)
+    bbox = compute_mask_roi_bbox(scope, fallback_shape)
+    zones = {
+        "silhouette": dilation(scope, disk(2)) & ~erosion(scope, disk(3)),
+        "front_rear": bbox_mask_from_fraction(fallback_shape, bbox, (0.00, 0.28, 0.18, 0.78)) | bbox_mask_from_fraction(fallback_shape, bbox, (0.82, 0.28, 1.00, 0.78)),
+        "wheels_tires": bbox_mask_from_fraction(fallback_shape, bbox, (0.08, 0.62, 0.34, 0.98)) | bbox_mask_from_fraction(fallback_shape, bbox, (0.66, 0.62, 0.92, 0.98)),
+        "window_line": bbox_mask_from_fraction(fallback_shape, bbox, (0.16, 0.15, 0.84, 0.48)),
+        "body_lines": bbox_mask_from_fraction(fallback_shape, bbox, (0.12, 0.45, 0.88, 0.72)),
+        "center_grill_emblem": bbox_mask_from_fraction(fallback_shape, bbox, (0.38, 0.34, 0.62, 0.68)),
+    }
+    return {name: (zone & scope) for name, zone in zones.items()}
+
+
+def compute_structure_only_score(ref, gen, mask=None, debug_dir=None, stem="pair"):
+    """Vergleiche graue Kantenbilder, damit Farbe/Reflexe nur schwach wirken."""
+    metric_mask = prepare_metric_mask(mask, ref, gen)
+    if metric_mask is None:
+        metric_mask = np.ones(ref.shape[:2], dtype=bool)
+    ref_gray = gaussian(color.rgb2gray(ref), sigma=1.0, preserve_range=True)
+    gen_gray = gaussian(color.rgb2gray(gen), sigma=1.0, preserve_range=True)
+    ref_edge = np.clip(sobel(ref_gray), 0.0, 1.0)
+    gen_edge = np.clip(sobel(gen_gray), 0.0, 1.0)
+    diff = np.abs(ref_edge - gen_edge)
+    score = score_from_error(masked_mean(diff, metric_mask), 0.18)
+    paths = {}
+    if debug_dir:
+        debug_path = Path(debug_dir); debug_path.mkdir(parents=True, exist_ok=True)
+        paths["structure_ref_edges"] = str(debug_path / f"{stem}_structure_ref_edges.png")
+        paths["structure_gen_edges"] = str(debug_path / f"{stem}_structure_gen_edges.png")
+        paths["structure_diff"] = str(debug_path / f"{stem}_structure_diff.png")
+        save_weight_debug_map(ref_edge, Path(paths["structure_ref_edges"]))
+        save_weight_debug_map(gen_edge, Path(paths["structure_gen_edges"]))
+        save_weight_debug_map(diff, Path(paths["structure_diff"]))
+    return {"score": score, "diff_map": diff, "ref_edge": ref_edge, "gen_edge": gen_edge, "debug_paths": paths}
+
+
+def compute_detail_zones_score(ref, gen, mask=None, profile=None, structure_debug=None, debug_dir=None, stem="pair"):
+    """Prüfe produktkritische Fallback-Zonen stärker als große Lackflächen."""
+    profile = profile or DEFAULT_PRODUCT_INTEGRITY_PROFILE
+    metric_mask = prepare_metric_mask(mask, ref, gen)
+    zones = build_detail_zone_masks(metric_mask, ref.shape[:2])
+    edge_diff = structure_debug["diff_map"] if structure_debug else np.abs(sobel(color.rgb2gray(ref)) - sobel(color.rgb2gray(gen)))
+    weights_cfg = profile.get("detail_zone_weights", {})
+    zone_scores = {}
+    weighted_sum = 0.0; weight_sum = 0.0
+    for name, zone in zones.items():
+        if not np.any(zone):
+            continue
+        zone_score = score_from_error(masked_mean(edge_diff, zone), 0.16)
+        zone_scores[name] = zone_score
+        weight = float(weights_cfg.get(name, 1.0))
+        weighted_sum += zone_score * weight; weight_sum += weight
+    score = float(weighted_sum / weight_sum) if weight_sum else 100.0
+    paths = {}
+    if debug_dir:
+        merged = np.zeros(ref.shape[:2], dtype=np.float32)
+        for i, zone in enumerate(zones.values(), start=1):
+            merged = np.maximum(merged, zone.astype(np.float32) * (i / max(len(zones), 1)))
+        paths["detail_zones_mask"] = str(Path(debug_dir) / f"{stem}_detail_zones_mask.png")
+        save_weight_debug_map(merged, Path(paths["detail_zones_mask"]))
+    return {"score": score, "zone_scores": zone_scores, "zones": zones, "debug_paths": paths}
+
+
+def compute_color_reflection_score(ref, gen, mask=None, edge_diff=None, debug_dir=None, stem="pair"):
+    """Bewerte Farb-/Lichtänderungen getrennt und dämpfe strukturstarke Pixel."""
+    metric_mask = prepare_metric_mask(mask, ref, gen)
+    if metric_mask is None:
+        metric_mask = np.ones(ref.shape[:2], dtype=bool)
+    color_diff = np.mean(np.abs(ref - gen), axis=2)
+    if edge_diff is None:
+        edge_diff = np.abs(sobel(color.rgb2gray(ref)) - sobel(color.rgb2gray(gen)))
+    low_edge_weight = np.clip(1.0 - (edge_diff / 0.20), 0.25, 1.0)
+    reflection_map = color_diff * low_edge_weight
+    score = score_from_error(masked_mean(reflection_map, metric_mask), 0.22)
+    paths = {}
+    if debug_dir:
+        paths["reflection_color_difference"] = str(Path(debug_dir) / f"{stem}_reflection_color_difference.png")
+        save_weight_debug_map(reflection_map, Path(paths["reflection_color_difference"]))
+    return {"score": score, "map": reflection_map, "debug_paths": paths}
+
+
+def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_score=None, profile=None, debug_dir=None, stem="pair"):
+    """Führe Structure, Detail-Zones, Color/Reflection und Car-only-LPIPS zur Produktintegrität zusammen."""
+    profile = profile or DEFAULT_PRODUCT_INTEGRITY_PROFILE
+    scope = car_mask if car_mask is not None and np.any(car_mask) else None
+    structure = compute_structure_only_score(ref, gen, mask=scope, debug_dir=debug_dir, stem=stem)
+    detail = compute_detail_zones_score(ref, gen, mask=scope, profile=profile, structure_debug=structure, debug_dir=debug_dir, stem=stem)
+    color_score = compute_color_reflection_score(ref, gen, mask=scope, edge_diff=structure["diff_map"], debug_dir=debug_dir, stem=stem)
+    component_scores = {
+        "structure_only_score": structure["score"],
+        "detail_zones_score": detail["score"],
+        "color_reflection_score": color_score["score"],
+        "car_only_lpips_score": car_only_lpips_score if car_only_lpips_score is not None else structure["score"],
+    }
+    enabled = profile.get("enabled_components", {})
+    weights = profile.get("weights", {})
+    total = 0.0; denom = 0.0
+    for key, value in component_scores.items():
+        if enabled.get(key, True):
+            weight = float(weights.get(key, 0.0)); total += float(value) * weight; denom += weight
+    product_score = float(total / denom) if denom else float(np.mean(list(component_scores.values())))
+    thresholds = profile.get("thresholds", {})
+    critical = []
+    tolerated = []
+    zone_scores = detail["zone_scores"]
+    zone_labels = {
+        "silhouette": "Abweichung an Fahrzeugkontur erkannt",
+        "front_rear": "mögliche Änderung an Scheinwerfer-, Rückleuchten- oder Front/Heck-Struktur erkannt",
+        "wheels_tires": "mögliche Veränderung der Felgen- oder Reifenstruktur erkannt",
+        "window_line": "Fensterlinie oder Dach-/Säulenstruktur auffällig",
+        "body_lines": "Karosserielinie oder Türfuge auffällig",
+        "center_grill_emblem": "mögliche Änderung an Kühlergrill oder Emblem erkannt",
+    }
+    for name, score in zone_scores.items():
+        if score < float(thresholds.get("critical_zone_score_max", 78.0)):
+            critical.append(zone_labels.get(name, f"Detailzone {name} auffällig"))
+        elif score < float(thresholds.get("warning_zone_score_max", 90.0)):
+            tolerated.append(zone_labels.get(name, f"Detailzone {name} leicht auffällig, manuelle Prüfung empfohlen"))
+    if structure["score"] < float(thresholds.get("failed_structure_min", 80.0)):
+        critical.append("Fahrzeugposition, Skalierung, Proportion oder Struktur deutlich abweichend")
+    if color_score["score"] < float(profile.get("reflection_tolerance", {}).get("tolerated_score_below", 82.0)):
+        tolerated.append("Reflexionsunterschiede auf Lack-/Glasflächen oder flächige Lichtabweichung erkannt")
+    if product_score < float(thresholds.get("failed_product_integrity_min", 80.0)) or structure["score"] < float(thresholds.get("failed_structure_min", 80.0)) or detail["score"] < float(thresholds.get("failed_detail_min", 80.0)):
+        decision = "failed"
+    elif product_score >= float(thresholds.get("passed_product_integrity_min", 90.0)) and structure["score"] >= float(thresholds.get("passed_structure_min", 90.0)) and detail["score"] >= float(thresholds.get("passed_detail_min", 88.0)) and not critical and not tolerated:
+        decision = "passed"
+    else:
+        decision = "warning"
+    debug_paths = {}; debug_paths.update(structure["debug_paths"]); debug_paths.update(detail["debug_paths"]); debug_paths.update(color_score["debug_paths"])
+    return {
+        "structure_only_score": structure["score"],
+        "detail_zones_score": detail["score"],
+        "color_reflection_score": color_score["score"],
+        "product_integrity_score": product_score,
+        "product_integrity_decision": decision,
+        "critical_findings": critical,
+        "tolerated_findings": tolerated,
+        "product_integrity_debug_paths": debug_paths,
+        "detail_zone_scores": zone_scores,
+    }
+
 def compute_delta_e(ref, gen):
     ref_lab = color.rgb2lab(ref)
     gen_lab = color.rgb2lab(gen)
@@ -1457,6 +1700,7 @@ def evaluate_pair(
     roi_square=True,
     max_metric_long_edge=1600,
     mercedes_weight_profile=None,
+    product_integrity_profile=None,
 ):
     ref_img = load_image(ref_path)
     gen_img = load_image(gen_path)
@@ -1670,6 +1914,17 @@ def evaluate_pair(
     else:
         geometric = build_empty_car_mask_metrics()
 
+    product_integrity_profile = product_integrity_profile or load_product_integrity_profile()
+    product_integrity = compute_product_integrity_scores(
+        ref_norm,
+        gen_norm,
+        car_mask=reflection_scope_mask,
+        car_only_lpips_score=lpips_car_only_similarity_percent,
+        profile=product_integrity_profile,
+        debug_dir=debug_dir,
+        stem=basename,
+    )
+
     print("------------------------------------------------------------")
     print(f"Pair: {basename}")
     print(f"  Reference original : {ref_w}x{ref_h}")
@@ -1702,6 +1957,11 @@ def evaluate_pair(
     print(f"  Glass interior excluded: {glass_interior_area_ratio * 100.0:.2f}%")
     print(f"  Reflection robust LPIPS : {reflection_robust_lpips:.6f}")
     print(f"  Final similarity score  : {format_percent(final_similarity_score)}")
+    print(f"  Product Integrity Score : {product_integrity['product_integrity_score']:.2f}%")
+    print(f"  Product Integrity       : {product_integrity['product_integrity_decision']}")
+    print(f"  Structure-only Score    : {product_integrity['structure_only_score']:.2f}%")
+    print(f"  Detail-zones Score      : {product_integrity['detail_zones_score']:.2f}%")
+    print(f"  Color-reflection Score  : {product_integrity['color_reflection_score']:.2f}%")
     if segmenter is not None:
         print(f"  Mask area (%)      : {car_metrics['debug']['mask_area_ratio'] * 100.0:.2f}%")
         print(f"  BBox (Metrik)      : {car_metrics['debug']['metric_bbox']}")
@@ -1754,6 +2014,19 @@ def evaluate_pair(
         "reflection_robust_lpips": reflection_robust_lpips,
         "reflection_robust_lpips_similarity_percent": reflection_robust_lpips_similarity_percent,
         "final_similarity_score": final_similarity_score,
+        "lpips_raw": lpips_val,
+        "lpips_score": percent_metrics["lpips_similarity_percent"],
+        "car_only_lpips_raw": car_metrics["lpips_car_only"],
+        "car_only_lpips_score": lpips_car_only_similarity_percent,
+        "structure_only_score": product_integrity["structure_only_score"],
+        "detail_zones_score": product_integrity["detail_zones_score"],
+        "color_reflection_score": product_integrity["color_reflection_score"],
+        "product_integrity_score": product_integrity["product_integrity_score"],
+        "product_integrity_decision": product_integrity["product_integrity_decision"],
+        "critical_findings": json.dumps(product_integrity["critical_findings"], ensure_ascii=False),
+        "tolerated_findings": json.dumps(product_integrity["tolerated_findings"], ensure_ascii=False),
+        "product_integrity_profile": product_integrity_profile.get("name", DEFAULT_PRODUCT_INTEGRITY_PROFILE_NAME),
+        "product_integrity_debug_paths": json.dumps(product_integrity["product_integrity_debug_paths"], sort_keys=True),
         "mercedes_profile_enabled": mercedes_profile_enabled,
         "used_weight_profile": used_weight_profile,
         "reflection_weight_mean": reflection_weight_mean,
@@ -1813,6 +2086,7 @@ def evaluate_folders(
     roi_square=True,
     max_metric_long_edge=1600,
     mercedes_weight_profile=None,
+    product_integrity_profile=None,
 ):
     ref_dir = Path(reference_dir)
     gen_dir = Path(generated_dir)
@@ -1866,6 +2140,7 @@ def evaluate_folders(
             roi_square=roi_square,
             max_metric_long_edge=max_metric_long_edge,
             mercedes_weight_profile=mercedes_weight_profile,
+            product_integrity_profile=product_integrity_profile,
         )
         results.append(result)
 
@@ -1952,6 +2227,7 @@ def parse_args():
     parser.add_argument("--car-only-dir", default="car_only", help="Verzeichnis für gespeicherte Car-only-Crops")
     parser.add_argument("--weight-profile-config", default=None, help="Pfad zu configs/mercedes_weight_profiles.json")
     parser.add_argument("--weight-profile", default=None, help="Name des Mercedes Weight Profiles")
+    parser.add_argument("--product-integrity-profile-config", default=None, help="Pfad zu configs/product_integrity_profile.json")
     parser.add_argument(
         "--skip-hausdorff",
         action="store_true",
@@ -2017,6 +2293,8 @@ def main():
         profile_name=args.weight_profile,
     )
     print(f"[INFO] Weight Profile   : {mercedes_weight_profile.get('name')} ({mercedes_weight_profile.get('source')})")
+    product_integrity_profile = load_product_integrity_profile(args.product_integrity_profile_config)
+    print(f"[INFO] Integrity Profile: {product_integrity_profile.get('name')} ({product_integrity_profile.get('source')})")
 
     lpips_model = init_lpips_model(net=args.lpips_net, use_gpu=args.use_gpu)
     verify_lpips_forward(lpips_model, net=args.lpips_net, use_gpu=args.use_gpu)
@@ -2069,6 +2347,7 @@ def main():
             roi_square=args.roi_square,
             max_metric_long_edge=args.max_metric_long_edge,
             mercedes_weight_profile=mercedes_weight_profile,
+            product_integrity_profile=product_integrity_profile,
         )
         build_result_dataframe([result]).to_csv(args.output_csv, index=False, float_format="%.6f", na_rep="")
         print(f"[INFO] Einzelvergleich gespeichert: {args.output_csv}")
@@ -2103,6 +2382,7 @@ def main():
         roi_square=args.roi_square,
         max_metric_long_edge=args.max_metric_long_edge,
         mercedes_weight_profile=mercedes_weight_profile,
+        product_integrity_profile=product_integrity_profile,
     )
 
 

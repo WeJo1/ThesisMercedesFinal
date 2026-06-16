@@ -1,0 +1,38 @@
+{
+  "name": "mercedes_product_integrity_v1",
+  "enabled_components": {
+    "structure_only_score": true,
+    "detail_zones_score": true,
+    "color_reflection_score": true,
+    "car_only_lpips_score": true
+  },
+  "weights": {
+    "structure_only_score": 0.45,
+    "detail_zones_score": 0.40,
+    "color_reflection_score": 0.10,
+    "car_only_lpips_score": 0.05
+  },
+  "thresholds": {
+    "passed_product_integrity_min": 90,
+    "passed_structure_min": 90,
+    "passed_detail_min": 88,
+    "failed_product_integrity_min": 80,
+    "failed_structure_min": 80,
+    "failed_detail_min": 80,
+    "warning_color_reflection_max": 78,
+    "critical_zone_score_max": 78,
+    "warning_zone_score_max": 90
+  },
+  "reflection_tolerance": {
+    "low_edge_difference_bonus": 0.35,
+    "tolerated_score_below": 82
+  },
+  "detail_zone_weights": {
+    "silhouette": 1.35,
+    "front_rear": 1.25,
+    "wheels_tires": 1.35,
+    "window_line": 1.20,
+    "body_lines": 1.00,
+    "center_grill_emblem": 1.20
+  }
+}

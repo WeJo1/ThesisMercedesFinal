@@ -241,6 +241,31 @@
               </div>
               <p id="reflectionRobustLpips" class="stat-value">--</p>
             </article>
+
+            <article class="metric-card metric-card-priority">
+              <div class="stat-label-row"><p class="stat-label">Product-Integrity-Score</p><details class="metric-info"><summary aria-label="Product Integrity Erklärung anzeigen">ⓘ</summary><p>Gesamtbewertung: Structure-only 45 %, Detail-Zones 40 %, Color/Reflection 10 %, Car-only-LPIPS 5 %. 100 bedeutet produktseitig unauffällig.</p></details></div>
+              <p id="productIntegrityScore" class="stat-value">--</p>
+            </article>
+            <article class="metric-card metric-card-priority">
+              <div class="stat-label-row"><p class="stat-label">Product-Integrity-Entscheidung</p><details class="metric-info"><summary aria-label="Entscheidung Erklärung anzeigen">ⓘ</summary><p>passed, warning oder failed nach konfigurierbaren Schwellenwerten für Produktstruktur und kritische Detailzonen.</p></details></div>
+              <p id="productIntegrityDecision" class="stat-value">--</p>
+            </article>
+            <article class="metric-card">
+              <div class="stat-label-row"><p class="stat-label">Structure-Only-Score</p><details class="metric-info"><summary aria-label="Structure-only Erklärung anzeigen">ⓘ</summary><p>Vergleicht geglättete Graustufen-Kanten innerhalb der Fahrzeugmaske und ignoriert Farbton sowie Reflexe weitgehend.</p></details></div>
+              <p id="structureOnlyScore" class="stat-value">--</p>
+            </article>
+            <article class="metric-card">
+              <div class="stat-label-row"><p class="stat-label">Detail-Zones-Score</p><details class="metric-info"><summary aria-label="Detailzonen Erklärung anzeigen">ⓘ</summary><p>Prüft Scheinwerfer-/Front-/Heckbereiche, Felgen, Fensterlinie, Karosserielinien, Grill/Emblem und Silhouette stärker.</p></details></div>
+              <p id="detailZonesScore" class="stat-value">--</p>
+            </article>
+            <article class="metric-card">
+              <div class="stat-label-row"><p class="stat-label">Color-Reflection-Score</p><details class="metric-info"><summary aria-label="Color Reflection Erklärung anzeigen">ⓘ</summary><p>Separater Hinweiswert für Farb-, Helligkeits- und Reflexionsänderungen auf glatten Bereichen. Niedrige Werte wirken nur schwach auf Product-Integrity.</p></details></div>
+              <p id="colorReflectionScore" class="stat-value">--</p>
+            </article>
+            <article class="metric-card metric-card-wide">
+              <div class="stat-label-row"><p class="stat-label">Product-Integrity-Hinweise</p></div>
+              <div class="findings-grid"><div><strong>Kritisch</strong><ul id="criticalFindings"></ul></div><div><strong>Toleriert / Hinweis</strong><ul id="toleratedFindings"></ul></div></div>
+            </article>
             <article class="metric-card metric-card-priority">
               <div class="stat-label-row">
                 <p class="stat-label">Final Similarity Score</p>
