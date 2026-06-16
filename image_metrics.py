@@ -82,9 +82,9 @@ DEFAULT_PRODUCT_INTEGRITY_PROFILE = {
         "car_only_lpips_score": True,
     },
     "weights": {
-        "structure_only_score": 0.40,
-        "detail_zones_score": 0.45,
-        "color_reflection_score": 0.10,
+        "structure_only_score": 0.50,
+        "detail_zones_score": 0.42,
+        "color_reflection_score": 0.03,
         "car_only_lpips_score": 0.05,
         "legacy_weighted_lpips_weight": 0.0,
     },
@@ -822,20 +822,20 @@ def symmetric_gaussian_zone(x, y, zone):
 
 
 def build_critical_component_zones(mask, shape):
-    """Erzeuge robuste Produktzonen aus der Fahrzeug-Bounding-Box.
-
-    Nutze die Prototyp-Annahme: Die Fahrzeugfront liegt links im Bild.
-    """
+    """Erzeuge robuste Produktzonen aus Fahrzeugkontur und Bounding-Box."""
     scope = np.asarray(mask, dtype=bool) if mask is not None and np.any(mask) else np.ones(shape, dtype=bool)
     bbox = compute_mask_roi_bbox(scope, shape)
-    headlight_zone = bbox_mask_from_fraction(shape, bbox, (0.00, 0.20, 0.36, 0.58))
-    light_signature_zone = bbox_mask_from_fraction(shape, bbox, (0.00, 0.16, 0.34, 0.54))
-    grille_zone = bbox_mask_from_fraction(shape, bbox, (0.00, 0.35, 0.30, 0.72))
-    emblem_zone = bbox_mask_from_fraction(shape, bbox, (0.18, 0.38, 0.40, 0.66))
-    front_wheel_zone = bbox_mask_from_fraction(shape, bbox, (0.05, 0.58, 0.39, 1.00))
-    rear_wheel_zone = bbox_mask_from_fraction(shape, bbox, (0.61, 0.58, 0.95, 1.00))
+    headlight_zone = bbox_mask_from_fraction(shape, bbox, (0.00, 0.20, 0.38, 0.58))
+    light_signature_zone = bbox_mask_from_fraction(shape, bbox, (0.00, 0.16, 0.36, 0.54))
+    grille_zone = bbox_mask_from_fraction(shape, bbox, (0.00, 0.34, 0.32, 0.74))
+    emblem_zone = bbox_mask_from_fraction(shape, bbox, (0.16, 0.38, 0.42, 0.66))
+    front_wheel_zone = find_wheel_zone_from_mask(scope, bbox, "front")
+    rear_wheel_zone = find_wheel_zone_from_mask(scope, bbox, "rear")
     tire_zone = front_wheel_zone | rear_wheel_zone
     window_line_zone = bbox_mask_from_fraction(shape, bbox, (0.08, 0.12, 0.92, 0.58))
+    roof_pillar_zone = bbox_mask_from_fraction(shape, bbox, (0.10, 0.05, 0.90, 0.36))
+    side_body_zone = bbox_mask_from_fraction(shape, bbox, (0.10, 0.42, 0.92, 0.76))
+    front_apron_zone = bbox_mask_from_fraction(shape, bbox, (0.00, 0.58, 0.34, 0.90))
     silhouette_zone = dilation(scope, disk(2)) & ~erosion(scope, disk(3))
     zones = {
         "headlight_zone": headlight_zone,
@@ -846,6 +846,9 @@ def build_critical_component_zones(mask, shape):
         "rear_wheel_zone": rear_wheel_zone,
         "tire_zone": tire_zone,
         "window_line_zone": window_line_zone,
+        "roof_pillar_zone": roof_pillar_zone,
+        "side_body_zone": side_body_zone,
+        "front_apron_zone": front_apron_zone,
         "silhouette_zone": silhouette_zone,
         # Kompatible Kurznamen für die Komponenten-Auswertung:
         "headlight": headlight_zone,
@@ -856,10 +859,14 @@ def build_critical_component_zones(mask, shape):
         "rear_wheel": rear_wheel_zone,
         "wheel_tire": tire_zone,
         "window_line": window_line_zone,
+        "roof_pillar": roof_pillar_zone,
+        "side_body": side_body_zone,
+        "front_apron": front_apron_zone,
         "silhouette": silhouette_zone,
     }
     for name, zone in list(zones.items()):
-        zones[name] = np.asarray(zone & scope, dtype=bool)
+        min_ratio = 0.0005 if any(part in name for part in ("wheel", "grille", "emblem")) else 0.001
+        zones[name], _ = validate_zone_against_vehicle(zone, scope, name, min_area_ratio=min_ratio)
     return zones
 
 
@@ -1482,6 +1489,32 @@ def apply_masked_car_crop(img, mask, bbox):
     return masked_crop, mask_crop
 
 
+def validate_binary_mask(mask, name="mask", min_area_px=1, max_hole_ratio=0.18):
+    """Validiere eine Fahrzeug-/Zonenmaske und melde typische Pipeline-Defekte früh."""
+    mask_bool = np.asarray(mask, dtype=bool)
+    if mask_bool.ndim != 2:
+        raise ValueError(f"{name} muss zweidimensional sein, erhalten: {mask_bool.shape}.")
+    area = int(np.sum(mask_bool))
+    if area < int(min_area_px):
+        raise ValueError(f"{name} ist leer oder zu klein ({area} px).")
+    x0, y0, x1, y1 = compute_mask_roi_bbox(mask_bool, mask_bool.shape)
+    roi = mask_bool[y0:y1, x0:x1]
+    bbox_area = max(int(roi.size), 1)
+    filled_roi = fill_holes_smaller_than(roi, bbox_area)
+    holes = filled_roi & ~roi
+    hole_ratio = float(np.sum(holes) / max(float(area), 1.0))
+    if hole_ratio > float(max_hole_ratio):
+        raise ValueError(
+            f"{name} enthält unplausibel große Löcher ({hole_ratio:.2%} der Maskenfläche). "
+            "Prüfe boolesche Maskenkombinationen, Polygon-Fills und Crop/Resize-Koordinaten."
+        )
+    return {
+        "area_px": area,
+        "bbox": (x0, y0, x1, y1),
+        "hole_ratio": hole_ratio,
+    }
+
+
 def save_mask_image(mask, path):
     mask_img = (mask.astype(np.uint8) * 255)
     Image.fromarray(mask_img, mode="L").save(path)
@@ -1570,6 +1603,7 @@ def compute_car_only_metrics(
         max_hole_area=mask_max_hole_area,
         trim_px=mask_trim_px,
     )
+    validate_binary_mask(mask, "final_vehicle_mask", min_area_px=max(1, int(min_mask_area) + 1))
 
     mask_area = int(np.sum(mask))
     total_area = int(mask.size)
@@ -1663,11 +1697,15 @@ def compute_car_only_metrics(
         debug_path.mkdir(parents=True, exist_ok=True)
         save_mask_image(base_mask.astype(bool), debug_path / f"{stem}_raw_vehicle_mask.png")
         save_mask_image(mask, debug_path / f"{stem}_final_vehicle_mask.png")
+        save_mask_image(ref_mask.astype(bool), debug_path / f"{stem}_final_vehicle_mask_reference.png")
+        save_mask_image(gen_mask.astype(bool), debug_path / f"{stem}_final_vehicle_mask_comparison.png")
         save_mask_image(mask, debug_path / f"{stem}_mask.png")
         with open(debug_path / f"{stem}_crop_box.json", "w", encoding="utf-8") as fp:
             json.dump(debug["bbox"], fp, indent=2)
         np_to_pil_uint8(ref_car).save(debug_path / f"{stem}_ref_neutral.png")
         np_to_pil_uint8(gen_car).save(debug_path / f"{stem}_gen_neutral.png")
+        np_to_pil_uint8(ref_preview).save(debug_path / f"{stem}_aligned_reference_vehicle.png")
+        np_to_pil_uint8(gen_preview).save(debug_path / f"{stem}_aligned_comparison_vehicle.png")
         np_to_pil_uint8(np.repeat(mask_crop[..., None].astype(np.float32), 3, axis=2)).save(debug_path / f"{stem}_crop_mask.png")
 
     car_only_paths = {"ref": None, "gen": None}
@@ -1742,6 +1780,52 @@ def bbox_mask_from_fraction(shape, bbox, fractions):
     return mask
 
 
+def validate_zone_against_vehicle(zone, vehicle_mask, name, min_area_ratio=0.001, min_iou_with_vehicle=0.72):
+    """Gib nur Zonen frei, die ausreichend groß sind und sichtbar auf dem Fahrzeug liegen."""
+    zone = np.asarray(zone, dtype=bool)
+    vehicle = np.asarray(vehicle_mask, dtype=bool) if vehicle_mask is not None and np.any(vehicle_mask) else np.ones(zone.shape, dtype=bool)
+    clipped = zone & vehicle
+    vehicle_area = max(float(np.sum(vehicle)), 1.0)
+    original_area = max(float(np.sum(zone)), 1.0)
+    area_ratio = float(np.sum(clipped) / vehicle_area)
+    iou_with_vehicle = float(np.sum(clipped) / original_area)
+    valid = bool(area_ratio >= float(min_area_ratio) and iou_with_vehicle >= float(min_iou_with_vehicle))
+    return clipped if valid else np.zeros(zone.shape, dtype=bool), {
+        "name": name,
+        "valid": valid,
+        "area_ratio": area_ratio,
+        "iou_with_vehicle": iou_with_vehicle,
+    }
+
+
+def find_wheel_zone_from_mask(vehicle_mask, bbox, side):
+    """Leite eine Radzone aus der unteren Fahrzeugkontur ab statt aus einer starren Box."""
+    vehicle = np.asarray(vehicle_mask, dtype=bool)
+    shape = vehicle.shape
+    x0, y0, x1, y1 = bbox
+    bw = max(1, x1 - x0)
+    bh = max(1, y1 - y0)
+    if side == "front":
+        search = bbox_mask_from_fraction(shape, bbox, (0.03, 0.55, 0.42, 1.00))
+    else:
+        search = bbox_mask_from_fraction(shape, bbox, (0.58, 0.55, 0.97, 1.00))
+    candidates = vehicle & search
+    if not np.any(candidates):
+        return np.zeros(shape, dtype=bool)
+    ys, xs = np.where(candidates)
+    lower_cut = y0 + int(0.58 * bh)
+    lower = candidates & (np.mgrid[0:shape[0], 0:shape[1]][0] >= lower_cut)
+    if np.any(lower):
+        ys, xs = np.where(lower)
+    cx = int(round(np.median(xs)))
+    cy = int(round(np.percentile(ys, 62)))
+    rx = max(4, int(round(0.12 * bw)))
+    ry = max(4, int(round(0.20 * bh)))
+    yy, xx = np.mgrid[0:shape[0], 0:shape[1]]
+    ellipse = (((xx - cx) / rx) ** 2 + ((yy - cy) / ry) ** 2) <= 1.0
+    return ellipse & dilation(vehicle, disk(2))
+
+
 def build_detail_zone_masks(car_mask, fallback_shape, ref=None, gen=None, glass_masks=None):
     """Erzeuge detailnahe Fahrzeugzonen aus Maske, Kanten und Fahrzeug-Bounding-Box."""
     scope = np.asarray(car_mask, dtype=bool) if car_mask is not None and np.any(car_mask) else np.ones(fallback_shape, dtype=bool)
@@ -1775,10 +1859,9 @@ def build_detail_zone_masks(car_mask, fallback_shape, ref=None, gen=None, glass_
     product_edges = detail_edges & ~glass_interior
 
     silhouette = (dilation(scope, disk(2)) & ~erosion(scope, disk(3))) & scope
-    wheel_band = (by >= 0.62) & (by <= 1.0)
-    left_wheel = bbox_mask_from_fraction(fallback_shape, bbox, (0.07, 0.60, 0.36, 1.00)) & wheel_band
-    right_wheel = bbox_mask_from_fraction(fallback_shape, bbox, (0.64, 0.60, 0.93, 1.00)) & wheel_band
-    wheels_tires = (left_wheel | right_wheel) & (product_edges | changed_detail_edges | silhouette)
+    front_wheel = find_wheel_zone_from_mask(scope, bbox, "front")
+    rear_wheel = find_wheel_zone_from_mask(scope, bbox, "rear")
+    wheels_tires = (front_wheel | rear_wheel) & (product_edges | changed_detail_edges | silhouette | front_wheel | rear_wheel)
 
     front_rear_band = (
         bbox_mask_from_fraction(fallback_shape, bbox, (0.00, 0.30, 0.22, 0.78))
@@ -1794,7 +1877,7 @@ def build_detail_zone_masks(car_mask, fallback_shape, ref=None, gen=None, glass_
     center_band = bbox_mask_from_fraction(fallback_shape, bbox, (0.36, 0.32, 0.64, 0.70))
     center_grill_emblem = center_band & product_edges
 
-    zones = {
+    raw_zones = {
         "silhouette": silhouette,
         "front_rear": front_rear,
         "wheels_tires": wheels_tires,
@@ -1802,7 +1885,10 @@ def build_detail_zone_masks(car_mask, fallback_shape, ref=None, gen=None, glass_
         "body_lines": body_lines,
         "center_grill_emblem": center_grill_emblem,
     }
-    return {name: (zone & scope) for name, zone in zones.items()}
+    zones = {}
+    for name, zone in raw_zones.items():
+        zones[name], _ = validate_zone_against_vehicle(zone, scope, name, min_area_ratio=0.0005 if name == "center_grill_emblem" else 0.001)
+    return zones
 
 def compute_structure_only_score(ref, gen, mask=None, debug_dir=None, stem="pair"):
     """Vergleiche graue Kantenbilder ausschließlich innerhalb der Fahrzeugmaske."""
@@ -1857,7 +1943,7 @@ def compute_detail_zones_score(ref, gen, mask=None, profile=None, structure_debu
     for name, zone in zones.items():
         if not np.any(zone):
             continue
-        zone_score = score_from_error(masked_mean(edge_diff, zone), 0.16)
+        zone_score = score_from_error(masked_mean(edge_diff, zone), 0.13)
         zone_scores[name] = zone_score
         weight = float(weights_cfg.get(name, 1.0))
         weighted_sum += zone_score * weight; weight_sum += weight
@@ -1900,6 +1986,7 @@ def compute_component_product_scores(ref, gen, mask=None, structure_debug=None, 
     """Bewerte harte Produktbauteile lokal, damit Details nicht im Gesamtscore verschwinden."""
     metric_mask = prepare_metric_mask(mask, ref, gen)
     shape = ref.shape[:2]
+    scope = metric_mask if metric_mask is not None else np.ones(shape, dtype=bool)
     zones = build_critical_component_zones(metric_mask, shape)
 
     ref_gray = color.rgb2gray(ref).astype(np.float32)
@@ -1925,7 +2012,8 @@ def compute_component_product_scores(ref, gen, mask=None, structure_debug=None, 
 
     # Harte Bauteile nutzen bewusst ungedämpfte lokale Signale. Reflection-Downweighting
     # darf Scheinwerfer, Lichtsignatur, Räder/Felgen/Reifen, Grill und Emblem nicht entschärfen.
-    component_diff_map = np.clip((0.45 * structure_diff) + (0.30 * edge_delta) + (0.55 * gray_diff) + (0.20 * lpips_local), 0.0, 1.0)
+    component_diff_map = np.clip((0.55 * structure_diff) + (0.35 * edge_delta) + (0.20 * gray_diff) + (0.15 * lpips_local), 0.0, 1.0)
+    component_diff_map = component_diff_map * scope.astype(np.float32)
     edge_presence = np.maximum(ref_edge, gen_edge)
 
     component_scores = {}
@@ -1951,11 +2039,21 @@ def compute_component_product_scores(ref, gen, mask=None, structure_debug=None, 
     if debug_dir:
         debug_path = Path(debug_dir); debug_path.mkdir(parents=True, exist_ok=True)
         paths["critical_component_zones"] = str(debug_path / f"{stem}_critical_component_zones.png")
+        paths["wheel_zone_front"] = str(debug_path / f"{stem}_wheel_zone_front.png")
+        paths["wheel_zone_rear"] = str(debug_path / f"{stem}_wheel_zone_rear.png")
+        paths["grille_zone"] = str(debug_path / f"{stem}_grille_zone.png")
+        paths["headlight_zone"] = str(debug_path / f"{stem}_headlight_zone.png")
+        paths["window_zone"] = str(debug_path / f"{stem}_window_zone.png")
         paths["headlight_zone_diff"] = str(debug_path / f"{stem}_headlight_zone_diff.png")
         paths["wheel_tire_zone_diff"] = str(debug_path / f"{stem}_wheel_tire_zone_diff.png")
         paths["grille_zone_diff"] = str(debug_path / f"{stem}_grille_zone_diff.png")
         paths["component_attribution_map"] = str(debug_path / f"{stem}_component_attribution_map.png")
         save_weight_debug_map(zone_debug, Path(paths["critical_component_zones"]))
+        save_mask_image(zones["front_wheel"], Path(paths["wheel_zone_front"]))
+        save_mask_image(zones["rear_wheel"], Path(paths["wheel_zone_rear"]))
+        save_mask_image(zones["grille"], Path(paths["grille_zone"]))
+        save_mask_image(zones["headlight"] | zones["front_light_signature"], Path(paths["headlight_zone"]))
+        save_mask_image(zones["window_line"] | zones.get("roof_pillar", np.zeros(shape, dtype=bool)), Path(paths["window_zone"]))
         save_weight_debug_map(np.where(zones["headlight"] | zones["front_light_signature"], component_diff_map, 0.0), Path(paths["headlight_zone_diff"]))
         save_weight_debug_map(np.where(zones["wheel_tire"], component_diff_map, 0.0), Path(paths["wheel_tire_zone_diff"]))
         save_weight_debug_map(np.where(zones["grille"], component_diff_map, 0.0), Path(paths["grille_zone_diff"]))
@@ -2074,9 +2172,9 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
     grille_diff = float(component_diffs.get("grille", 0.0))
     emblem_diff = float(component_diffs.get("emblem", 0.0))
 
-    headlight_diff_gate = float(thresholds.get("critical_headlight_diff_min", 0.20))
-    light_diff_gate = float(thresholds.get("critical_light_signature_diff_min", 0.18))
-    wheel_diff_gate = float(thresholds.get("warning_wheel_diff_min", 0.16))
+    headlight_diff_gate = float(thresholds.get("critical_headlight_diff_min", 0.14))
+    light_diff_gate = float(thresholds.get("critical_light_signature_diff_min", 0.12))
+    wheel_diff_gate = float(thresholds.get("warning_wheel_diff_min", 0.12))
     front_diff_gate = float(thresholds.get("warning_front_detail_diff_min", 0.17))
 
     headlight_failed = headlight_diff > headlight_diff_gate or (headlight_score < float(thresholds.get("critical_headlight_score_max", 72.0)) and headlight_diff > light_diff_gate)
@@ -2113,6 +2211,26 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
         add_finding(findings, "emblem_front_structure", "tolerated", "component:emblem")
         component_findings.append("Mercedes-Stern/Emblem")
 
+    finding_zone_map = {
+        "wheel_tire_structure": components["zones"]["front_wheel"] | components["zones"]["rear_wheel"] | components["zones"]["wheel_tire"],
+        "headlight_light_signature": components["zones"]["headlight"] | components["zones"]["front_light_signature"],
+        "grille_front_structure": components["zones"]["grille"],
+        "emblem_front_structure": components["zones"]["emblem"],
+    }
+    overlay_evidence = np.zeros(ref.shape[:2], dtype=bool)
+    overlay_threshold = float(thresholds.get("finding_overlay_diff_threshold", 0.08))
+    invalid_findings = []
+    for key, zone in finding_zone_map.items():
+        if key not in findings:
+            continue
+        local_activity = zone & (components["component_diff_map"] >= overlay_threshold)
+        if not np.any(zone) or np.sum(local_activity) < 1:
+            findings.pop(key, None)
+            invalid_findings.append(key)
+            component_findings = [item for item in component_findings if not (key == "wheel_tire_structure" and "Felgen" in item)]
+            continue
+        overlay_evidence |= local_activity
+
     reflection_cfg = profile.get("reflection_tolerance", {})
     reflection_weights = build_reflection_downweight_map(ref, gen, car_mask=scope)
     downweight_threshold = float(reflection_cfg.get("downweight_threshold", DEFAULT_MERCEDES_WEIGHT_PROFILE.get("downweight_threshold", 0.92)))
@@ -2139,13 +2257,19 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
         else:
             add_finding(findings, "paint_reflection", "tolerated", "reflection:evidence")
 
+    if headlight_failed or light_signature_failed:
+        product_score = min(product_score, min(headlight_score, light_signature_score) + 18.0)
+    if wheel_strong:
+        product_score = min(product_score, wheel_tire_score + 18.0)
+
     if debug_dir:
         debug_path = Path(debug_dir); debug_path.mkdir(parents=True, exist_ok=True)
         absolute_structure_threshold = float(thresholds.get("absolute_structure_diff_threshold", 0.30))
         absolute_lpips_threshold = float(thresholds.get("absolute_weighted_lpips_threshold", 0.30))
         absolute_component_threshold = float(thresholds.get("absolute_component_diff_threshold", 0.30))
-        structure_map = np.clip(np.asarray(structure["diff_map"], dtype=np.float32), 0.0, 1.0)
-        component_map = np.clip(np.asarray(components["component_diff_map"], dtype=np.float32), 0.0, 1.0)
+        scope_mask = scope if scope is not None else np.ones(ref.shape[:2], dtype=bool)
+        structure_map = np.clip(np.asarray(structure["diff_map"], dtype=np.float32), 0.0, 1.0) * scope_mask.astype(np.float32)
+        component_map = np.clip(np.asarray(components["component_diff_map"], dtype=np.float32), 0.0, 1.0) * scope_mask.astype(np.float32)
         lpips_map_local = resize_float_map_to_shape(np.asarray(lpips_component_map, dtype=np.float32), ref.shape[:2]) if lpips_component_map is not None else np.zeros(ref.shape[:2], dtype=np.float32)
         if np.max(lpips_map_local) > 1.0:
             lpips_map_local = lpips_map_local / (float(np.percentile(lpips_map_local, 98)) + 1e-8)
@@ -2154,6 +2278,10 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
         relative_map = np.maximum(structure_map, component_map)
         combined_map = np.maximum(relative_map, absolute_mask.astype(np.float32))
         extra_paths = {
+            "structure_diff_map": debug_path / f"{stem}_structure_diff_map.png",
+            "reflection_diff_map": debug_path / f"{stem}_reflection_diff_map.png",
+            "overlay_findings_map": debug_path / f"{stem}_overlay_findings_map.png",
+            "invalid_zone_diagnostics": debug_path / f"{stem}_invalid_zone_diagnostics.png",
             "heatmap_relative": debug_path / f"{stem}_heatmap_relative.png",
             "heatmap_absolute_threshold": debug_path / f"{stem}_heatmap_absolute_threshold.png",
             "heatmap_combined": debug_path / f"{stem}_heatmap_combined.png",
@@ -2161,6 +2289,16 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
             "reflection_accepted_map": debug_path / f"{stem}_reflection_accepted_map.png",
             "reflection_rejected_due_to_critical_component": debug_path / f"{stem}_reflection_rejected_due_to_critical_component.png",
         }
+        save_weight_debug_map(structure_map, extra_paths["structure_diff_map"])
+        save_weight_debug_map(color_score["map"] * scope_mask.astype(np.float32), extra_paths["reflection_diff_map"])
+        save_weight_debug_map(overlay_evidence.astype(np.float32), extra_paths["overlay_findings_map"])
+        invalid_map = np.zeros(ref.shape[:2], dtype=np.float32)
+        for zone in finding_zone_map.values():
+            if np.any(zone):
+                invalid_map = np.maximum(invalid_map, zone.astype(np.float32) * 0.25)
+        if invalid_findings:
+            invalid_map = np.maximum(invalid_map, np.where(scope_mask, 1.0, 0.0).astype(np.float32) * 0.1)
+        save_weight_debug_map(invalid_map, extra_paths["invalid_zone_diagnostics"])
         save_weight_debug_map(relative_map, extra_paths["heatmap_relative"])
         save_weight_debug_map(absolute_mask.astype(np.float32), extra_paths["heatmap_absolute_threshold"])
         save_weight_debug_map(combined_map, extra_paths["heatmap_combined"])

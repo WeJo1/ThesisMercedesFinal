@@ -7,10 +7,10 @@
     "car_only_lpips_score": true
   },
   "weights": {
-    "structure_only_score": 0.45,
+    "structure_only_score": 0.52,
     "detail_zones_score": 0.4,
-    "color_reflection_score": 0.05,
-    "car_only_lpips_score": 0.1
+    "color_reflection_score": 0.03,
+    "car_only_lpips_score": 0.05
   },
   "thresholds": {
     "passed_product_integrity_min": 90,
@@ -22,7 +22,11 @@
     "warning_color_reflection_max": 78,
     "critical_zone_score_max": 78,
     "warning_zone_score_max": 90,
-    "soft_pass_product_integrity_min": 88
+    "soft_pass_product_integrity_min": 88,
+    "finding_overlay_diff_threshold": 0.08,
+    "critical_headlight_diff_min": 0.14,
+    "critical_light_signature_diff_min": 0.12,
+    "warning_wheel_diff_min": 0.12
   },
   "reflection_tolerance": {
     "low_edge_difference_bonus": 0.35,
