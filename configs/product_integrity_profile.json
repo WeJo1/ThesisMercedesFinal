@@ -8,9 +8,9 @@
   },
   "weights": {
     "structure_only_score": 0.45,
-    "detail_zones_score": 0.40,
-    "color_reflection_score": 0.10,
-    "car_only_lpips_score": 0.05
+    "detail_zones_score": 0.4,
+    "color_reflection_score": 0.05,
+    "car_only_lpips_score": 0.1
   },
   "thresholds": {
     "passed_product_integrity_min": 90,
@@ -21,7 +21,8 @@
     "failed_detail_min": 80,
     "warning_color_reflection_max": 78,
     "critical_zone_score_max": 78,
-    "warning_zone_score_max": 90
+    "warning_zone_score_max": 90,
+    "soft_pass_product_integrity_min": 88
   },
   "reflection_tolerance": {
     "low_edge_difference_bonus": 0.35,
@@ -31,8 +32,17 @@
     "silhouette": 1.35,
     "front_rear": 1.25,
     "wheels_tires": 1.35,
-    "window_line": 1.20,
-    "body_lines": 1.00,
-    "center_grill_emblem": 1.20
+    "window_line": 1.2,
+    "body_lines": 1.0,
+    "center_grill_emblem": 1.2
+  },
+  "contour_warning": {
+    "high_iou_min": 0.98,
+    "high_dice_min": 0.99,
+    "critical_zone_score_max": 72,
+    "warning_zone_score_max": 86,
+    "max_hausdorff_norm": 0.018,
+    "max_centroid_norm": 0.006,
+    "max_area_ratio_delta": 0.025
   }
 }

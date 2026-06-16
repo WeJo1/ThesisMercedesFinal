@@ -327,6 +327,13 @@ def test_csv_and_preview_include_product_integrity_values(tmp_path):
         "product_integrity_decision": "passed",
         "critical_findings": "[]",
         "tolerated_findings": "[\"Reflexionsunterschiede erkannt\"]",
+        "product_integrity_interpretation": "Die Fahrzeugstruktur ist stabil.",
+        "decision_reason": "Keine critical_findings; Abweichungen nur als tolerated_findings klassifiziert.",
+        "contour_warning_reason": "Keine relevante Konturabweichung erkannt.",
+        "glass_mask_area_ratio": 0.12,
+        "window_contour_area_ratio": 0.03,
+        "detail_zone_area_ratio": 0.41,
+        "structure_masked_area_ratio": 0.52,
     }
     df = im.build_result_dataframe([result])
     csv_path = tmp_path / "result.csv"
@@ -339,3 +346,54 @@ def test_csv_and_preview_include_product_integrity_values(tmp_path):
     assert row["product_integrity_decision"] == "passed"
     assert payload["structure_only_score"] == row["structure_only_score"]
     assert payload["tolerated_findings"] == row["tolerated_findings"]
+    assert row["decision_reason"].startswith("Keine critical_findings")
+    assert payload["product_integrity_interpretation"] == row["product_integrity_interpretation"]
+    assert payload["glass_mask_area_ratio"] == row["glass_mask_area_ratio"]
+
+def test_high_mask_overlap_downgrades_silhouette_notice():
+    ref, mask = synthetic_car_pair()
+    gen = ref.copy()
+    profile = im.merge_profile_defaults(im.DEFAULT_PRODUCT_INTEGRITY_PROFILE, {
+        "contour_warning": {"critical_zone_score_max": 101.0, "warning_zone_score_max": 101.0}
+    })
+    result = im.compute_product_integrity_scores(
+        ref,
+        gen,
+        car_mask=mask,
+        car_only_lpips_score=98.0,
+        profile=profile,
+        mask_metrics={
+            "mask_iou": 0.9857,
+            "mask_dice": 0.9928,
+            "hausdorff_norm": 0.004,
+            "centroid_distance_norm": 0.001,
+            "mask_area_ratio": 1.004,
+        },
+    )
+
+    assert not any("Kontur" in item for item in result["critical_findings"])
+    assert any("Rand" in item or "Kontur" in item for item in result["tolerated_findings"])
+
+
+def test_relevant_geometry_keeps_silhouette_critical():
+    ref, mask = synthetic_car_pair()
+    gen = ref.copy()
+    profile = im.merge_profile_defaults(im.DEFAULT_PRODUCT_INTEGRITY_PROFILE, {
+        "contour_warning": {"critical_zone_score_max": 101.0, "warning_zone_score_max": 101.0}
+    })
+    result = im.compute_product_integrity_scores(
+        ref,
+        gen,
+        car_mask=mask,
+        car_only_lpips_score=98.0,
+        profile=profile,
+        mask_metrics={
+            "mask_iou": 0.981,
+            "mask_dice": 0.991,
+            "hausdorff_norm": 0.04,
+            "centroid_distance_norm": 0.02,
+            "mask_area_ratio": 1.08,
+        },
+    )
+
+    assert any("Relevante Abweichung an Fahrzeugkontur" in item for item in result["critical_findings"])
