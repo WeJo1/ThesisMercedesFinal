@@ -60,6 +60,11 @@ DEFAULT_MERCEDES_WEIGHT_PROFILE = {
     "glass_bright_start": 0.58,
     "glass_min_area_ratio": 0.002,
     "downweight_threshold": 0.75,
+    "reflection_difference_start": 0.10,
+    "reflection_difference_width": 0.22,
+    "reflection_blur_sigma": 3.0,
+    "reflection_edge_change_limit": 0.12,
+    "reflection_absolute_edge_limit": 0.35,
     "zones": {
         "star_grill_front_center": {"cx": 0.50, "cy": 0.55, "sx": 0.16, "sy": 0.18, "weight": 0.55},
         "headlights_light_signature": {"x_offset": 0.26, "cy": 0.50, "sx": 0.11, "sy": 0.13, "weight": 0.45},
@@ -472,10 +477,9 @@ def prepare_metric_mask(mask, ref, gen):
 
     metric_mask = np.asarray(mask, dtype=bool)
     if metric_mask.shape != expected_shape:
-        raise ValueError(
-            f"Maskenvalidierung fehlgeschlagen: erwartete Form {expected_shape}, "
-            f"erhalten {metric_mask.shape}."
-        )
+        mask_img = Image.fromarray(metric_mask.astype(np.uint8) * 255)
+        mask_img = mask_img.resize((expected_shape[1], expected_shape[0]), Image.Resampling.NEAREST)
+        metric_mask = np.asarray(mask_img) > 127
 
     if not np.any(metric_mask):
         return None
@@ -720,12 +724,21 @@ def build_mercedes_importance_map(ref, gen, car_mask=None, profile=None):
 
 
 def build_glass_region_masks(ref, gen, car_mask=None, profile=None):
-    """Trenne Fahrzeugscheiben heuristisch in Innenfläche und produktrelevante Kontur."""
+    """Trenne Fahrzeugscheiben heuristisch in tolerierte Innenflächen und kritische Konturen."""
     profile = profile or DEFAULT_MERCEDES_WEIGHT_PROFILE
     h, w = ref.shape[:2]
     yy, xx = np.mgrid[0:h, 0:w]
-    x = xx / max(1, w - 1)
-    y = yy / max(1, h - 1)
+
+    has_vehicle_mask = car_mask is not None and np.any(car_mask)
+    if has_vehicle_mask:
+        vehicle = prepare_metric_mask(car_mask, ref, gen)
+    else:
+        vehicle = np.ones((h, w), dtype=bool)
+    x0, y0, x1, y1 = compute_mask_roi_bbox(vehicle, (h, w))
+    bw = max(1, x1 - x0)
+    bh = max(1, y1 - y0)
+    bx = (xx - x0) / bw
+    by = (yy - y0) / bh
 
     brightness = np.maximum(color.rgb2gray(ref), color.rgb2gray(gen)).astype(np.float32)
     saturation = np.maximum(color.rgb2hsv(ref)[..., 1], color.rgb2hsv(gen)[..., 1]).astype(np.float32)
@@ -733,42 +746,55 @@ def build_glass_region_masks(ref, gen, car_mask=None, profile=None):
     smooth = edge < float(profile.get("glass_smooth_edge_limit", 0.42))
 
     glass_band = (
-        (y >= float(profile.get("glass_zone_y_min", 0.18)))
-        & (y <= float(profile.get("glass_zone_y_max", 0.58)))
-        & (x >= float(profile.get("glass_zone_x_margin", 0.10)))
-        & (x <= 1.0 - float(profile.get("glass_zone_x_margin", 0.10)))
+        (by >= float(profile.get("glass_zone_y_min", 0.18)))
+        & (by <= float(profile.get("glass_zone_y_max", 0.58)))
+        & (bx >= float(profile.get("glass_zone_x_margin", 0.10)))
+        & (bx <= 1.0 - float(profile.get("glass_zone_x_margin", 0.10)))
+        & vehicle
     )
     low_saturation = saturation <= float(profile.get("glass_saturation_limit", 0.50))
     dark_glass = brightness <= float(profile.get("glass_dark_limit", 0.34))
     bright_reflection = brightness >= float(profile.get("glass_bright_start", 0.58))
-    candidate = glass_band & low_saturation & (dark_glass | bright_reflection | smooth)
+    smooth_glass = smooth if has_vehicle_mask else np.zeros((h, w), dtype=bool)
+    glass_like = low_saturation & (dark_glass | bright_reflection | smooth_glass)
 
-    if car_mask is not None and np.any(car_mask):
-        candidate &= np.asarray(car_mask, dtype=bool)
-
-    min_area = max(8, int(float(profile.get("glass_min_area_ratio", 0.002)) * h * w))
+    candidate = glass_band & glass_like
+    min_area = max(8, int(float(profile.get("glass_min_area_ratio", 0.002)) * max(np.sum(vehicle), 1)))
     candidate = remove_objects_smaller_than(candidate, min_area + 1)
-    candidate = fill_holes_smaller_than(closing(candidate, disk(2)), min_area + 1)
+    candidate = fill_holes_smaller_than(closing(candidate, disk(3)), min_area + 1)
+
+    max_area = max(1, int(0.34 * np.sum(vehicle)))
+    if np.sum(candidate) > max_area:
+        stronger_glass_like = glass_band & low_saturation & (dark_glass | bright_reflection | (smooth_glass & (by <= 0.48)))
+        candidate = fill_holes_smaller_than(closing(stronger_glass_like, disk(2)), min_area + 1)
 
     if not np.any(candidate):
         empty = np.zeros((h, w), dtype=bool)
         return {"candidate": empty, "interior": empty, "contour": empty}
 
-    radius = max(1, int(round(min(h, w) * float(profile.get("glass_contour_width_ratio", 0.018)))))
-    eroded = erosion(candidate, disk(radius))
-    contour = candidate & ~eroded
+    radius = max(1, int(round(min(bh, bw) * float(profile.get("glass_contour_width_ratio", 0.018)))))
+    contour = candidate & ~erosion(candidate, disk(radius))
     contour |= dilation(candidate & (edge > float(profile.get("glass_contour_edge_limit", 0.30))), disk(1))
+    contour &= vehicle
     interior = candidate & ~contour
 
     return {"candidate": candidate.astype(bool), "interior": interior.astype(bool), "contour": contour.astype(bool)}
 
-
 def build_reflection_downweight_map(ref, gen, car_mask=None, content_mask=None, profile=None):
-    """Reduziere helle/glatte Reflexionsflächen, erhalte aber Kanten und Geometrie."""
+    """Reduziere weiche Reflexionsänderungen, erhalte aber Kanten und Geometrie."""
     profile = profile or DEFAULT_MERCEDES_WEIGHT_PROFILE
-    brightness = np.maximum(color.rgb2gray(ref), color.rgb2gray(gen)).astype(np.float32)
-    saturation = np.maximum(color.rgb2hsv(ref)[..., 1], color.rgb2hsv(gen)[..., 1]).astype(np.float32)
+    metric_mask = prepare_metric_mask(car_mask, ref, gen)
+    if metric_mask is None:
+        metric_mask = prepare_metric_mask(content_mask, ref, gen)
+
+    ref_gray = color.rgb2gray(ref).astype(np.float32)
+    gen_gray = color.rgb2gray(gen).astype(np.float32)
+    brightness = np.maximum(ref_gray, gen_gray).astype(np.float32)
+    ref_hsv = color.rgb2hsv(ref)
+    gen_hsv = color.rgb2hsv(gen)
+    saturation = np.maximum(ref_hsv[..., 1], gen_hsv[..., 1]).astype(np.float32)
     edge = np.clip(np.maximum(compute_edge_strength(ref), compute_edge_strength(gen)), 0.0, 1.0)
+    edge_delta = np.abs(compute_edge_strength(ref) - compute_edge_strength(gen)).astype(np.float32)
 
     smooth = 1.0 - edge
     highlight_start = float(profile.get("reflection_highlight_start", 0.62))
@@ -776,7 +802,7 @@ def build_reflection_downweight_map(ref, gen, car_mask=None, content_mask=None, 
     saturation_limit = max(float(profile.get("reflection_low_saturation_limit", 0.55)), 1e-6)
     highlights = np.clip((brightness - highlight_start) / highlight_width, 0.0, 1.0)
     low_saturation_gloss = np.clip((saturation_limit - saturation) / saturation_limit, 0.0, 1.0)
-    reflection_likelihood = np.clip(
+    appearance_likelihood = np.clip(
         (
             float(profile.get("reflection_highlight_weight", 0.65)) * highlights
             + float(profile.get("reflection_low_saturation_weight", 0.35)) * low_saturation_gloss
@@ -786,11 +812,31 @@ def build_reflection_downweight_map(ref, gen, car_mask=None, content_mask=None, 
         1.0,
     )
 
+    lab_delta = np.linalg.norm(color.rgb2lab(ref) - color.rgb2lab(gen), axis=2).astype(np.float32) / 60.0
+    value_delta = np.abs(ref_hsv[..., 2] - gen_hsv[..., 2]).astype(np.float32)
+    luma_delta = np.abs(ref_gray - gen_gray).astype(np.float32)
+    color_delta = np.clip(0.45 * lab_delta + 0.30 * value_delta + 0.25 * luma_delta, 0.0, 1.0)
+    blur_sigma = float(profile.get("reflection_blur_sigma", 3.0))
+    soft_delta = gaussian(color_delta, sigma=blur_sigma, preserve_range=True).astype(np.float32)
+    edge_change_limit = max(float(profile.get("reflection_edge_change_limit", 0.12)), 1e-6)
+    absolute_edge_limit = max(float(profile.get("reflection_absolute_edge_limit", 0.35)), 1e-6)
+    low_edge_change = np.clip(1.0 - edge_delta / edge_change_limit, 0.0, 1.0)
+    low_absolute_edge = np.clip(1.0 - edge / absolute_edge_limit, 0.0, 1.0)
+    reflection_difference = np.clip(0.55 * color_delta + 0.45 * soft_delta, 0.0, 1.0)
+    difference_start = float(profile.get("reflection_difference_start", 0.10))
+    difference_width = max(float(profile.get("reflection_difference_width", 0.22)), 1e-6)
+    difference_likelihood = np.clip((reflection_difference - difference_start) / difference_width, 0.0, 1.0)
+    difference_likelihood *= low_edge_change * np.clip(0.35 + 0.65 * low_absolute_edge, 0.0, 1.0)
+
+    reflection_likelihood = np.maximum(appearance_likelihood, difference_likelihood)
+
     min_weight = float(profile.get("reflection_min_weight", 0.38))
     weight = 1.0 - (1.0 - min_weight) * reflection_likelihood
     # Kanten/Bauteilgrenzen ausdrücklich zurückholen.
     edge_floor = float(profile.get("reflection_edge_floor", 0.78))
-    weight = np.maximum(weight, edge_floor + (1.0 - edge_floor) * edge)
+    edge_protection = np.maximum(edge, np.clip(edge_delta / edge_change_limit, 0.0, 1.0))
+    protected_weight = edge_floor + (1.0 - edge_floor) * edge_protection
+    weight = np.where(edge_protection > 0.05, np.maximum(weight, protected_weight), weight)
 
     glass_masks = build_glass_region_masks(ref, gen, car_mask=car_mask, profile=profile)
     glass_interior = glass_masks["interior"]
@@ -804,11 +850,8 @@ def build_reflection_downweight_map(ref, gen, car_mask=None, content_mask=None, 
         contour_floor = float(profile.get("glass_contour_weight_floor", 0.92))
         weight = np.where(glass_contour, np.maximum(weight, contour_floor), weight)
 
-    if car_mask is not None and np.any(car_mask):
-        vehicle = np.asarray(car_mask, dtype=bool)
-        weight = np.where(vehicle, weight, 0.0)
-    elif content_mask is not None and np.any(content_mask):
-        weight = np.where(np.asarray(content_mask, dtype=bool), weight, 0.0)
+    if metric_mask is not None:
+        weight = np.where(metric_mask, weight, 0.0)
 
     return np.clip(weight, 0.0, 1.0).astype(np.float32)
 
@@ -1369,32 +1412,90 @@ def bbox_mask_from_fraction(shape, bbox, fractions):
     return mask
 
 
-def build_detail_zone_masks(car_mask, fallback_shape):
-    """Erzeuge robuste Fallback-Zonen aus der Fahrzeug-Bounding-Box."""
+def build_detail_zone_masks(car_mask, fallback_shape, ref=None, gen=None, glass_masks=None):
+    """Erzeuge detailnahe Fahrzeugzonen aus Maske, Kanten und Fahrzeug-Bounding-Box."""
     scope = np.asarray(car_mask, dtype=bool) if car_mask is not None and np.any(car_mask) else np.ones(fallback_shape, dtype=bool)
     bbox = compute_mask_roi_bbox(scope, fallback_shape)
+    x0, y0, x1, y1 = bbox
+    bw = max(1, x1 - x0)
+    bh = max(1, y1 - y0)
+    h, w = fallback_shape
+    yy, xx = np.mgrid[0:h, 0:w]
+    bx = (xx - x0) / bw
+    by = (yy - y0) / bh
+
+    if ref is not None and gen is not None:
+        ref_edge = compute_edge_strength(ref)
+        gen_edge = compute_edge_strength(gen)
+        stable_edge = np.clip(np.minimum(ref_edge, gen_edge), 0.0, 1.0)
+        edge_delta = np.abs(ref_edge - gen_edge)
+        scoped_edge_values = stable_edge[scope]
+        edge_threshold = max(0.035, float(np.percentile(scoped_edge_values, 58)) if scoped_edge_values.size else 0.035)
+        detail_edges = (stable_edge >= edge_threshold) & (edge_delta <= 0.16) & scope
+        changed_detail_edges = (edge_delta > 0.08) & scope
+    else:
+        detail_edges = scope.copy()
+        changed_detail_edges = np.zeros(fallback_shape, dtype=bool)
+
+    glass_interior = np.zeros(fallback_shape, dtype=bool)
+    glass_contour = np.zeros(fallback_shape, dtype=bool)
+    if glass_masks:
+        glass_interior = np.asarray(glass_masks.get("interior", glass_interior), dtype=bool)
+        glass_contour = np.asarray(glass_masks.get("contour", glass_contour), dtype=bool)
+    product_edges = detail_edges & ~glass_interior
+
+    silhouette = (dilation(scope, disk(2)) & ~erosion(scope, disk(3))) & scope
+    wheel_band = (by >= 0.62) & (by <= 1.0)
+    left_wheel = bbox_mask_from_fraction(fallback_shape, bbox, (0.07, 0.60, 0.36, 1.00)) & wheel_band
+    right_wheel = bbox_mask_from_fraction(fallback_shape, bbox, (0.64, 0.60, 0.93, 1.00)) & wheel_band
+    wheels_tires = (left_wheel | right_wheel) & (product_edges | changed_detail_edges | silhouette)
+
+    front_rear_band = (
+        bbox_mask_from_fraction(fallback_shape, bbox, (0.00, 0.30, 0.22, 0.78))
+        | bbox_mask_from_fraction(fallback_shape, bbox, (0.78, 0.30, 1.00, 0.78))
+    )
+    front_rear = front_rear_band & (product_edges | changed_detail_edges | silhouette)
+
+    window_band = (by >= 0.13) & (by <= 0.58) & (bx >= 0.08) & (bx <= 0.92) & scope
+    changed_window_edges = changed_detail_edges & window_band & (glass_contour | (by <= 0.24) | (silhouette & (by <= 0.34)))
+    window_line = (glass_contour | changed_window_edges | (window_band & product_edges) | (silhouette & (by <= 0.34))) & ~glass_interior
+    body_band = (by >= 0.40) & (by <= 0.78) & (bx >= 0.08) & (bx <= 0.92) & scope
+    body_lines = body_band & product_edges
+    center_band = bbox_mask_from_fraction(fallback_shape, bbox, (0.36, 0.32, 0.64, 0.70))
+    center_grill_emblem = center_band & product_edges
+
     zones = {
-        "silhouette": dilation(scope, disk(2)) & ~erosion(scope, disk(3)),
-        "front_rear": bbox_mask_from_fraction(fallback_shape, bbox, (0.00, 0.28, 0.18, 0.78)) | bbox_mask_from_fraction(fallback_shape, bbox, (0.82, 0.28, 1.00, 0.78)),
-        "wheels_tires": bbox_mask_from_fraction(fallback_shape, bbox, (0.08, 0.62, 0.34, 0.98)) | bbox_mask_from_fraction(fallback_shape, bbox, (0.66, 0.62, 0.92, 0.98)),
-        "window_line": bbox_mask_from_fraction(fallback_shape, bbox, (0.16, 0.15, 0.84, 0.48)),
-        "body_lines": bbox_mask_from_fraction(fallback_shape, bbox, (0.12, 0.45, 0.88, 0.72)),
-        "center_grill_emblem": bbox_mask_from_fraction(fallback_shape, bbox, (0.38, 0.34, 0.62, 0.68)),
+        "silhouette": silhouette,
+        "front_rear": front_rear,
+        "wheels_tires": wheels_tires,
+        "window_line": window_line,
+        "body_lines": body_lines,
+        "center_grill_emblem": center_grill_emblem,
     }
     return {name: (zone & scope) for name, zone in zones.items()}
 
-
 def compute_structure_only_score(ref, gen, mask=None, debug_dir=None, stem="pair"):
-    """Vergleiche graue Kantenbilder, damit Farbe/Reflexe nur schwach wirken."""
+    """Vergleiche graue Kantenbilder ausschließlich innerhalb der Fahrzeugmaske."""
     metric_mask = prepare_metric_mask(mask, ref, gen)
     if metric_mask is None:
         metric_mask = np.ones(ref.shape[:2], dtype=bool)
-    ref_gray = gaussian(color.rgb2gray(ref), sigma=1.0, preserve_range=True)
-    gen_gray = gaussian(color.rgb2gray(gen), sigma=1.0, preserve_range=True)
-    ref_edge = np.clip(sobel(ref_gray), 0.0, 1.0)
-    gen_edge = np.clip(sobel(gen_gray), 0.0, 1.0)
-    diff = np.abs(ref_edge - gen_edge)
-    score = score_from_error(masked_mean(diff, metric_mask), 0.18)
+    structure_mask = erosion(metric_mask, disk(1)) if np.any(metric_mask) else metric_mask
+    if not np.any(structure_mask):
+        structure_mask = metric_mask
+
+    ref_gray_raw = color.rgb2gray(ref).astype(np.float32)
+    gen_gray_raw = color.rgb2gray(gen).astype(np.float32)
+    ref_neutral = np.full(ref_gray_raw.shape, masked_mean(ref_gray_raw, structure_mask, default=0.5), dtype=np.float32)
+    gen_neutral = np.full(gen_gray_raw.shape, masked_mean(gen_gray_raw, structure_mask, default=0.5), dtype=np.float32)
+    ref_neutral[metric_mask] = ref_gray_raw[metric_mask]
+    gen_neutral[metric_mask] = gen_gray_raw[metric_mask]
+
+    ref_gray = gaussian(ref_neutral, sigma=1.0, preserve_range=True)
+    gen_gray = gaussian(gen_neutral, sigma=1.0, preserve_range=True)
+    ref_edge = np.clip(sobel(ref_gray), 0.0, 1.0) * structure_mask.astype(np.float32)
+    gen_edge = np.clip(sobel(gen_gray), 0.0, 1.0) * structure_mask.astype(np.float32)
+    diff = np.abs(ref_edge - gen_edge) * structure_mask.astype(np.float32)
+    score = score_from_error(masked_mean(diff, structure_mask), 0.18)
     paths = {}
     if debug_dir:
         debug_path = Path(debug_dir); debug_path.mkdir(parents=True, exist_ok=True)
@@ -1411,8 +1512,14 @@ def compute_detail_zones_score(ref, gen, mask=None, profile=None, structure_debu
     """Prüfe produktkritische Fallback-Zonen stärker als große Lackflächen."""
     profile = profile or DEFAULT_PRODUCT_INTEGRITY_PROFILE
     metric_mask = prepare_metric_mask(mask, ref, gen)
-    zones = build_detail_zone_masks(metric_mask, ref.shape[:2])
-    edge_diff = structure_debug["diff_map"] if structure_debug else np.abs(sobel(color.rgb2gray(ref)) - sobel(color.rgb2gray(gen)))
+    glass_masks = build_glass_region_masks(ref, gen, car_mask=metric_mask) if metric_mask is not None else None
+    zones = build_detail_zone_masks(metric_mask, ref.shape[:2], ref=ref, gen=gen, glass_masks=glass_masks)
+    if structure_debug:
+        edge_diff = structure_debug["diff_map"].copy()
+        persistent_edges = (structure_debug["ref_edge"] > 0.03) & (structure_debug["gen_edge"] > 0.03)
+        edge_diff = np.where(persistent_edges, edge_diff * 0.35, edge_diff)
+    else:
+        edge_diff = np.abs(sobel(color.rgb2gray(ref)) - sobel(color.rgb2gray(gen)))
     weights_cfg = profile.get("detail_zone_weights", {})
     zone_scores = {}
     weighted_sum = 0.0; weight_sum = 0.0
@@ -1444,6 +1551,7 @@ def compute_color_reflection_score(ref, gen, mask=None, edge_diff=None, debug_di
         edge_diff = np.abs(sobel(color.rgb2gray(ref)) - sobel(color.rgb2gray(gen)))
     low_edge_weight = np.clip(1.0 - (edge_diff / 0.20), 0.25, 1.0)
     reflection_map = color_diff * low_edge_weight
+    reflection_map = reflection_map * metric_mask.astype(np.float32)
     score = score_from_error(masked_mean(reflection_map, metric_mask), 0.22)
     paths = {}
     if debug_dir:
@@ -1843,8 +1951,11 @@ def evaluate_pair(
     reflection_weight_mean = float(np.mean(active_weights)) if active_weights.size else None
     reflection_weight_min = float(np.min(active_weights)) if active_weights.size else None
     downweight_threshold = float(mercedes_weight_profile.get("downweight_threshold", 0.75))
-    reflection_downweight_area_ratio = float(np.mean((reflection_weight_map > 0) & (reflection_weight_map < downweight_threshold)))
-    scope_area = max(float(np.sum(reflection_scope_mask > 0)), 1.0)
+    reflection_scope_bool = prepare_metric_mask(reflection_scope_mask, ref_norm, gen_norm)
+    if reflection_scope_bool is None:
+        reflection_scope_bool = reflection_weight_map > 0
+    reflection_downweight_area_ratio = float(np.sum(reflection_scope_bool & (reflection_weight_map > 0) & (reflection_weight_map < downweight_threshold)) / max(float(np.sum(reflection_scope_bool)), 1.0))
+    scope_area = max(float(np.sum(reflection_scope_bool)), 1.0)
     glass_interior_area_ratio = float(np.sum(glass_region_masks["interior"]) / scope_area)
     glass_contour_area_ratio = float(np.sum(glass_region_masks["contour"]) / scope_area)
     weighted_lpips_region_contributions = summarize_weighted_lpips_regions(
