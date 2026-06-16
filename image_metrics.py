@@ -10,7 +10,7 @@ from PIL import Image
 from skimage import color
 from skimage.filters import threshold_otsu
 from skimage.metrics import hausdorff_distance, structural_similarity
-from skimage.morphology import closing, dilation, disk, erosion, remove_small_holes, remove_small_objects
+from skimage.morphology import closing, dilation, disk, erosion, opening, remove_small_holes, remove_small_objects
 from tqdm import tqdm
 
 TORCH_IMPORT_ERROR = None
@@ -49,7 +49,7 @@ DEFAULT_MERCEDES_WEIGHT_PROFILE = {
     "reflection_low_saturation_limit": 0.55,
     "reflection_highlight_weight": 0.65,
     "reflection_low_saturation_weight": 0.35,
-    "glass_interior_weight": 0.08,
+    "glass_interior_weight": 0.0,
     "glass_contour_weight_floor": 0.92,
     "glass_contour_edge_boost": 0.32,
     "glass_zone_y_min": 0.18,
@@ -105,8 +105,15 @@ CSV_COLUMN_ORDER = [
     "reflection_downweight_area_ratio",
     "glass_interior_area_ratio",
     "glass_contour_area_ratio",
+    "weighted_lpips_weight_sum",
+    "weighted_lpips_active_area_ratio",
+    "weighted_lpips_region_contributions",
     "reflection_weight_map_path",
     "mercedes_weight_map_path",
+    "glass_interior_mask_path",
+    "window_contour_mask_path",
+    "weighted_lpips_map_path",
+    "effective_weight_map_path",
     "ssim_car_only",
     "mask_metric_scope",
     "mask_iou",
@@ -575,12 +582,20 @@ def resize_float_map_to_shape(value_map, target_shape, resample=Image.Resampling
     if value_map.shape == (target_rows, target_cols):
         return value_map.astype(np.float32)
 
-    map_min = float(np.min(value_map))
-    map_max = float(np.max(value_map))
-    normalized = (value_map - map_min) / (map_max - map_min + 1e-8)
-    img = Image.fromarray(np.clip(normalized * 255.0, 0, 255).astype(np.uint8), mode="L")
-    resized = np.asarray(img.resize((target_cols, target_rows), resample=resample), dtype=np.float32) / 255.0
-    return (resized * (map_max - map_min) + map_min).astype(np.float32)
+    # Erhalte absolute Gewichte. Eine Min/Max-Normalisierung würde echte 0-Ausschlüsse
+    # und die fachliche Priorisierung beim Resizing verfälschen.
+    max_value = float(np.max(value_map))
+    if max_value <= 1.0:
+        scale = 255.0
+        arr = value_map * scale
+    else:
+        scale = 255.0 / max_value
+        arr = value_map * scale
+    img = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8), mode="L")
+    resized = np.asarray(img.resize((target_cols, target_rows), resample=resample), dtype=np.float32)
+    if max_value <= 1.0:
+        return (resized / 255.0).astype(np.float32)
+    return (resized / scale).astype(np.float32)
 
 
 def compute_edge_strength(img):
@@ -641,9 +656,9 @@ def build_mercedes_importance_map(ref, gen, car_mask=None, profile=None):
     glass_interior = glass_masks["interior"]
     glass_contour = glass_masks["contour"]
     if np.any(glass_interior):
-        # Bewerte in Scheiben primär die Kontur/Fensterlinie, nicht Spiegelungsinhalte.
-        interior_cap = float(profile.get("base_vehicle_weight", 0.82)) * float(profile.get("glass_interior_weight", 0.08))
-        weight = np.where(glass_interior, np.minimum(weight, interior_cap), weight)
+        # Scheibeninnenflächen fließen nicht in Weighted-LPIPS ein; nur Konturen zählen.
+        interior_weight = float(profile.get("glass_interior_weight", 0.0))
+        weight = np.where(glass_interior, interior_weight, weight)
     if np.any(glass_contour):
         contour_floor = float(profile.get("glass_contour_weight_floor", 0.92))
         contour_boost = float(profile.get("glass_contour_edge_boost", 0.32))
@@ -729,9 +744,9 @@ def build_reflection_downweight_map(ref, gen, car_mask=None, content_mask=None, 
     glass_interior = glass_masks["interior"]
     glass_contour = glass_masks["contour"]
     if np.any(glass_interior):
-        # Dämpfe rein photometrische LPIPS-Signale in Scheibeninnenflächen sehr stark.
-        glass_weight = float(profile.get("glass_interior_weight", 0.08))
-        weight = np.where(glass_interior, np.minimum(weight, glass_weight), weight)
+        # Scheibeninhalte wie Himmel, Wald, Innenraum und Reflexe sind nicht produkttreuerelevant.
+        glass_weight = float(profile.get("glass_interior_weight", 0.0))
+        weight = np.where(glass_interior, glass_weight, weight)
     if np.any(glass_contour):
         # A-/B-/C-Säule, Dachlinie und Fensterlinie bleiben produktrelevant.
         contour_floor = float(profile.get("glass_contour_weight_floor", 0.92))
@@ -746,13 +761,62 @@ def build_reflection_downweight_map(ref, gen, car_mask=None, content_mask=None, 
     return np.clip(weight, 0.0, 1.0).astype(np.float32)
 
 
-def compute_weighted_lpips_from_map(dist_map, weight_map, eps=1e-8):
+def build_weighted_lpips_scope_mask(car_mask, glass_interior_mask=None, content_mask=None):
+    """Nutze nur Fahrzeugpixel und schließe Scheibeninnenflächen vollständig aus."""
+    if car_mask is not None and np.any(car_mask):
+        scope = np.asarray(car_mask, dtype=bool).copy()
+    elif content_mask is not None and np.any(content_mask):
+        scope = np.asarray(content_mask, dtype=bool).copy()
+    else:
+        scope = None
+
+    if scope is not None and glass_interior_mask is not None and np.any(glass_interior_mask):
+        scope &= ~np.asarray(glass_interior_mask, dtype=bool)
+    return scope
+
+
+def compute_weighted_lpips_from_map(dist_map, weight_map, mask=None, eps=1e-8, return_debug=False):
     dist_map = np.asarray(dist_map, dtype=np.float32)
     weights = resize_float_map_to_shape(weight_map, dist_map.shape)
+    if mask is not None:
+        resized_mask = resize_float_map_to_shape(np.asarray(mask, dtype=np.float32), dist_map.shape, resample=Image.Resampling.NEAREST)
+        weights = np.where(resized_mask >= 0.5, weights, 0.0)
+    weights = np.clip(weights, 0.0, None)
     weight_sum = float(np.sum(weights))
     if weight_sum <= float(eps):
-        return float(np.mean(dist_map))
-    return float(np.sum(dist_map * weights) / (weight_sum + float(eps)))
+        value = float(np.mean(dist_map))
+    else:
+        value = float(np.sum(dist_map * weights) / (weight_sum + float(eps)))
+    if not return_debug:
+        return value
+    return {
+        "value": value,
+        "weight_sum": weight_sum,
+        "active_area_ratio": float(np.mean(weights > 0.0)),
+        "weighted_map": (dist_map * weights).astype(np.float32),
+        "effective_weight_map": weights.astype(np.float32),
+    }
+
+
+def summarize_weighted_lpips_regions(dist_map, weight_map, regions, eps=1e-8):
+    summaries = {}
+    weight_map = np.asarray(weight_map, dtype=np.float32)
+    for name, region_mask in regions.items():
+        if region_mask is None:
+            continue
+        resized_region = resize_float_map_to_shape(
+            np.asarray(region_mask, dtype=np.float32),
+            weight_map.shape,
+            resample=Image.Resampling.NEAREST,
+        )
+        region_weights = weight_map * (resized_region >= 0.5).astype(np.float32)
+        debug = compute_weighted_lpips_from_map(dist_map, region_weights, eps=eps, return_debug=True)
+        summaries[name] = {
+            "distance": debug["value"],
+            "weight_sum": debug["weight_sum"],
+            "active_area_ratio": debug["active_area_ratio"],
+        }
+    return summaries
 
 
 def save_weight_debug_map(weight_map, path):
@@ -933,9 +997,14 @@ def refine_car_mask(
         grown_mask = dilation(refined_mask, footprint=grow_disk)
         refined_mask = refined_mask | (merged_mask & grown_mask)
 
+    # Säubere Segmentierungsrauschen, ohne auf eine Bounding Box auszuweichen:
+    # Opening entfernt kleine Hintergrundreste; Closing/Hole-Filling schließen Rad- und
+    # Karosserielücken kontrolliert.
+    refined_mask = opening(refined_mask, footprint=disk(1))
     refined_mask = closing(refined_mask, footprint=disk(2))
     refined_mask = remove_objects_smaller_than(refined_mask, min_object_area)
     refined_mask = fill_holes_smaller_than(refined_mask, max_hole_area)
+    refined_mask = closing(refined_mask, footprint=disk(1))
 
     if trim_px > 0:
         refined_mask = erosion(refined_mask, footprint=disk(int(trim_px)))
@@ -1167,6 +1236,8 @@ def compute_car_only_metrics(
     if debug_dir:
         debug_path = Path(debug_dir)
         debug_path.mkdir(parents=True, exist_ok=True)
+        save_mask_image(base_mask.astype(bool), debug_path / f"{stem}_raw_vehicle_mask.png")
+        save_mask_image(mask, debug_path / f"{stem}_final_vehicle_mask.png")
         save_mask_image(mask, debug_path / f"{stem}_mask.png")
         with open(debug_path / f"{stem}_crop_box.json", "w", encoding="utf-8") as fp:
             json.dump(debug["bbox"], fp, indent=2)
@@ -1504,8 +1575,22 @@ def evaluate_pair(
         car_mask=reflection_scope_mask,
         profile=mercedes_weight_profile,
     )
+    weighted_scope_mask = build_weighted_lpips_scope_mask(
+        car_mask=reflection_scope_mask,
+        glass_interior_mask=glass_region_masks["interior"],
+        content_mask=valid_content_mask,
+    )
     combined_weight_map = mercedes_weight_map * reflection_weight_map if mercedes_profile_enabled else mercedes_weight_map
-    weighted_mercedes_lpips = compute_weighted_lpips_from_map(lpips_map, combined_weight_map, eps=eps)
+    if weighted_scope_mask is not None:
+        combined_weight_map = np.where(weighted_scope_mask, combined_weight_map, 0.0)
+    weighted_debug = compute_weighted_lpips_from_map(
+        lpips_map,
+        combined_weight_map,
+        mask=weighted_scope_mask,
+        eps=eps,
+        return_debug=True,
+    )
+    weighted_mercedes_lpips = weighted_debug["value"]
     reflection_robust_lpips = weighted_mercedes_lpips
     weighted_mercedes_lpips_similarity_percent = convert_lpips_to_similarity_percent(weighted_mercedes_lpips)
     reflection_robust_lpips_similarity_percent = convert_lpips_to_similarity_percent(reflection_robust_lpips)
@@ -1518,15 +1603,39 @@ def evaluate_pair(
     scope_area = max(float(np.sum(reflection_scope_mask > 0)), 1.0)
     glass_interior_area_ratio = float(np.sum(glass_region_masks["interior"]) / scope_area)
     glass_contour_area_ratio = float(np.sum(glass_region_masks["contour"]) / scope_area)
+    weighted_lpips_region_contributions = summarize_weighted_lpips_regions(
+        lpips_map,
+        weighted_debug["effective_weight_map"],
+        {
+            "vehicle_scope_without_glass_interiors": weighted_scope_mask,
+            "glass_interiors_excluded": glass_region_masks["interior"],
+            "window_contours": glass_region_masks["contour"],
+            "high_priority_product_edges": combined_weight_map >= max(1.0, float(np.percentile(active_weights, 75)) if active_weights.size else 1.0),
+            "low_priority_reflection_or_plain_paint": (combined_weight_map > 0.0) & (combined_weight_map < downweight_threshold),
+        },
+        eps=eps,
+    )
     reflection_weight_map_path = None
     mercedes_weight_map_path = None
+    glass_interior_mask_path = None
+    window_contour_mask_path = None
+    weighted_lpips_map_path = None
+    effective_weight_map_path = None
     if debug_dir:
         debug_path = Path(debug_dir)
         stem = Path(ref_path).stem
         reflection_weight_map_path = str(debug_path / f"{stem}_reflection_downweight.png")
         mercedes_weight_map_path = str(debug_path / f"{stem}_mercedes_weight.png")
+        glass_interior_mask_path = str(debug_path / f"{stem}_glass_interior_mask.png")
+        window_contour_mask_path = str(debug_path / f"{stem}_window_contour_mask.png")
+        weighted_lpips_map_path = str(debug_path / f"{stem}_weighted_lpips_map.png")
+        effective_weight_map_path = str(debug_path / f"{stem}_weighted_lpips_effective_weight.png")
         save_weight_debug_map(reflection_weight_map, Path(reflection_weight_map_path))
         save_weight_debug_map(mercedes_weight_map, Path(mercedes_weight_map_path))
+        save_mask_image(glass_region_masks["interior"], Path(glass_interior_mask_path))
+        save_mask_image(glass_region_masks["contour"], Path(window_contour_mask_path))
+        save_weight_debug_map(weighted_debug["weighted_map"], Path(weighted_lpips_map_path))
+        save_weight_debug_map(weighted_debug["effective_weight_map"], Path(effective_weight_map_path))
 
     valid_heatmap_focus_mode = {"global", "car_only"}
     if heatmap_focus_mode not in valid_heatmap_focus_mode:
@@ -1587,6 +1696,10 @@ def evaluate_pair(
     print(f"  LPIPS foreground   : {lpips_foreground:.6f}")
     print(f"  LPIPS foreground % : {format_percent(lpips_foreground_similarity_percent)}")
     print(f"  Weighted Mercedes LPIPS : {weighted_mercedes_lpips:.6f}")
+    print(f"  Weighted Mercedes LPIPS % : {format_percent(weighted_mercedes_lpips_similarity_percent)}")
+    print(f"  Weighted raw direction : LPIPS-Distanz niedriger ist besser; UI-% höher ist besser")
+    print(f"  Weighted active area   : {weighted_debug['active_area_ratio'] * 100.0:.2f}%")
+    print(f"  Glass interior excluded: {glass_interior_area_ratio * 100.0:.2f}%")
     print(f"  Reflection robust LPIPS : {reflection_robust_lpips:.6f}")
     print(f"  Final similarity score  : {format_percent(final_similarity_score)}")
     if segmenter is not None:
@@ -1648,8 +1761,15 @@ def evaluate_pair(
         "reflection_downweight_area_ratio": reflection_downweight_area_ratio,
         "glass_interior_area_ratio": glass_interior_area_ratio,
         "glass_contour_area_ratio": glass_contour_area_ratio,
+        "weighted_lpips_weight_sum": weighted_debug["weight_sum"],
+        "weighted_lpips_active_area_ratio": weighted_debug["active_area_ratio"],
+        "weighted_lpips_region_contributions": json.dumps(weighted_lpips_region_contributions, sort_keys=True),
         "reflection_weight_map_path": reflection_weight_map_path,
         "mercedes_weight_map_path": mercedes_weight_map_path,
+        "glass_interior_mask_path": glass_interior_mask_path,
+        "window_contour_mask_path": window_contour_mask_path,
+        "weighted_lpips_map_path": weighted_lpips_map_path,
+        "effective_weight_map_path": effective_weight_map_path,
         "ssim_car_only": car_metrics["ssim_car_only"],
         "car_mask_area_ratio": car_metrics["debug"]["mask_area_ratio"],
         "car_bbox": json.dumps(car_metrics["debug"]["bbox"]) if car_metrics["debug"]["bbox"] else None,
