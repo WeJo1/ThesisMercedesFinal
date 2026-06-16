@@ -86,9 +86,13 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             "mercedes_weight_map_preview": None,
             "weight_debug_paths": {
                 "mercedes_weight_map": row.get("mercedes_weight_map_path"),
+                "effective_weight_map": row.get("effective_weight_map_path"),
             },
             "reflection_debug_paths": {
                 "reflection_downweight_map": row.get("reflection_weight_map_path"),
+                "glass_interior_mask": row.get("glass_interior_mask_path"),
+                "window_contour_mask": row.get("window_contour_mask_path"),
+                "weighted_lpips_map": row.get("weighted_lpips_map_path"),
             },
             "mask_iou": row.get("mask_iou"),
             "mask_dice": row.get("mask_dice"),

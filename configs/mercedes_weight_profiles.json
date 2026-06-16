@@ -14,7 +14,7 @@
       "reflection_low_saturation_limit": 0.55,
       "reflection_highlight_weight": 0.65,
       "reflection_low_saturation_weight": 0.35,
-      "glass_interior_weight": 0.08,
+      "glass_interior_weight": 0.0,
       "glass_contour_weight_floor": 0.92,
       "glass_contour_edge_boost": 0.32,
       "glass_zone_y_min": 0.18,

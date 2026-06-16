@@ -55,7 +55,7 @@ def test_glass_interior_is_damped_but_window_contour_stays_relevant():
 
     assert np.any(glass_masks["interior"])
     assert np.any(glass_masks["contour"])
-    assert float(np.mean(reflection_weights[glass_masks["interior"]])) <= 0.09
+    assert float(np.mean(reflection_weights[glass_masks["interior"]])) == 0.0
     assert float(np.mean(reflection_weights[glass_masks["contour"]])) >= 0.90
     assert float(np.mean(mercedes_weights[glass_masks["contour"]])) > float(np.mean(mercedes_weights[glass_masks["interior"]]))
 
@@ -69,6 +69,26 @@ def test_weighted_lpips_differs_from_raw_when_weighting_is_active():
 
     assert weighted != raw
     assert weighted < raw
+
+
+def test_weighted_lpips_excludes_zero_weight_regions_from_numerator_and_denominator():
+    dist_map = np.array([[1.0, 1.0], [0.1, 0.1]], dtype=np.float32)
+    weight_map = np.array([[0.0, 0.0], [1.0, 1.0]], dtype=np.float32)
+
+    weighted = im.compute_weighted_lpips_from_map(dist_map, weight_map)
+
+    assert np.isclose(weighted, 0.1)
+
+
+def test_weighted_scope_excludes_glass_interior_but_keeps_window_contour():
+    car_mask = np.ones((4, 4), dtype=bool)
+    glass_interior = np.zeros((4, 4), dtype=bool)
+    glass_interior[1:3, 1:3] = True
+
+    scope = im.build_weighted_lpips_scope_mask(car_mask, glass_interior_mask=glass_interior)
+
+    assert np.all(scope[~glass_interior])
+    assert not np.any(scope[glass_interior])
 
 
 def test_csv_contains_reflection_values_and_missing_paths_do_not_break(tmp_path):
