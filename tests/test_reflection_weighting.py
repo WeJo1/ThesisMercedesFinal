@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 import image_metrics as im
 from gui_server import MetricsHandler
@@ -118,7 +119,7 @@ def test_product_critical_regions_keep_high_mercedes_weight():
     weights = im.build_mercedes_importance_map(ref, gen)
 
     grill_star_zone = float(np.mean(weights[45:62, 65:95]))
-    plain_paint_zone = float(np.mean(weights[20:35, 15:35]))
+    plain_paint_zone = float(np.mean(weights[8:15, 120:145]))
     assert grill_star_zone > plain_paint_zone
     assert grill_star_zone > 1.0
 
@@ -182,8 +183,8 @@ def test_csv_contains_reflection_values_and_missing_paths_do_not_break(tmp_path)
     result = {
         "filename": "demo.png",
         "lpips": 0.2,
-        "weighted_mercedes_lpips": 0.15,
-        "reflection_robust_lpips": 0.12,
+        "legacy_debug_weighted_lpips_raw": 0.15,
+        "legacy_reflection_robust_lpips_raw": 0.12,
         "final_similarity_score": 88.0,
         "raw_lpips": 0.2,
         "car_only_lpips": 0.18,
@@ -198,8 +199,10 @@ def test_csv_contains_reflection_values_and_missing_paths_do_not_break(tmp_path)
     with csv_path.open(newline="", encoding="utf-8") as fp:
         row = next(csv.DictReader(fp))
 
-    assert "weighted_mercedes_lpips" in row
-    assert "reflection_robust_lpips" in row
+    assert "legacy_debug_weighted_lpips_raw" in row
+    assert "legacy_reflection_robust_lpips_raw" in row
+    assert "weighted_mercedes_lpips" not in row
+    assert "reflection_robust_lpips" not in row
     assert "final_similarity_score" in row
     assert "raw_lpips" in row
     assert "car_only_lpips" in row
@@ -208,8 +211,8 @@ def test_csv_contains_reflection_values_and_missing_paths_do_not_break(tmp_path)
 
     handler = MetricsHandler.__new__(MetricsHandler)
     payload = handler.build_preview_payload(row, include_previews=True)
-    assert payload["weighted_mercedes_lpips"] == row["weighted_mercedes_lpips"]
-    assert payload["reflection_robust_lpips"] == row["reflection_robust_lpips"]
+    assert payload["legacy_debug_weighted_lpips_raw"] == row["legacy_debug_weighted_lpips_raw"]
+    assert payload["legacy_reflection_robust_lpips_raw"] == row["legacy_reflection_robust_lpips_raw"]
     assert payload["final_similarity_score"] == row["final_similarity_score"]
     assert payload["raw_lpips"] == row["raw_lpips"]
     assert payload["car_only_lpips"] == row["car_only_lpips"]
@@ -397,3 +400,168 @@ def test_relevant_geometry_keeps_silhouette_critical():
     )
 
     assert any("Relevante Abweichung an Fahrzeugkontur" in item for item in result["critical_findings"])
+
+def test_component_scores_identical_image_pass_without_critical_findings():
+    ref, mask = synthetic_car_pair()
+
+    result = im.compute_product_integrity_scores(ref, ref.copy(), car_mask=mask, car_only_lpips_score=100.0)
+
+    assert result["headlight_score"] > 99
+    assert result["front_wheel_score"] > 99
+    assert result["rear_wheel_score"] > 99
+    assert result["critical_findings"] == []
+    assert result["product_integrity_decision"] == "passed"
+
+
+def test_component_scores_fail_on_headlight_or_light_signature_change():
+    ref, mask = synthetic_car_pair()
+    gen = ref.copy()
+    gen[33:42, 20:43] = 0.05
+    gen[35:39, 20:36] = 0.15
+
+    result = im.compute_product_integrity_scores(ref, gen, car_mask=mask, car_only_lpips_score=92.0)
+
+    assert result["headlight_score"] < 90
+    assert any("Scheinwerfer" in item or "Lichtsignatur" in item for item in result["critical_findings"])
+    assert result["product_integrity_decision"] == "failed"
+    assert "Scheinwerferbereich" in result["decision_reason"]
+
+
+def test_component_scores_warn_on_wheel_rim_or_tire_change():
+    ref, mask = synthetic_car_pair()
+    gen = ref.copy()
+    gen[48:66, 30:48] = 0.55
+    gen[54:62, 34:44] = 0.95
+
+    result = im.compute_product_integrity_scores(ref, gen, car_mask=mask, car_only_lpips_score=86.0)
+
+    assert min(result["front_wheel_score"], result["wheel_tire_score"]) < 90
+    assert any("Felgen" in item or "Reifen" in item or "Radstruktur" in item for item in result["critical_findings"] + result["tolerated_findings"])
+    assert result["product_integrity_decision"] in {"warning", "failed"}
+
+
+def test_component_scores_fail_and_name_headlight_and_wheel_changes():
+    ref, mask = synthetic_car_pair()
+    gen = ref.copy()
+    gen[33:42, 20:43] = 0.05
+    gen[48:66, 30:48] = 0.55
+
+    result = im.compute_product_integrity_scores(ref, gen, car_mask=mask, car_only_lpips_score=80.0)
+
+    findings = " ".join(result["critical_findings"] + result["tolerated_findings"])
+    assert "Scheinwerfer" in findings or "Lichtsignatur" in findings
+    assert "Felgen" in findings or "Reifen" in findings or "Radstruktur" in findings
+    assert result["product_integrity_decision"] == "failed"
+
+
+def test_component_scores_do_not_fail_on_paint_or_glass_reflection_only():
+    ref, mask = synthetic_car_pair()
+    gen = ref.copy()
+    gen[32:46, 70:105] = np.clip(gen[32:46, 70:105] + 0.22, 0.0, 1.0)
+
+    result = im.compute_product_integrity_scores(ref, gen, car_mask=mask, car_only_lpips_score=90.0)
+
+    findings = " ".join(result["critical_findings"] + result["tolerated_findings"])
+    assert "Scheinwerfer" not in findings
+    assert "Felgen" not in findings and "Reifen" not in findings
+    assert result["tolerated_findings"]
+    assert result["product_integrity_decision"] in {"passed", "warning"}
+
+def test_weighted_lpips_is_legacy_debug_not_main_csv_or_ui():
+    html = Path("index.html").read_text(encoding="utf-8")
+
+    assert "Mercedes LPIPS gewichtet" not in html
+    assert "weightedMercedesLpips" not in html
+    assert "legacy_debug_weighted_lpips_raw" in im.CSV_COLUMN_ORDER
+    assert "weighted_mercedes_lpips" not in im.CSV_COLUMN_ORDER
+    assert "reflection_robust_lpips" not in im.CSV_COLUMN_ORDER
+
+
+def test_product_integrity_uses_interpretable_scores_not_weighted_lpips():
+    ref, mask = synthetic_car_pair()
+    profile = im.merge_profile_defaults(im.DEFAULT_PRODUCT_INTEGRITY_PROFILE, {})
+    result = im.compute_product_integrity_scores(ref, ref.copy(), car_mask=mask, car_only_lpips_score=0.0, profile=profile)
+
+    expected = (
+        result["structure_only_score"] * 0.40
+        + result["detail_zones_score"] * 0.45
+        + result["color_reflection_score"] * 0.10
+        + 0.0 * 0.05
+    )
+    assert profile["weights"].get("legacy_weighted_lpips_weight") == 0.0
+    assert result["product_integrity_score"] == pytest.approx(expected)
+
+
+def test_headlight_hard_fail_overrides_good_legacy_or_car_only_scores():
+    ref, mask = synthetic_car_pair()
+    gen = ref.copy()
+    gen[33:42, 20:43] = 0.05
+    gen[35:39, 20:36] = 0.15
+
+    result = im.compute_product_integrity_scores(ref, gen, car_mask=mask, car_only_lpips_score=99.0)
+
+    assert result["product_integrity_decision"] == "failed"
+    assert any("Scheinwerfer" in item or "Lichtsignatur" in item for item in result["critical_findings"])
+
+
+def test_reflection_only_can_pass_without_weighted_lpips_decision_dependency():
+    ref, mask = synthetic_car_pair()
+    gen = ref.copy()
+    gen[32:42, 70:105] = np.clip(gen[32:42, 70:105] + 0.08, 0.0, 1.0)
+
+    result = im.compute_product_integrity_scores(ref, gen, car_mask=mask, car_only_lpips_score=96.0)
+
+    assert result["structure_only_score"] >= 90
+    assert result["detail_zones_score"] >= 88
+    assert result["product_integrity_decision"] in {"passed", "warning"}
+    assert not any("Scheinwerfer" in item or "Felgen" in item or "Reifen" in item for item in result["critical_findings"])
+
+def test_mercedes_weight_map_prioritizes_front_details_and_wheels():
+    ref, mask = synthetic_car_pair()
+    gen = ref.copy()
+
+    weights = im.build_mercedes_importance_map(ref, gen, car_mask=mask)
+    zones = im.build_critical_component_zones(mask, ref.shape[:2])
+    paint_zone = mask.copy()
+    for key in ["headlight_zone", "light_signature_zone", "grille_zone", "emblem_zone", "front_wheel_zone", "rear_wheel_zone", "tire_zone", "window_line_zone"]:
+        paint_zone &= ~zones[key]
+
+    assert float(np.mean(weights[zones["headlight_zone"]])) >= 1.60
+    assert float(np.mean(weights[zones["grille_zone"]])) >= 1.60
+    assert float(np.mean(weights[zones["emblem_zone"]])) >= 1.60
+    assert float(np.mean(weights[zones["front_wheel_zone"]])) >= 1.45
+    assert float(np.mean(weights[zones["headlight_zone"]])) > float(np.mean(weights[paint_zone]))
+
+
+def test_reflection_downweight_keeps_critical_component_effective_weight_high():
+    ref, mask = synthetic_car_pair()
+    gen = ref.copy()
+    gen[33:42, 20:43] = np.clip(gen[33:42, 20:43] + 0.35, 0.0, 1.0)
+
+    mercedes_weights = im.build_mercedes_importance_map(ref, gen, car_mask=mask)
+    reflection_weights = im.build_reflection_downweight_map(ref, gen, car_mask=mask)
+    zones = im.build_critical_component_zones(mask, ref.shape[:2])
+    critical_mask = zones["headlight_zone"] | zones["grille_zone"] | zones["emblem_zone"] | zones["front_wheel_zone"] | zones["rear_wheel_zone"] | zones["tire_zone"]
+    protected_reflection = np.where(critical_mask, 1.0, reflection_weights)
+    effective = mercedes_weights * protected_reflection
+
+    assert float(np.min(protected_reflection[critical_mask])) == 1.0
+    assert float(np.mean(effective[zones["headlight_zone"]])) >= 1.60
+
+def test_window_contour_excludes_hood_front_and_exposes_separate_masks():
+    ref, gen, mask = synthetic_window_pair()
+    # Simuliere eine starke Motorhauben-/Frontkante außerhalb des Fensterbands.
+    ref[58:62, 18:70] = 0.02
+    gen[58:62, 18:70] = 0.02
+
+    glass_masks = im.build_glass_region_masks(ref, gen, car_mask=mask)
+    hood_front_region = np.zeros(mask.shape, dtype=bool)
+    hood_front_region[56:66, 18:75] = True
+
+    assert np.any(glass_masks["window_candidate_region"])
+    assert np.any(glass_masks["surface"])
+    assert np.any(glass_masks["contour"])
+    assert np.any(glass_masks["line"])
+    assert np.sum(glass_masks["contour"] & hood_front_region) == 0
+    assert np.sum(glass_masks["line"] & hood_front_region) == 0
+    assert np.sum(glass_masks["contour"] & ~glass_masks["window_candidate_region"]) == 0

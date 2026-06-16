@@ -82,10 +82,11 @@ DEFAULT_PRODUCT_INTEGRITY_PROFILE = {
         "car_only_lpips_score": True,
     },
     "weights": {
-        "structure_only_score": 0.45,
-        "detail_zones_score": 0.40,
-        "color_reflection_score": 0.05,
-        "car_only_lpips_score": 0.10,
+        "structure_only_score": 0.40,
+        "detail_zones_score": 0.45,
+        "color_reflection_score": 0.10,
+        "car_only_lpips_score": 0.05,
+        "legacy_weighted_lpips_weight": 0.0,
     },
     "thresholds": {
         "passed_product_integrity_min": 90.0,
@@ -147,10 +148,10 @@ CSV_COLUMN_ORDER = [
     "lpips_car_only",
     "car_only_lpips",
     "lpips_car_only_similarity_percent",
-    "weighted_mercedes_lpips",
-    "weighted_mercedes_lpips_similarity_percent",
-    "reflection_robust_lpips",
-    "reflection_robust_lpips_similarity_percent",
+    "legacy_debug_weighted_lpips_raw",
+    "legacy_debug_weighted_lpips_similarity_percent",
+    "legacy_reflection_robust_lpips_raw",
+    "legacy_reflection_robust_lpips_similarity_percent",
     "final_similarity_score",
     "lpips_raw",
     "lpips_score",
@@ -163,6 +164,20 @@ CSV_COLUMN_ORDER = [
     "product_integrity_decision",
     "critical_findings",
     "tolerated_findings",
+    "headlight_score",
+    "headlight_diff",
+    "light_signature_score",
+    "front_light_signature_score",
+    "front_wheel_score",
+    "rear_wheel_score",
+    "wheel_tire_score",
+    "tire_score",
+    "grille_score",
+    "emblem_score",
+    "window_line_score",
+    "silhouette_score",
+    "critical_component_detected",
+    "critical_component_names",
     "product_integrity_profile",
     "product_integrity_debug_paths",
     "product_integrity_interpretation",
@@ -184,8 +199,14 @@ CSV_COLUMN_ORDER = [
     "weighted_lpips_region_contributions",
     "reflection_weight_map_path",
     "mercedes_weight_map_path",
+    "critical_component_mask_path",
     "glass_interior_mask_path",
     "window_contour_mask_path",
+    "window_candidate_region_path",
+    "window_surface_mask_path",
+    "window_line_mask_path",
+    "overlay_window_contour_ref_path",
+    "overlay_window_contour_gen_path",
     "weighted_lpips_map_path",
     "effective_weight_map_path",
     "ssim_car_only",
@@ -222,11 +243,23 @@ CSV_FLOAT_COLUMNS = [
     "lpips_car_only",
     "car_only_lpips",
     "lpips_car_only_similarity_percent",
-    "weighted_mercedes_lpips",
-    "weighted_mercedes_lpips_similarity_percent",
-    "reflection_robust_lpips",
-    "reflection_robust_lpips_similarity_percent",
+    "legacy_debug_weighted_lpips_raw",
+    "legacy_debug_weighted_lpips_similarity_percent",
+    "legacy_reflection_robust_lpips_raw",
+    "legacy_reflection_robust_lpips_similarity_percent",
     "final_similarity_score",
+    "headlight_score",
+    "headlight_diff",
+    "light_signature_score",
+    "front_light_signature_score",
+    "front_wheel_score",
+    "rear_wheel_score",
+    "wheel_tire_score",
+    "tire_score",
+    "grille_score",
+    "emblem_score",
+    "window_line_score",
+    "silhouette_score",
     "reflection_weight_mean",
     "reflection_weight_min",
     "reflection_downweight_area_ratio",
@@ -698,6 +731,48 @@ def symmetric_gaussian_zone(x, y, zone):
     return np.exp(-(((np.abs(x - 0.50) - x_offset) / sx) ** 2 + ((y - cy) / sy) ** 2))
 
 
+def build_critical_component_zones(mask, shape):
+    """Erzeuge robuste Produktzonen aus der Fahrzeug-Bounding-Box.
+
+    Nutze die Prototyp-Annahme: Die Fahrzeugfront liegt links im Bild.
+    """
+    scope = np.asarray(mask, dtype=bool) if mask is not None and np.any(mask) else np.ones(shape, dtype=bool)
+    bbox = compute_mask_roi_bbox(scope, shape)
+    headlight_zone = bbox_mask_from_fraction(shape, bbox, (0.00, 0.20, 0.36, 0.58))
+    light_signature_zone = bbox_mask_from_fraction(shape, bbox, (0.00, 0.16, 0.34, 0.54))
+    grille_zone = bbox_mask_from_fraction(shape, bbox, (0.00, 0.35, 0.30, 0.72))
+    emblem_zone = bbox_mask_from_fraction(shape, bbox, (0.18, 0.38, 0.40, 0.66))
+    front_wheel_zone = bbox_mask_from_fraction(shape, bbox, (0.05, 0.58, 0.39, 1.00))
+    rear_wheel_zone = bbox_mask_from_fraction(shape, bbox, (0.61, 0.58, 0.95, 1.00))
+    tire_zone = front_wheel_zone | rear_wheel_zone
+    window_line_zone = bbox_mask_from_fraction(shape, bbox, (0.08, 0.12, 0.92, 0.58))
+    silhouette_zone = dilation(scope, disk(2)) & ~erosion(scope, disk(3))
+    zones = {
+        "headlight_zone": headlight_zone,
+        "light_signature_zone": light_signature_zone,
+        "grille_zone": grille_zone,
+        "emblem_zone": emblem_zone,
+        "front_wheel_zone": front_wheel_zone,
+        "rear_wheel_zone": rear_wheel_zone,
+        "tire_zone": tire_zone,
+        "window_line_zone": window_line_zone,
+        "silhouette_zone": silhouette_zone,
+        # Kompatible Kurznamen für die Komponenten-Auswertung:
+        "headlight": headlight_zone,
+        "front_light_signature": light_signature_zone,
+        "grille": grille_zone,
+        "emblem": emblem_zone,
+        "front_wheel": front_wheel_zone,
+        "rear_wheel": rear_wheel_zone,
+        "wheel_tire": tire_zone,
+        "window_line": window_line_zone,
+        "silhouette": silhouette_zone,
+    }
+    for name, zone in list(zones.items()):
+        zones[name] = np.asarray(zone & scope, dtype=bool)
+    return zones
+
+
 def build_mercedes_importance_map(ref, gen, car_mask=None, profile=None):
     """Gewichte produktkritische Fahrzeugstrukturen höher als glatte Flächen."""
     profile = profile or DEFAULT_MERCEDES_WEIGHT_PROFILE
@@ -725,8 +800,32 @@ def build_mercedes_importance_map(ref, gen, car_mask=None, profile=None):
         + float(zones.get("side_body_character_line", {}).get("weight", 0.22)) * side_line
     )
 
+    vehicle = prepare_metric_mask(car_mask, ref, gen) if car_mask is not None and np.any(car_mask) else np.ones((h, w), dtype=bool)
+    component_zones = build_critical_component_zones(vehicle, (h, w))
+    critical_component_mask = (
+        component_zones["headlight_zone"]
+        | component_zones["light_signature_zone"]
+        | component_zones["grille_zone"]
+        | component_zones["emblem_zone"]
+        | component_zones["front_wheel_zone"]
+        | component_zones["rear_wheel_zone"]
+        | component_zones["tire_zone"]
+        | component_zones["window_line_zone"]
+        | component_zones["silhouette_zone"]
+    )
+    front_detail_mask = (
+        component_zones["headlight_zone"]
+        | component_zones["light_signature_zone"]
+        | component_zones["grille_zone"]
+        | component_zones["emblem_zone"]
+    )
+    wheel_mask = component_zones["front_wheel_zone"] | component_zones["rear_wheel_zone"] | component_zones["tire_zone"]
+    line_mask = component_zones["window_line_zone"] | component_zones["silhouette_zone"]
+    weight = np.where(line_mask, np.maximum(weight, float(profile.get("critical_line_weight_floor", 1.35))), weight)
+    weight = np.where(wheel_mask, np.maximum(weight, float(profile.get("critical_wheel_weight_floor", 1.80))), weight)
+    weight = np.where(front_detail_mask, np.maximum(weight, float(profile.get("critical_front_detail_weight_floor", 2.10))), weight)
+
     if car_mask is not None and np.any(car_mask):
-        vehicle = np.asarray(car_mask, dtype=bool)
         weight = np.where(vehicle, weight, 0.0)
 
     glass_masks = build_glass_region_masks(ref, gen, car_mask=car_mask, profile=profile)
@@ -740,6 +839,10 @@ def build_mercedes_importance_map(ref, gen, car_mask=None, profile=None):
         contour_floor = float(profile.get("glass_contour_weight_floor", 0.92))
         contour_boost = float(profile.get("glass_contour_edge_boost", 0.32))
         weight = np.where(glass_contour, np.maximum(weight, contour_floor + contour_boost * edge), weight)
+    # Glas-/Reflexionslogik darf harte Produktbereiche nicht abdunkeln.
+    weight = np.where(critical_component_mask, np.maximum(weight, float(profile.get("critical_component_weight_floor", 1.65))), weight)
+    weight = np.where(front_detail_mask, np.maximum(weight, float(profile.get("critical_front_detail_weight_floor", 2.10))), weight)
+    weight = np.where(wheel_mask, np.maximum(weight, float(profile.get("critical_wheel_weight_floor", 1.80))), weight)
 
     return np.clip(weight, 0.0, float(profile.get("max_weight", 2.4))).astype(np.float32)
 
@@ -766,13 +869,28 @@ def build_glass_region_masks(ref, gen, car_mask=None, profile=None):
     edge = np.clip(np.maximum(compute_edge_strength(ref), compute_edge_strength(gen)), 0.0, 1.0)
     smooth = edge < float(profile.get("glass_smooth_edge_limit", 0.42))
 
-    glass_band = (
-        (by >= float(profile.get("glass_zone_y_min", 0.18)))
-        & (by <= float(profile.get("glass_zone_y_max", 0.58)))
-        & (bx >= float(profile.get("glass_zone_x_margin", 0.10)))
-        & (bx <= 1.0 - float(profile.get("glass_zone_x_margin", 0.10)))
+    window_candidate_region = (
+        (by >= float(profile.get("window_candidate_y_min", 0.15)))
+        & (by <= float(profile.get("window_candidate_y_max", 0.50)))
+        & (bx >= float(profile.get("window_candidate_x_min", 0.12)))
+        & (bx <= float(profile.get("window_candidate_x_max", 0.92)))
         & vehicle
     )
+    # Schließe den vorderen unteren Bereich aus: Dort liegen Motorhaube, Grill und
+    # Scheinwerferkanten, aber keine Fensterkontur.
+    hood_front_exclusion = (
+        (bx <= float(profile.get("window_front_exclusion_x_max", 0.36)))
+        & (by >= float(profile.get("window_front_exclusion_y_min", 0.38)))
+    )
+    window_candidate_region &= ~hood_front_exclusion
+    # Begrenze die Kandidaten auf zusammenhängende Kanten im Fensterband statt auf
+    # eine grobe Box. Eine kleine Dilatation verbindet Dachlinie, Säulen und Beltline.
+    window_edge_seed = window_candidate_region & (edge >= float(profile.get("window_candidate_edge_min", 0.06)))
+    if np.any(window_edge_seed):
+        connected_window_band = dilation(window_edge_seed, disk(max(1, int(profile.get("window_candidate_connect_px", 2)))))
+        window_candidate_region &= connected_window_band | (by <= float(profile.get("window_surface_y_max", 0.46)))
+
+    glass_band = window_candidate_region
     low_saturation = saturation <= float(profile.get("glass_saturation_limit", 0.50))
     dark_glass = brightness <= float(profile.get("glass_dark_limit", 0.34))
     bright_reflection = brightness >= float(profile.get("glass_bright_start", 0.58))
@@ -791,15 +909,36 @@ def build_glass_region_masks(ref, gen, car_mask=None, profile=None):
 
     if not np.any(candidate):
         empty = np.zeros((h, w), dtype=bool)
-        return {"candidate": empty, "interior": empty, "contour": empty}
+        return {
+            "candidate": empty,
+            "window_candidate_region": window_candidate_region.astype(bool),
+            "interior": empty,
+            "surface": empty,
+            "contour": empty,
+            "line": empty,
+        }
 
     radius = max(1, int(round(min(bh, bw) * float(profile.get("glass_contour_width_ratio", 0.018)))))
-    contour = candidate & ~erosion(candidate, disk(radius))
-    contour |= dilation(candidate & (edge > float(profile.get("glass_contour_edge_limit", 0.30))), disk(1))
-    contour &= vehicle
-    interior = candidate & ~contour
+    surface = candidate.astype(bool)
+    line_seed = window_candidate_region & (
+        edge > float(profile.get("glass_contour_edge_limit", 0.30))
+    )
+    contour = surface & ~erosion(surface, disk(radius))
+    line = (contour | dilation(line_seed & dilation(surface, disk(1)), disk(1))) & window_candidate_region & vehicle
+    # Keine Motorhaube/Frontkanten: Schneide die finale Kontur erneut an der
+    # fensterspezifischen Kandidatenregion.
+    line &= ~hood_front_exclusion
+    contour = line.astype(bool)
+    interior = surface & ~contour
 
-    return {"candidate": candidate.astype(bool), "interior": interior.astype(bool), "contour": contour.astype(bool)}
+    return {
+        "candidate": surface.astype(bool),
+        "window_candidate_region": window_candidate_region.astype(bool),
+        "interior": interior.astype(bool),
+        "surface": surface.astype(bool),
+        "contour": contour.astype(bool),
+        "line": contour.astype(bool),
+    }
 
 def build_reflection_downweight_map(ref, gen, car_mask=None, content_mask=None, profile=None):
     """Reduziere weiche Reflexionsänderungen, erhalte aber Kanten und Geometrie."""
@@ -1138,7 +1277,12 @@ def refine_car_mask(
     return refined_mask.astype(bool)
 
 
-def compute_mask_bbox(mask, pad_px=20, min_size_px=64, make_square=True):
+def compute_shared_vehicle_crop_box(mask, pad_px=20, min_size_px=64, square=False):
+    """Berechne eine gemeinsame Crop-Box aus der finalen Fahrzeugmaske.
+
+    Koordinatenkonvention: x0/y0 inklusive, x1/y1 exklusiv.
+    """
+    mask = np.asarray(mask, dtype=bool)
     ys, xs = np.where(mask)
     if len(xs) == 0:
         h, w = mask.shape
@@ -1153,7 +1297,7 @@ def compute_mask_bbox(mask, pad_px=20, min_size_px=64, make_square=True):
     box_h = y1 - y0
     min_size = max(1, int(min_size_px))
 
-    if make_square:
+    if square:
         target_size = max(box_w, box_h, min_size)
         cx = (x0 + x1) / 2.0
         cy = (y0 + y1) / 2.0
@@ -1193,18 +1337,56 @@ def compute_mask_bbox(mask, pad_px=20, min_size_px=64, make_square=True):
     return x0, y0, x1, y1
 
 
+def compute_mask_bbox(mask, pad_px=20, min_size_px=64, make_square=True):
+    return compute_shared_vehicle_crop_box(mask, pad_px=pad_px, min_size_px=min_size_px, square=make_square)
+
+
+def validate_crop_box_for_array(image_or_mask, crop_box, name="image_or_mask"):
+    arr = np.asarray(image_or_mask)
+    if arr.ndim < 2:
+        raise ValueError(f"{name} muss mindestens 2 Dimensionen haben, erhalten: {arr.shape}")
+    x0, y0, x1, y1 = [int(v) for v in crop_box]
+    h, w = arr.shape[:2]
+    if x0 < 0 or y0 < 0 or x1 > w or y1 > h or x1 <= x0 or y1 <= y0:
+        raise ValueError(
+            f"Ungültige gemeinsame Crop-Box für {name}: "
+            f"x0={x0}, y0={y0}, x1={x1}, y1={y1}, Bildgröße={w}x{h}. "
+            "Konvention: x0/y0 inklusive, x1/y1 exklusiv."
+        )
+
+
+def apply_shared_crop(image_or_mask, crop_box):
+    """Wende dieselbe exklusive Crop-Box unverändert auf Bild oder Maske an."""
+    validate_crop_box_for_array(image_or_mask, crop_box)
+    x0, y0, x1, y1 = [int(v) for v in crop_box]
+    return np.asarray(image_or_mask)[y0:y1, x0:x1].copy()
+
+
+def validate_same_spatial_size(named_arrays, context):
+    sizes = {name: tuple(np.asarray(arr).shape[:2]) for name, arr in named_arrays.items() if arr is not None}
+    if not sizes:
+        return
+    expected_name, expected_size = next(iter(sizes.items()))
+    mismatches = {name: size for name, size in sizes.items() if size != expected_size}
+    if mismatches:
+        formatted = ", ".join(f"{name}={size[1]}x{size[0]}" for name, size in sizes.items())
+        raise ValueError(
+            f"{context}: Größenvalidierung fehlgeschlagen. Erwartet wie {expected_name}="
+            f"{expected_size[1]}x{expected_size[0]}, erhalten: {formatted}. "
+            "Prüfe, dass ausschließlich die gemeinsame Crop-Box verwendet wird."
+        )
+
+
 def apply_neutralize_crop(img, mask, bbox, neutral_value=0.5):
-    x0, y0, x1, y1 = bbox
-    img_crop = img[y0:y1, x0:x1, :].copy()
-    mask_crop = mask[y0:y1, x0:x1]
+    img_crop = apply_shared_crop(img, bbox)
+    mask_crop = apply_shared_crop(mask, bbox).astype(bool)
     img_crop[~mask_crop] = neutral_value
     return img_crop, mask_crop
 
 
 def apply_masked_car_crop(img, mask, bbox):
-    x0, y0, x1, y1 = bbox
-    img_crop = img[y0:y1, x0:x1, :].copy()
-    mask_crop = mask[y0:y1, x0:x1]
+    img_crop = apply_shared_crop(img, bbox)
+    mask_crop = apply_shared_crop(mask, bbox).astype(bool)
     masked_crop = np.zeros_like(img_crop)
     masked_crop[mask_crop] = img_crop[mask_crop]
     return masked_crop, mask_crop
@@ -1213,6 +1395,16 @@ def apply_masked_car_crop(img, mask, bbox):
 def save_mask_image(mask, path):
     mask_img = (mask.astype(np.uint8) * 255)
     Image.fromarray(mask_img, mode="L").save(path)
+
+
+def save_mask_overlay(image, mask, path, color_rgb=(1.0, 0.1, 0.0), alpha=0.65):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    base = np.asarray(image, dtype=np.float32).copy()
+    overlay = base.copy()
+    mask_bool = np.asarray(mask, dtype=bool)
+    color_arr = np.asarray(color_rgb, dtype=np.float32)
+    overlay[mask_bool] = (1.0 - float(alpha)) * overlay[mask_bool] + float(alpha) * color_arr
+    np_to_pil_uint8(np.clip(overlay, 0.0, 1.0)).save(path)
 
 
 def bbox_to_debug_dict(bbox, pad_px, min_size_px, square):
@@ -1318,43 +1510,61 @@ def compute_car_only_metrics(
         }
 
     adaptive_min_size = max(int(roi_min_size_px), int(min(ref_norm.shape[0], ref_norm.shape[1]) * 0.2))
-    metric_bbox = compute_mask_bbox(mask, pad_px=pad_px, min_size_px=adaptive_min_size, make_square=roi_square)
+    metric_bbox = compute_shared_vehicle_crop_box(mask, pad_px=pad_px, min_size_px=adaptive_min_size, square=roi_square)
     debug["metric_bbox"] = bbox_to_debug_dict(metric_bbox, pad_px, adaptive_min_size, roi_square)
     debug["bbox"] = debug["metric_bbox"]
 
-    ref_preview_mask = ref_mask.astype(bool)
-    gen_preview_mask = gen_mask.astype(bool)
-    ref_preview_bbox = compute_mask_bbox(ref_preview_mask, pad_px=pad_px, min_size_px=adaptive_min_size, make_square=roi_square)
-    gen_preview_bbox = compute_mask_bbox(gen_preview_mask, pad_px=pad_px, min_size_px=adaptive_min_size, make_square=roi_square)
+    # Vorschau- und Metrik-Crops verwenden bewusst dieselbe Box. Keine unabhängigen
+    # Ref-/Gen-Bounding-Boxes und kein Nachtrimmen anhand von Alpha oder Pixelinhalt.
+    ref_preview_bbox = metric_bbox
+    gen_preview_bbox = metric_bbox
     debug["ref_preview_bbox"] = bbox_to_debug_dict(ref_preview_bbox, pad_px, adaptive_min_size, roi_square)
     debug["gen_preview_bbox"] = bbox_to_debug_dict(gen_preview_bbox, pad_px, adaptive_min_size, roi_square)
 
     if car_mode == "neutralize_crop":
         ref_car, mask_crop = apply_neutralize_crop(ref_norm, mask, metric_bbox, neutral_value=neutral_value)
         gen_car, _ = apply_neutralize_crop(gen_norm, mask, metric_bbox, neutral_value=neutral_value)
-        ref_preview, _ = apply_masked_car_crop(ref_norm, ref_preview_mask, ref_preview_bbox)
-        gen_preview, _ = apply_masked_car_crop(gen_norm, gen_preview_mask, gen_preview_bbox)
+        ref_preview, _ = apply_masked_car_crop(ref_norm, mask, metric_bbox)
+        gen_preview, _ = apply_masked_car_crop(gen_norm, mask, metric_bbox)
         lpips_car = compute_lpips(ref_car, gen_car, lpips_model, use_gpu=use_gpu)
         ssim_car = compute_ssim(ref_car, gen_car)
     elif car_mode == "weighted_lpips":
         debug["fallback_reason"] = "car_mode=weighted_lpips ist deprecated und nutzt neutralize_crop."
         ref_car, mask_crop = apply_neutralize_crop(ref_norm, mask, metric_bbox, neutral_value=neutral_value)
         gen_car, _ = apply_neutralize_crop(gen_norm, mask, metric_bbox, neutral_value=neutral_value)
-        ref_preview, _ = apply_masked_car_crop(ref_norm, ref_preview_mask, ref_preview_bbox)
-        gen_preview, _ = apply_masked_car_crop(gen_norm, gen_preview_mask, gen_preview_bbox)
+        ref_preview, _ = apply_masked_car_crop(ref_norm, mask, metric_bbox)
+        gen_preview, _ = apply_masked_car_crop(gen_norm, mask, metric_bbox)
         lpips_car = compute_lpips(ref_car, gen_car, lpips_model, use_gpu=use_gpu)
         ssim_car = compute_ssim(ref_car, gen_car)
     elif car_mode == "roi_crop":
-        x0, y0, x1, y1 = metric_bbox
-        ref_car = ref_norm[y0:y1, x0:x1, :]
-        gen_car = gen_norm[y0:y1, x0:x1, :]
-        mask_crop = mask[y0:y1, x0:x1]
-        ref_preview, _ = apply_masked_car_crop(ref_norm, ref_preview_mask, ref_preview_bbox)
-        gen_preview, _ = apply_masked_car_crop(gen_norm, gen_preview_mask, gen_preview_bbox)
+        ref_car = apply_shared_crop(ref_norm, metric_bbox)
+        gen_car = apply_shared_crop(gen_norm, metric_bbox)
+        mask_crop = apply_shared_crop(mask, metric_bbox).astype(bool)
+        ref_preview, _ = apply_masked_car_crop(ref_norm, mask, metric_bbox)
+        gen_preview, _ = apply_masked_car_crop(gen_norm, mask, metric_bbox)
         lpips_car = compute_lpips(ref_car, gen_car, lpips_model, use_gpu=use_gpu)
         ssim_car = compute_ssim(ref_car, gen_car)
     else:
         raise ValueError("car_mode muss 'neutralize_crop', 'roi_crop' oder 'weighted_lpips' sein")
+
+    validate_same_spatial_size(
+        {
+            "ref_car_only": ref_preview,
+            "gen_car_only": gen_preview,
+            "ref_neutral": ref_car,
+            "gen_neutral": gen_car,
+            "crop_mask": mask_crop,
+        },
+        "Car-Only-Crop",
+    )
+    expected_h = int(metric_bbox[3] - metric_bbox[1])
+    expected_w = int(metric_bbox[2] - metric_bbox[0])
+    actual_h, actual_w = mask_crop.shape[:2]
+    if (actual_w, actual_h) != (expected_w, expected_h):
+        raise ValueError(
+            f"crop_box.json passt nicht zum Crop: Box ergibt {expected_w}x{expected_h}, "
+            f"crop_mask ist {actual_w}x{actual_h}."
+        )
 
     stem = Path(ref_path).stem
 
@@ -1596,13 +1806,96 @@ def compute_color_reflection_score(ref, gen, mask=None, edge_diff=None, debug_di
     return {"score": score, "map": reflection_map, "debug_paths": paths}
 
 
-def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_score=None, profile=None, debug_dir=None, stem="pair", mask_metrics=None):
+def compute_component_product_scores(ref, gen, mask=None, structure_debug=None, lpips_component_map=None, debug_dir=None, stem="pair"):
+    """Bewerte harte Produktbauteile lokal, damit Details nicht im Gesamtscore verschwinden."""
+    metric_mask = prepare_metric_mask(mask, ref, gen)
+    shape = ref.shape[:2]
+    zones = build_critical_component_zones(metric_mask, shape)
+
+    ref_gray = color.rgb2gray(ref).astype(np.float32)
+    gen_gray = color.rgb2gray(gen).astype(np.float32)
+    gray_diff = np.abs(ref_gray - gen_gray)
+    ref_edge = np.clip(sobel(ref_gray), 0.0, 1.0).astype(np.float32)
+    gen_edge = np.clip(sobel(gen_gray), 0.0, 1.0).astype(np.float32)
+    edge_delta = np.abs(ref_edge - gen_edge)
+    if structure_debug:
+        structure_diff = np.asarray(structure_debug["diff_map"], dtype=np.float32)
+    else:
+        structure_diff = np.abs(sobel(ref_gray) - sobel(gen_gray)).astype(np.float32)
+    if lpips_component_map is not None:
+        lpips_local = resize_float_map_to_shape(
+            np.asarray(lpips_component_map, dtype=np.float32),
+            shape,
+            resample=Image.Resampling.BILINEAR,
+        )
+        lpips_local = lpips_local / (float(np.percentile(lpips_local, 98)) + 1e-8)
+        lpips_local = np.clip(lpips_local, 0.0, 1.0)
+    else:
+        lpips_local = np.zeros(shape, dtype=np.float32)
+
+    # Harte Bauteile nutzen bewusst ungedämpfte lokale Signale. Reflection-Downweighting
+    # darf Scheinwerfer, Lichtsignatur, Räder/Felgen/Reifen, Grill und Emblem nicht entschärfen.
+    component_diff_map = np.clip((0.45 * structure_diff) + (0.30 * edge_delta) + (0.55 * gray_diff) + (0.20 * lpips_local), 0.0, 1.0)
+    edge_presence = np.maximum(ref_edge, gen_edge)
+
+    component_scores = {}
+    component_diffs = {}
+    attribution = np.zeros(shape, dtype=np.float32)
+    zone_debug = np.zeros(shape, dtype=np.float32)
+    zone_order = list(zones.keys())
+    for idx, name in enumerate(zone_order, start=1):
+        zone = zones[name]
+        if not np.any(zone):
+            local_diff = 0.0
+        else:
+            detail_pixels = zone & (edge_presence >= max(0.025, float(np.percentile(edge_presence[zone], 45))))
+            eval_zone = detail_pixels if np.sum(detail_pixels) >= max(8, int(np.sum(zone) * 0.08)) else zone
+            local_diff = masked_mean(component_diff_map, eval_zone, default=0.0)
+        scale = 0.105 if name in {"headlight", "front_light_signature", "front_wheel", "rear_wheel", "wheel_tire"} else 0.13
+        component_diffs[name] = float(local_diff)
+        component_scores[f"{name}_score"] = score_from_error(local_diff, scale)
+        attribution = np.maximum(attribution, np.where(zone, component_diff_map, 0.0))
+        zone_debug = np.maximum(zone_debug, zone.astype(np.float32) * (idx / max(len(zone_order), 1)))
+
+    paths = {}
+    if debug_dir:
+        debug_path = Path(debug_dir); debug_path.mkdir(parents=True, exist_ok=True)
+        paths["critical_component_zones"] = str(debug_path / f"{stem}_critical_component_zones.png")
+        paths["headlight_zone_diff"] = str(debug_path / f"{stem}_headlight_zone_diff.png")
+        paths["wheel_zones_diff"] = str(debug_path / f"{stem}_wheel_zones_diff.png")
+        paths["component_attribution_map"] = str(debug_path / f"{stem}_component_attribution_map.png")
+        save_weight_debug_map(zone_debug, Path(paths["critical_component_zones"]))
+        save_weight_debug_map(np.where(zones["headlight"] | zones["front_light_signature"], component_diff_map, 0.0), Path(paths["headlight_zone_diff"]))
+        save_weight_debug_map(np.where(zones["wheel_tire"], component_diff_map, 0.0), Path(paths["wheel_zones_diff"]))
+        save_weight_debug_map(attribution, Path(paths["component_attribution_map"]))
+
+    return {
+        "scores": component_scores,
+        "diffs": component_diffs,
+        "zones": zones,
+        "debug_paths": paths,
+        "critical_component_mask": (
+            zones["headlight"]
+            | zones["front_light_signature"]
+            | zones["front_wheel"]
+            | zones["rear_wheel"]
+            | zones["wheel_tire"]
+            | zones["grille"]
+            | zones["emblem"]
+        ),
+    }
+
+
+def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_score=None, profile=None, debug_dir=None, stem="pair", mask_metrics=None, lpips_component_map=None):
     """Führe Structure, Detail-Zones, Color/Reflection und Car-only-LPIPS zur Produktintegrität zusammen."""
     profile = profile or DEFAULT_PRODUCT_INTEGRITY_PROFILE
     scope = car_mask if car_mask is not None and np.any(car_mask) else None
     structure = compute_structure_only_score(ref, gen, mask=scope, debug_dir=debug_dir, stem=stem)
     detail = compute_detail_zones_score(ref, gen, mask=scope, profile=profile, structure_debug=structure, debug_dir=debug_dir, stem=stem)
     color_score = compute_color_reflection_score(ref, gen, mask=scope, edge_diff=structure["diff_map"], debug_dir=debug_dir, stem=stem)
+    components = compute_component_product_scores(ref, gen, mask=scope, structure_debug=structure, lpips_component_map=lpips_component_map, debug_dir=debug_dir, stem=stem)
+    component_values = components["scores"]
+    component_diffs = components["diffs"]
     component_scores = {
         "structure_only_score": structure["score"],
         "detail_zones_score": detail["score"],
@@ -1638,6 +1931,7 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
     critical = []
     tolerated = []
     contour_warning_reason = "Keine relevante Konturabweichung erkannt."
+    component_findings = []
     zone_scores = detail["zone_scores"]
     zone_labels = {
         "silhouette": "Abweichung an Fahrzeugkontur erkannt",
@@ -1664,6 +1958,64 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
             tolerated.append(zone_labels.get(name, f"Detailzone {name} leicht auffällig, manuelle Prüfung empfohlen"))
     if structure["score"] < float(thresholds.get("failed_structure_min", 80.0)):
         critical.append("Fahrzeugposition, Skalierung, Proportion oder Struktur deutlich abweichend")
+
+    headlight_score = float(component_values.get("headlight_score", 100.0))
+    headlight_diff = float(component_diffs.get("headlight", 0.0))
+    light_signature_score = float(component_values.get("front_light_signature_score", 100.0))
+    grille_score = float(component_values.get("grille_score", 100.0))
+    emblem_score = float(component_values.get("emblem_score", 100.0))
+    front_wheel_score = float(component_values.get("front_wheel_score", 100.0))
+    rear_wheel_score = float(component_values.get("rear_wheel_score", 100.0))
+    wheel_tire_score = float(component_values.get("wheel_tire_score", 100.0))
+    window_line_score = float(component_values.get("window_line_score", 100.0))
+    silhouette_score = float(component_values.get("silhouette_score", 100.0))
+
+    light_signature_diff = float(component_diffs.get("front_light_signature", 0.0))
+    front_wheel_diff = float(component_diffs.get("front_wheel", 0.0))
+    rear_wheel_diff = float(component_diffs.get("rear_wheel", 0.0))
+    wheel_tire_diff = float(component_diffs.get("wheel_tire", 0.0))
+    grille_diff = float(component_diffs.get("grille", 0.0))
+    emblem_diff = float(component_diffs.get("emblem", 0.0))
+
+    headlight_diff_gate = float(thresholds.get("critical_headlight_diff_min", 0.20))
+    light_diff_gate = float(thresholds.get("critical_light_signature_diff_min", 0.18))
+    wheel_diff_gate = float(thresholds.get("warning_wheel_diff_min", 0.16))
+    front_diff_gate = float(thresholds.get("warning_front_detail_diff_min", 0.17))
+
+    headlight_failed = headlight_diff > headlight_diff_gate or (headlight_score < float(thresholds.get("critical_headlight_score_max", 72.0)) and headlight_diff > light_diff_gate)
+    light_signature_failed = light_signature_score < float(thresholds.get("critical_light_signature_score_max", 74.0)) and light_signature_diff > light_diff_gate
+    wheel_strong = min(front_wheel_score, rear_wheel_score, wheel_tire_score) < float(thresholds.get("critical_wheel_score_max", 68.0)) and max(front_wheel_diff, rear_wheel_diff, wheel_tire_diff) > wheel_diff_gate
+    wheel_warning = min(front_wheel_score, rear_wheel_score, wheel_tire_score) < float(thresholds.get("warning_wheel_score_max", 84.0)) and max(front_wheel_diff, rear_wheel_diff, wheel_tire_diff) > wheel_diff_gate
+    grille_strong = grille_score < float(thresholds.get("critical_grille_score_max", 70.0)) and grille_diff > front_diff_gate
+    grille_warning = grille_score < float(thresholds.get("warning_grille_score_max", 84.0)) and grille_diff > front_diff_gate
+    emblem_strong = emblem_score < float(thresholds.get("critical_emblem_score_max", 70.0)) and emblem_diff > front_diff_gate
+    emblem_warning = emblem_score < float(thresholds.get("warning_emblem_score_max", 84.0)) and emblem_diff > front_diff_gate
+
+    if headlight_failed:
+        critical.append("Kritische Änderung an Scheinwerfer oder Lichtsignatur erkannt")
+        component_findings.append("Scheinwerfer/Lichtsignatur")
+    if light_signature_failed and not headlight_failed:
+        critical.append("Kritische Änderung der Lichtsignatur erkannt")
+        component_findings.append("Lichtsignatur")
+    if wheel_strong:
+        critical.append("Änderung an Felgen-, Reifen- oder Radstruktur erkannt")
+        component_findings.append("Felgen/Reifen/Radstruktur")
+    elif wheel_warning:
+        tolerated.append("Änderung an Felgen-, Reifen- oder Radstruktur erkannt")
+        component_findings.append("Felgen/Reifen/Radstruktur")
+    if grille_strong:
+        critical.append("Mögliche Änderung am Kühlergrill erkannt")
+        component_findings.append("Kühlergrill")
+    elif grille_warning:
+        tolerated.append("Mögliche Änderung am Kühlergrill erkannt")
+        component_findings.append("Kühlergrill")
+    if emblem_strong:
+        critical.append("Mögliche Änderung an markenspezifischem Frontbereich erkannt")
+        component_findings.append("Mercedes-Stern/Emblem")
+    elif emblem_warning:
+        tolerated.append("Mögliche Änderung an markenspezifischem Frontbereich erkannt")
+        component_findings.append("Mercedes-Stern/Emblem")
+
     reflection_cfg = profile.get("reflection_tolerance", {})
     reflection_gap = min(structure["score"], detail["score"]) - color_score["score"]
     stable_structure = structure["score"] >= 92.0 and (mask_iou is None or float(mask_iou) >= 0.98)
@@ -1679,7 +2031,9 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
         and component_scores["car_only_lpips_score"] >= 80.0
         and not critical
     )
-    if product_score < float(thresholds.get("failed_product_integrity_min", 80.0)) or structure["score"] < float(thresholds.get("failed_structure_min", 80.0)) or detail["score"] < float(thresholds.get("failed_detail_min", 80.0)):
+    if headlight_failed or light_signature_failed or grille_strong or emblem_strong or wheel_strong or (wheel_warning and (headlight_failed or light_signature_failed)):
+        decision = "failed"
+    elif product_score < float(thresholds.get("failed_product_integrity_min", 80.0)) or structure["score"] < float(thresholds.get("failed_structure_min", 80.0)) or detail["score"] < float(thresholds.get("failed_detail_min", 80.0)):
         decision = "failed"
     elif stable_pass_candidate or (product_score >= float(thresholds.get("passed_product_integrity_min", 90.0)) and component_scores["car_only_lpips_score"] >= 80.0 and not critical):
         decision = "passed"
@@ -1687,14 +2041,24 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
         decision = "warning"
     if critical:
         interpretation = "Die Fahrzeugmaske und Detailzonen zeigen produktrelevante Abweichungen. Mindestens ein kritischer Struktur-, Kontur- oder Detailhinweis muss geprüft werden."
-        decision_reason = "critical_findings vorhanden oder Kernscore unter Fehlergrenze."
+        if headlight_failed or light_signature_failed:
+            decision_reason = "Das Bild wurde als failed bewertet, weil im Scheinwerferbereich eine kritische Strukturabweichung erkannt wurde."
+            if wheel_warning or wheel_strong:
+                decision_reason += " Zusätzlich wurden Abweichungen an Rad-/Felgenstrukturen festgestellt."
+            elif grille_strong or emblem_strong:
+                decision_reason += " Zusätzlich ist der markenspezifische Frontbereich auffällig."
+        elif wheel_strong:
+            decision_reason = "Das Bild wurde aufgrund deutlicher Abweichungen an Felgen-, Reifen- oder Radstruktur als kritisch bewertet."
+        else:
+            decision_reason = "critical_findings vorhanden oder Kernscore unter Fehlergrenze."
     elif tolerated:
         interpretation = "Die Fahrzeugmaske stimmt gut überein. Die Fahrzeugstruktur ist stabil. Erkannte Reflexions-, Helligkeits- oder geringe Randabweichungen werden toleriert; es liegt keine eindeutige Produktabweichung vor."
         decision_reason = "Keine critical_findings; Abweichungen nur als tolerated_findings klassifiziert."
     else:
         interpretation = "Fahrzeugstruktur, Kontur und Detailzonen sind stabil. Es wurden keine produktrelevanten Abweichungen erkannt."
         decision_reason = "Scores über den Pass-Schwellen und keine Findings."
-    debug_paths = {}; debug_paths.update(structure["debug_paths"]); debug_paths.update(detail["debug_paths"]); debug_paths.update(color_score["debug_paths"])
+    critical_component_names = sorted(set(component_findings))
+    debug_paths = {}; debug_paths.update(structure["debug_paths"]); debug_paths.update(detail["debug_paths"]); debug_paths.update(color_score["debug_paths"]); debug_paths.update(components["debug_paths"])
     return {
         "structure_only_score": structure["score"],
         "detail_zones_score": detail["score"],
@@ -1705,6 +2069,21 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
         "tolerated_findings": tolerated,
         "product_integrity_debug_paths": debug_paths,
         "detail_zone_scores": zone_scores,
+        "component_scores": component_values,
+        "headlight_score": headlight_score,
+        "headlight_diff": headlight_diff,
+        "light_signature_score": light_signature_score,
+        "front_light_signature_score": light_signature_score,
+        "front_wheel_score": front_wheel_score,
+        "rear_wheel_score": rear_wheel_score,
+        "wheel_tire_score": wheel_tire_score,
+        "tire_score": wheel_tire_score,
+        "grille_score": grille_score,
+        "emblem_score": emblem_score,
+        "window_line_score": window_line_score,
+        "silhouette_score": silhouette_score,
+        "critical_component_detected": bool(critical_component_names),
+        "critical_component_names": critical_component_names,
         "product_integrity_interpretation": interpretation,
         "decision_reason": decision_reason,
         "contour_warning_reason": contour_warning_reason,
@@ -1994,6 +2373,17 @@ def evaluate_pair(
     ref_car_mask = car_masks.get("ref_mask")
     gen_car_mask = car_masks.get("gen_mask")
     car_focus_mask = car_masks.get("car_mask")
+    validate_same_spatial_size(
+        {
+            "ref_norm": ref_norm,
+            "gen_norm": gen_norm,
+            "final_vehicle_mask": car_focus_mask,
+            "ref_vehicle_mask": ref_car_mask,
+            "gen_vehicle_mask": gen_car_mask,
+            "content_mask": valid_content_mask,
+        },
+        "Vollbild-Masken nach Normalisierung",
+    )
 
     reflection_scope_mask = car_focus_mask if car_focus_mask is not None and np.any(car_focus_mask) else valid_content_mask
     mercedes_weight_profile = mercedes_weight_profile or load_mercedes_weight_profile()
@@ -2024,7 +2414,59 @@ def evaluate_pair(
         glass_interior_mask=glass_region_masks["interior"],
         content_mask=valid_content_mask,
     )
-    combined_weight_map = mercedes_weight_map * reflection_weight_map if mercedes_profile_enabled else mercedes_weight_map
+    validate_same_spatial_size(
+        {
+            "mercedes_weight": mercedes_weight_map,
+            "reflection_weight": reflection_weight_map,
+            "glass_interior_mask": glass_region_masks["interior"],
+            "weighted_lpips_scope": weighted_scope_mask,
+            "ref_norm": ref_norm,
+            "gen_norm": gen_norm,
+        },
+        "Weighted-LPIPS-Eingaben",
+    )
+    reflection_scope_bool = prepare_metric_mask(reflection_scope_mask, ref_norm, gen_norm)
+    if reflection_scope_bool is None:
+        reflection_scope_bool = reflection_weight_map > 0
+    critical_component_zones = build_critical_component_zones(reflection_scope_bool, ref_norm.shape[:2])
+    critical_component_mask = (
+        critical_component_zones["headlight_zone"]
+        | critical_component_zones["light_signature_zone"]
+        | critical_component_zones["grille_zone"]
+        | critical_component_zones["emblem_zone"]
+        | critical_component_zones["front_wheel_zone"]
+        | critical_component_zones["rear_wheel_zone"]
+        | critical_component_zones["tire_zone"]
+        | critical_component_zones["window_line_zone"]
+    )
+    protected_reflection_weight_map = np.where(critical_component_mask, 1.0, reflection_weight_map)
+    protected_mercedes_weight_map = np.where(
+        critical_component_mask,
+        np.maximum(mercedes_weight_map, float(mercedes_weight_profile.get("critical_component_weight_floor", 1.65))),
+        mercedes_weight_map,
+    )
+    front_detail_mask = (
+        critical_component_zones["headlight_zone"]
+        | critical_component_zones["light_signature_zone"]
+        | critical_component_zones["grille_zone"]
+        | critical_component_zones["emblem_zone"]
+    )
+    wheel_detail_mask = (
+        critical_component_zones["front_wheel_zone"]
+        | critical_component_zones["rear_wheel_zone"]
+        | critical_component_zones["tire_zone"]
+    )
+    protected_mercedes_weight_map = np.where(
+        front_detail_mask,
+        np.maximum(protected_mercedes_weight_map, float(mercedes_weight_profile.get("critical_front_detail_weight_floor", 2.10))),
+        protected_mercedes_weight_map,
+    )
+    protected_mercedes_weight_map = np.where(
+        wheel_detail_mask,
+        np.maximum(protected_mercedes_weight_map, float(mercedes_weight_profile.get("critical_wheel_weight_floor", 1.80))),
+        protected_mercedes_weight_map,
+    )
+    combined_weight_map = protected_mercedes_weight_map * protected_reflection_weight_map if mercedes_profile_enabled else protected_mercedes_weight_map
     if weighted_scope_mask is not None:
         combined_weight_map = np.where(weighted_scope_mask, combined_weight_map, 0.0)
     weighted_debug = compute_weighted_lpips_from_map(
@@ -2034,19 +2476,19 @@ def evaluate_pair(
         eps=eps,
         return_debug=True,
     )
-    weighted_mercedes_lpips = weighted_debug["value"]
-    reflection_robust_lpips = weighted_mercedes_lpips
-    weighted_mercedes_lpips_similarity_percent = convert_lpips_to_similarity_percent(weighted_mercedes_lpips)
-    reflection_robust_lpips_similarity_percent = convert_lpips_to_similarity_percent(reflection_robust_lpips)
-    final_similarity_score = reflection_robust_lpips_similarity_percent
+    # Legacy/Debug: Der gewichtete LPIPS-Durchschnitt bleibt nur zur Diagnose und
+    # für Debug-Karten erhalten. Er ist keine Hauptmetrik und keine
+    # Entscheidungsgrundlage mehr; Product-Integrity liefert die fachliche Bewertung.
+    legacy_debug_weighted_lpips_raw = weighted_debug["value"]
+    legacy_debug_weighted_lpips_similarity_percent = convert_lpips_to_similarity_percent(legacy_debug_weighted_lpips_raw)
+    legacy_reflection_robust_lpips_raw = legacy_debug_weighted_lpips_raw
+    legacy_reflection_robust_lpips_similarity_percent = legacy_debug_weighted_lpips_similarity_percent
+    final_similarity_score = None
     active_weights = combined_weight_map[combined_weight_map > 0]
     reflection_weight_mean = float(np.mean(active_weights)) if active_weights.size else None
     reflection_weight_min = float(np.min(active_weights)) if active_weights.size else None
     downweight_threshold = float(mercedes_weight_profile.get("downweight_threshold", 0.75))
-    reflection_scope_bool = prepare_metric_mask(reflection_scope_mask, ref_norm, gen_norm)
-    if reflection_scope_bool is None:
-        reflection_scope_bool = reflection_weight_map > 0
-    reflection_downweight_area_ratio = float(np.sum(reflection_scope_bool & (reflection_weight_map > 0) & (reflection_weight_map < downweight_threshold)) / max(float(np.sum(reflection_scope_bool)), 1.0))
+    reflection_downweight_area_ratio = float(np.sum(reflection_scope_bool & ~critical_component_mask & (reflection_weight_map > 0) & (reflection_weight_map < downweight_threshold)) / max(float(np.sum(reflection_scope_bool)), 1.0))
     scope_area = max(float(np.sum(reflection_scope_bool)), 1.0)
     glass_interior_area_ratio = float(np.sum(glass_region_masks["interior"]) / scope_area)
     glass_contour_area_ratio = float(np.sum(glass_region_masks["contour"]) / scope_area)
@@ -2066,8 +2508,14 @@ def evaluate_pair(
     )
     reflection_weight_map_path = None
     mercedes_weight_map_path = None
+    critical_component_mask_path = None
     glass_interior_mask_path = None
     window_contour_mask_path = None
+    window_candidate_region_path = None
+    window_surface_mask_path = None
+    window_line_mask_path = None
+    overlay_window_contour_ref_path = None
+    overlay_window_contour_gen_path = None
     weighted_lpips_map_path = None
     effective_weight_map_path = None
     if debug_dir:
@@ -2075,14 +2523,26 @@ def evaluate_pair(
         stem = Path(ref_path).stem
         reflection_weight_map_path = str(debug_path / f"{stem}_reflection_downweight.png")
         mercedes_weight_map_path = str(debug_path / f"{stem}_mercedes_weight.png")
+        critical_component_mask_path = str(debug_path / f"{stem}_critical_component_mask.png")
         glass_interior_mask_path = str(debug_path / f"{stem}_glass_interior_mask.png")
         window_contour_mask_path = str(debug_path / f"{stem}_window_contour_mask.png")
+        window_candidate_region_path = str(debug_path / f"{stem}_window_candidate_region.png")
+        window_surface_mask_path = str(debug_path / f"{stem}_window_surface_mask.png")
+        window_line_mask_path = str(debug_path / f"{stem}_window_line_mask.png")
+        overlay_window_contour_ref_path = str(debug_path / f"{stem}_overlay_window_contour_on_ref.png")
+        overlay_window_contour_gen_path = str(debug_path / f"{stem}_overlay_window_contour_on_gen.png")
         weighted_lpips_map_path = str(debug_path / f"{stem}_weighted_lpips_map.png")
         effective_weight_map_path = str(debug_path / f"{stem}_weighted_lpips_effective_weight.png")
         save_weight_debug_map(mask_debug_map_to_vehicle(reflection_weight_map, reflection_scope_bool), Path(reflection_weight_map_path))
-        save_weight_debug_map(mask_debug_map_to_vehicle(mercedes_weight_map, reflection_scope_bool), Path(mercedes_weight_map_path))
+        save_weight_debug_map(mask_debug_map_to_vehicle(protected_mercedes_weight_map, reflection_scope_bool), Path(mercedes_weight_map_path))
+        save_mask_image(critical_component_mask, Path(critical_component_mask_path))
         save_mask_image(glass_region_masks["interior"], Path(glass_interior_mask_path))
         save_mask_image(glass_region_masks["contour"], Path(window_contour_mask_path))
+        save_mask_image(glass_region_masks["window_candidate_region"], Path(window_candidate_region_path))
+        save_mask_image(glass_region_masks["surface"], Path(window_surface_mask_path))
+        save_mask_image(glass_region_masks["line"], Path(window_line_mask_path))
+        save_mask_overlay(ref_norm, glass_region_masks["contour"], Path(overlay_window_contour_ref_path))
+        save_mask_overlay(gen_norm, glass_region_masks["contour"], Path(overlay_window_contour_gen_path))
         save_weight_debug_map(weighted_debug["weighted_map"], Path(weighted_lpips_map_path))
         save_weight_debug_map(weighted_debug["effective_weight_map"], Path(effective_weight_map_path))
 
@@ -2129,6 +2589,7 @@ def evaluate_pair(
         debug_dir=debug_dir,
         stem=basename,
         mask_metrics=geometric,
+        lpips_component_map=lpips_map,
     )
 
     print("------------------------------------------------------------")
@@ -2156,18 +2617,18 @@ def evaluate_pair(
         print(f"  LPIPS Spatial map  : {lpips_spatial_path}")
     print(f"  LPIPS foreground   : {lpips_foreground:.6f}")
     print(f"  LPIPS foreground % : {format_percent(lpips_foreground_similarity_percent)}")
-    print(f"  Weighted Mercedes LPIPS : {weighted_mercedes_lpips:.6f}")
-    print(f"  Weighted Mercedes LPIPS % : {format_percent(weighted_mercedes_lpips_similarity_percent)}")
-    print(f"  Weighted raw direction : LPIPS-Distanz niedriger ist besser; UI-% höher ist besser")
-    print(f"  Weighted active area   : {weighted_debug['active_area_ratio'] * 100.0:.2f}%")
+    print(f"  Legacy weighted LPIPS(debug): {legacy_debug_weighted_lpips_raw:.6f}")
+    print(f"  Legacy weighted area(debug) : {weighted_debug['active_area_ratio'] * 100.0:.2f}%")
     print(f"  Glass interior excluded: {glass_interior_area_ratio * 100.0:.2f}%")
-    print(f"  Reflection robust LPIPS : {reflection_robust_lpips:.6f}")
-    print(f"  Final similarity score  : {format_percent(final_similarity_score)}")
     print(f"  Product Integrity Score : {product_integrity['product_integrity_score']:.2f}%")
     print(f"  Product Integrity       : {product_integrity['product_integrity_decision']}")
     print(f"  Structure-only Score    : {product_integrity['structure_only_score']:.2f}%")
     print(f"  Detail-zones Score      : {product_integrity['detail_zones_score']:.2f}%")
     print(f"  Color-reflection Score  : {product_integrity['color_reflection_score']:.2f}%")
+    print(f"  Headlight Score         : {product_integrity['headlight_score']:.2f}%")
+    print(f"  Front Wheel Score       : {product_integrity['front_wheel_score']:.2f}%")
+    print(f"  Rear Wheel Score        : {product_integrity['rear_wheel_score']:.2f}%")
+    print(f"  Critical Components     : {', '.join(product_integrity['critical_component_names']) or 'keine'}")
     if segmenter is not None:
         print(f"  Mask area (%)      : {car_metrics['debug']['mask_area_ratio'] * 100.0:.2f}%")
         print(f"  BBox (Metrik)      : {car_metrics['debug']['metric_bbox']}")
@@ -2215,11 +2676,11 @@ def evaluate_pair(
         "lpips_car_only": car_metrics["lpips_car_only"],
         "car_only_lpips": car_metrics["lpips_car_only"],
         "lpips_car_only_similarity_percent": lpips_car_only_similarity_percent,
-        "weighted_mercedes_lpips": weighted_mercedes_lpips,
-        "weighted_mercedes_lpips_similarity_percent": weighted_mercedes_lpips_similarity_percent,
-        "reflection_robust_lpips": reflection_robust_lpips,
-        "reflection_robust_lpips_similarity_percent": reflection_robust_lpips_similarity_percent,
-        "final_similarity_score": final_similarity_score,
+        "legacy_debug_weighted_lpips_raw": legacy_debug_weighted_lpips_raw,
+        "legacy_debug_weighted_lpips_similarity_percent": legacy_debug_weighted_lpips_similarity_percent,
+        "legacy_reflection_robust_lpips_raw": legacy_reflection_robust_lpips_raw,
+        "legacy_reflection_robust_lpips_similarity_percent": legacy_reflection_robust_lpips_similarity_percent,
+        "final_similarity_score": product_integrity["product_integrity_score"],
         "lpips_raw": lpips_val,
         "lpips_score": percent_metrics["lpips_similarity_percent"],
         "car_only_lpips_raw": car_metrics["lpips_car_only"],
@@ -2231,6 +2692,20 @@ def evaluate_pair(
         "product_integrity_decision": product_integrity["product_integrity_decision"],
         "critical_findings": json.dumps(product_integrity["critical_findings"], ensure_ascii=False),
         "tolerated_findings": json.dumps(product_integrity["tolerated_findings"], ensure_ascii=False),
+        "headlight_score": product_integrity["headlight_score"],
+        "headlight_diff": product_integrity["headlight_diff"],
+        "light_signature_score": product_integrity["light_signature_score"],
+        "front_light_signature_score": product_integrity["front_light_signature_score"],
+        "front_wheel_score": product_integrity["front_wheel_score"],
+        "rear_wheel_score": product_integrity["rear_wheel_score"],
+        "wheel_tire_score": product_integrity["wheel_tire_score"],
+        "tire_score": product_integrity["tire_score"],
+        "grille_score": product_integrity["grille_score"],
+        "emblem_score": product_integrity["emblem_score"],
+        "window_line_score": product_integrity["window_line_score"],
+        "silhouette_score": product_integrity["silhouette_score"],
+        "critical_component_detected": product_integrity["critical_component_detected"],
+        "critical_component_names": json.dumps(product_integrity["critical_component_names"], ensure_ascii=False),
         "product_integrity_profile": product_integrity_profile.get("name", DEFAULT_PRODUCT_INTEGRITY_PROFILE_NAME),
         "product_integrity_debug_paths": json.dumps(product_integrity["product_integrity_debug_paths"], sort_keys=True),
         "product_integrity_interpretation": product_integrity["product_integrity_interpretation"],
@@ -2252,8 +2727,14 @@ def evaluate_pair(
         "weighted_lpips_region_contributions": json.dumps(weighted_lpips_region_contributions, sort_keys=True),
         "reflection_weight_map_path": reflection_weight_map_path,
         "mercedes_weight_map_path": mercedes_weight_map_path,
+        "critical_component_mask_path": critical_component_mask_path,
         "glass_interior_mask_path": glass_interior_mask_path,
         "window_contour_mask_path": window_contour_mask_path,
+        "window_candidate_region_path": window_candidate_region_path,
+        "window_surface_mask_path": window_surface_mask_path,
+        "window_line_mask_path": window_line_mask_path,
+        "overlay_window_contour_ref_path": overlay_window_contour_ref_path,
+        "overlay_window_contour_gen_path": overlay_window_contour_gen_path,
         "weighted_lpips_map_path": weighted_lpips_map_path,
         "effective_weight_map_path": effective_weight_map_path,
         "ssim_car_only": car_metrics["ssim_car_only"],
@@ -2379,9 +2860,9 @@ def evaluate_folders(
                 "delta_e_similarity_percent",
                 "lpips_car_only",
                 "lpips_car_only_similarity_percent",
-                "weighted_mercedes_lpips",
-                "reflection_robust_lpips",
                 "final_similarity_score",
+                "product_integrity_score",
+                "product_integrity_decision",
                 "mask_iou",
                 "mask_dice",
             ]

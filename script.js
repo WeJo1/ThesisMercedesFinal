@@ -41,9 +41,6 @@ const mercedesProfileStatus = document.getElementById('mercedesProfileStatus');
 const ssim = document.getElementById('ssim');
 const deltaE = document.getElementById('deltaE');
 const lpipsCar = document.getElementById('lpipsCar');
-const weightedMercedesLpips = document.getElementById('weightedMercedesLpips');
-const reflectionRobustLpips = document.getElementById('reflectionRobustLpips');
-const finalSimilarityScore = document.getElementById('finalSimilarityScore');
 const structureOnlyScore = document.getElementById('structureOnlyScore');
 const detailZonesScore = document.getElementById('detailZonesScore');
 const colorReflectionScore = document.getElementById('colorReflectionScore');
@@ -1330,15 +1327,6 @@ function renderMetrics(data) {
   lpipsCar.textContent = hasCarOnlyMetric
     ? formatMetricPair(data.lpips_car_only, data.lpips_car_only_similarity_percent)
     : '--';
-  weightedMercedesLpips.textContent = formatMetricPair(
-    data.weighted_mercedes_lpips,
-    data.weighted_mercedes_lpips_similarity_percent,
-    deriveLpipsSimilarityPercent(data.weighted_mercedes_lpips),
-  );
-  reflectionRobustLpips.textContent = formatMetricPair(
-    data.reflection_robust_lpips,
-    data.reflection_robust_lpips_similarity_percent,
-  );
   structureOnlyScore.textContent = formatScore(data.structure_only_score);
   detailZonesScore.textContent = formatScore(data.detail_zones_score);
   colorReflectionScore.textContent = formatScore(data.color_reflection_score);
@@ -1349,8 +1337,6 @@ function renderMetrics(data) {
   }
   renderFindingsList(criticalFindings, data.critical_findings, 'Keine kritischen Produktabweichungen erkannt.');
   renderFindingsList(toleratedFindings, data.tolerated_findings, 'Keine tolerierten Reflexions-/Lichthinweise.');
-  const finalScore = Number(data.final_similarity_score);
-  finalSimilarityScore.textContent = Number.isNaN(finalScore) ? '--' : `${finalScore.toFixed(2)} %`;
   if (hasCarMaskMetrics) {
     setMetric(maskIou, data.mask_iou);
     setMetric(maskDice, data.mask_dice);
@@ -1646,7 +1632,7 @@ function resetInterface() {
   comparisonSection.hidden = true;
   comparisonList.innerHTML = '';
 
-  [lpipsValue, mercedesProfileStatus, ssim, deltaE, lpipsCar, weightedMercedesLpips, reflectionRobustLpips, finalSimilarityScore, maskIou, maskDice].forEach((node) => {
+  [lpipsValue, mercedesProfileStatus, ssim, deltaE, lpipsCar, maskIou, maskDice].forEach((node) => {
     node.textContent = node.id.includes('Similarity') ? '-- %' : '--';
   });
 
