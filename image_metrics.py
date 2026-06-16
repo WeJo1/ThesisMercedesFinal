@@ -1489,8 +1489,8 @@ def apply_masked_car_crop(img, mask, bbox):
     return masked_crop, mask_crop
 
 
-def validate_binary_mask(mask, name="mask", min_area_px=1, max_hole_ratio=0.18):
-    """Validiere eine Fahrzeug-/Zonenmaske und melde typische Pipeline-Defekte früh."""
+def measure_binary_mask(mask, name="mask", min_area_px=1):
+    """Miss Fläche, Bounding-Box und eingeschlossene Löcher einer Binärmaske."""
     mask_bool = np.asarray(mask, dtype=bool)
     if mask_bool.ndim != 2:
         raise ValueError(f"{name} muss zweidimensional sein, erhalten: {mask_bool.shape}.")
@@ -1502,17 +1502,36 @@ def validate_binary_mask(mask, name="mask", min_area_px=1, max_hole_ratio=0.18):
     bbox_area = max(int(roi.size), 1)
     filled_roi = fill_holes_smaller_than(roi, bbox_area)
     holes = filled_roi & ~roi
-    hole_ratio = float(np.sum(holes) / max(float(area), 1.0))
-    if hole_ratio > float(max_hole_ratio):
-        raise ValueError(
-            f"{name} enthält unplausibel große Löcher ({hole_ratio:.2%} der Maskenfläche). "
-            "Prüfe boolesche Maskenkombinationen, Polygon-Fills und Crop/Resize-Koordinaten."
-        )
+    hole_area = int(np.sum(holes))
+    hole_ratio = float(hole_area / max(float(area), 1.0))
     return {
         "area_px": area,
         "bbox": (x0, y0, x1, y1),
+        "hole_area_px": hole_area,
         "hole_ratio": hole_ratio,
     }
+
+
+def fill_enclosed_mask_holes(mask):
+    """Fülle eingeschlossene Löcher innerhalb der Masken-Bounding-Box."""
+    mask_bool = np.asarray(mask, dtype=bool).copy()
+    x0, y0, x1, y1 = compute_mask_roi_bbox(mask_bool, mask_bool.shape)
+    roi = mask_bool[y0:y1, x0:x1]
+    if roi.size == 0:
+        return mask_bool
+    mask_bool[y0:y1, x0:x1] = fill_holes_smaller_than(roi, max(int(roi.size), 1))
+    return mask_bool
+
+
+def validate_binary_mask(mask, name="mask", min_area_px=1, max_hole_ratio=0.18):
+    """Validiere eine Fahrzeug-/Zonenmaske und melde typische Pipeline-Defekte früh."""
+    stats = measure_binary_mask(mask, name=name, min_area_px=min_area_px)
+    if max_hole_ratio is not None and stats["hole_ratio"] > float(max_hole_ratio):
+        raise ValueError(
+            f"{name} enthält unplausibel große Löcher ({stats['hole_ratio']:.2%} der Maskenfläche). "
+            "Prüfe boolesche Maskenkombinationen, Polygon-Fills und Crop/Resize-Koordinaten."
+        )
+    return stats
 
 
 def save_mask_image(mask, path):
@@ -1603,7 +1622,20 @@ def compute_car_only_metrics(
         max_hole_area=mask_max_hole_area,
         trim_px=mask_trim_px,
     )
-    validate_binary_mask(mask, "final_vehicle_mask", min_area_px=max(1, int(min_mask_area) + 1))
+    mask_validation = measure_binary_mask(mask, "final_vehicle_mask", min_area_px=max(1, int(min_mask_area) + 1))
+    mask_holes_repaired = False
+    if mask_validation["hole_ratio"] > 0.18:
+        # Große, komplett eingeschlossene Löcher entstehen bei Fahrzeugsegmentierungen
+        # häufig durch Fenster, Felgen oder Reflexionen. Repariere diese Fälle, statt
+        # den gesamten Lauf abzubrechen; echte leere/zu kleine Masken bleiben Fehler.
+        mask = fill_enclosed_mask_holes(mask)
+        mask_holes_repaired = True
+        mask_validation = validate_binary_mask(
+            mask,
+            "final_vehicle_mask",
+            min_area_px=max(1, int(min_mask_area) + 1),
+            max_hole_ratio=None,
+        )
 
     mask_area = int(np.sum(mask))
     total_area = int(mask.size)
@@ -1621,6 +1653,13 @@ def compute_car_only_metrics(
             "min_object_area": mask_min_object_area,
             "max_hole_area": mask_max_hole_area,
             "trim_px": mask_trim_px,
+        },
+        "mask_validation": {
+            "area_px": mask_validation["area_px"],
+            "bbox": mask_validation["bbox"],
+            "hole_area_px": mask_validation["hole_area_px"],
+            "hole_ratio": mask_validation["hole_ratio"],
+            "holes_repaired": mask_holes_repaired,
         },
     }
     if mask_area <= int(min_mask_area):
