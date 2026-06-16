@@ -49,6 +49,7 @@ const detailZonesScore = document.getElementById('detailZonesScore');
 const colorReflectionScore = document.getElementById('colorReflectionScore');
 const productIntegrityScore = document.getElementById('productIntegrityScore');
 const productIntegrityDecision = document.getElementById('productIntegrityDecision');
+const productIntegrityInterpretation = document.getElementById('productIntegrityInterpretation');
 const criticalFindings = document.getElementById('criticalFindings');
 const toleratedFindings = document.getElementById('toleratedFindings');
 const maskIou = document.getElementById('maskIou');
@@ -1343,6 +1344,9 @@ function renderMetrics(data) {
   colorReflectionScore.textContent = formatScore(data.color_reflection_score);
   productIntegrityScore.textContent = formatScore(data.product_integrity_score);
   productIntegrityDecision.textContent = data.product_integrity_decision || '--';
+  if (productIntegrityInterpretation) {
+    productIntegrityInterpretation.textContent = data.product_integrity_interpretation || data.decision_reason || 'Keine Interpretation verfügbar.';
+  }
   renderFindingsList(criticalFindings, data.critical_findings, 'Keine kritischen Produktabweichungen erkannt.');
   renderFindingsList(toleratedFindings, data.tolerated_findings, 'Keine tolerierten Reflexions-/Lichthinweise.');
   const finalScore = Number(data.final_similarity_score);

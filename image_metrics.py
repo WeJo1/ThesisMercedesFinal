@@ -84,8 +84,8 @@ DEFAULT_PRODUCT_INTEGRITY_PROFILE = {
     "weights": {
         "structure_only_score": 0.45,
         "detail_zones_score": 0.40,
-        "color_reflection_score": 0.10,
-        "car_only_lpips_score": 0.05,
+        "color_reflection_score": 0.05,
+        "car_only_lpips_score": 0.10,
     },
     "thresholds": {
         "passed_product_integrity_min": 90.0,
@@ -97,6 +97,16 @@ DEFAULT_PRODUCT_INTEGRITY_PROFILE = {
         "warning_color_reflection_max": 78.0,
         "critical_zone_score_max": 78.0,
         "warning_zone_score_max": 90.0,
+        "soft_pass_product_integrity_min": 88.0,
+    },
+    "contour_warning": {
+        "high_iou_min": 0.98,
+        "high_dice_min": 0.99,
+        "critical_zone_score_max": 72.0,
+        "warning_zone_score_max": 86.0,
+        "max_hausdorff_norm": 0.018,
+        "max_centroid_norm": 0.006,
+        "max_area_ratio_delta": 0.025,
     },
     "reflection_tolerance": {
         "low_edge_difference_bonus": 0.35,
@@ -155,6 +165,13 @@ CSV_COLUMN_ORDER = [
     "tolerated_findings",
     "product_integrity_profile",
     "product_integrity_debug_paths",
+    "product_integrity_interpretation",
+    "decision_reason",
+    "contour_warning_reason",
+    "glass_mask_area_ratio",
+    "window_contour_area_ratio",
+    "detail_zone_area_ratio",
+    "structure_masked_area_ratio",
     "mercedes_profile_enabled",
     "used_weight_profile",
     "reflection_weight_mean",
@@ -213,6 +230,10 @@ CSV_FLOAT_COLUMNS = [
     "reflection_weight_mean",
     "reflection_weight_min",
     "reflection_downweight_area_ratio",
+    "glass_mask_area_ratio",
+    "window_contour_area_ratio",
+    "detail_zone_area_ratio",
+    "structure_masked_area_ratio",
     "ssim_car_only",
     "mask_iou",
     "mask_dice",
@@ -921,6 +942,15 @@ def save_weight_debug_map(weight_map, path):
     Image.fromarray(np.clip(arr * 255.0, 0, 255).astype(np.uint8), mode="L").save(path)
 
 
+def mask_debug_map_to_vehicle(values, vehicle_mask):
+    """Setze Debugwerte außerhalb des Fahrzeugbereichs auf Schwarz."""
+    arr = np.asarray(values, dtype=np.float32)
+    metric_mask = prepare_metric_mask(vehicle_mask, arr[..., None] if arr.ndim == 2 else arr, arr[..., None] if arr.ndim == 2 else arr)
+    if metric_mask is None:
+        return arr
+    return np.where(metric_mask, arr, 0.0)
+
+
 def compute_lpips_on_content(ref, gen, content_mask, lpips_model, use_gpu=False, mask_downsample="bilinear", eps=1e-8):
     metric_mask = prepare_metric_mask(content_mask, ref, gen)
     if metric_mask is None:
@@ -1505,7 +1535,8 @@ def compute_structure_only_score(ref, gen, mask=None, debug_dir=None, stem="pair
         save_weight_debug_map(ref_edge, Path(paths["structure_ref_edges"]))
         save_weight_debug_map(gen_edge, Path(paths["structure_gen_edges"]))
         save_weight_debug_map(diff, Path(paths["structure_diff"]))
-    return {"score": score, "diff_map": diff, "ref_edge": ref_edge, "gen_edge": gen_edge, "debug_paths": paths}
+    structure_area_ratio = float(np.sum(structure_mask) / max(float(structure_mask.size), 1.0))
+    return {"score": score, "diff_map": diff, "ref_edge": ref_edge, "gen_edge": gen_edge, "debug_paths": paths, "structure_masked_area_ratio": structure_area_ratio}
 
 
 def compute_detail_zones_score(ref, gen, mask=None, profile=None, structure_debug=None, debug_dir=None, stem="pair"):
@@ -1538,7 +1569,12 @@ def compute_detail_zones_score(ref, gen, mask=None, profile=None, structure_debu
             merged = np.maximum(merged, zone.astype(np.float32) * (i / max(len(zones), 1)))
         paths["detail_zones_mask"] = str(Path(debug_dir) / f"{stem}_detail_zones_mask.png")
         save_weight_debug_map(merged, Path(paths["detail_zones_mask"]))
-    return {"score": score, "zone_scores": zone_scores, "zones": zones, "debug_paths": paths}
+    merged_zone = np.zeros(ref.shape[:2], dtype=bool)
+    for zone in zones.values():
+        merged_zone |= np.asarray(zone, dtype=bool)
+    metric_area = max(float(np.sum(metric_mask)) if metric_mask is not None else float(ref.shape[0] * ref.shape[1]), 1.0)
+    detail_zone_area_ratio = float(np.sum(merged_zone) / metric_area)
+    return {"score": score, "zone_scores": zone_scores, "zones": zones, "debug_paths": paths, "detail_zone_area_ratio": detail_zone_area_ratio}
 
 
 def compute_color_reflection_score(ref, gen, mask=None, edge_diff=None, debug_dir=None, stem="pair"):
@@ -1560,7 +1596,7 @@ def compute_color_reflection_score(ref, gen, mask=None, edge_diff=None, debug_di
     return {"score": score, "map": reflection_map, "debug_paths": paths}
 
 
-def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_score=None, profile=None, debug_dir=None, stem="pair"):
+def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_score=None, profile=None, debug_dir=None, stem="pair", mask_metrics=None):
     """Führe Structure, Detail-Zones, Color/Reflection und Car-only-LPIPS zur Produktintegrität zusammen."""
     profile = profile or DEFAULT_PRODUCT_INTEGRITY_PROFILE
     scope = car_mask if car_mask is not None and np.any(car_mask) else None
@@ -1581,8 +1617,27 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
             weight = float(weights.get(key, 0.0)); total += float(value) * weight; denom += weight
     product_score = float(total / denom) if denom else float(np.mean(list(component_scores.values())))
     thresholds = profile.get("thresholds", {})
+    contour_cfg = profile.get("contour_warning", {})
+    mask_metrics = mask_metrics or {}
+    mask_iou = mask_metrics.get("mask_iou")
+    mask_dice = mask_metrics.get("mask_dice")
+    hausdorff_norm = mask_metrics.get("hausdorff_norm")
+    centroid_norm = mask_metrics.get("centroid_distance_norm")
+    mask_area_ratio = mask_metrics.get("mask_area_ratio")
+    high_mask_overlap = (
+        mask_iou is not None
+        and mask_dice is not None
+        and float(mask_iou) >= float(contour_cfg.get("high_iou_min", 0.98))
+        and float(mask_dice) >= float(contour_cfg.get("high_dice_min", 0.99))
+    )
+    contour_geometric_relevant = (
+        (hausdorff_norm is not None and float(hausdorff_norm) > float(contour_cfg.get("max_hausdorff_norm", 0.018)))
+        or (centroid_norm is not None and float(centroid_norm) > float(contour_cfg.get("max_centroid_norm", 0.006)))
+        or (mask_area_ratio is not None and abs(float(mask_area_ratio) - 1.0) > float(contour_cfg.get("max_area_ratio_delta", 0.025)))
+    )
     critical = []
     tolerated = []
+    contour_warning_reason = "Keine relevante Konturabweichung erkannt."
     zone_scores = detail["zone_scores"]
     zone_labels = {
         "silhouette": "Abweichung an Fahrzeugkontur erkannt",
@@ -1593,20 +1648,52 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
         "center_grill_emblem": "mögliche Änderung an Kühlergrill oder Emblem erkannt",
     }
     for name, score in zone_scores.items():
+        if name == "silhouette":
+            local_strong = score < float(contour_cfg.get("critical_zone_score_max", 72.0))
+            local_notice = score < float(contour_cfg.get("warning_zone_score_max", 86.0))
+            if local_strong and (not high_mask_overlap or contour_geometric_relevant):
+                critical.append("Relevante Abweichung an Fahrzeugkontur erkannt")
+                contour_warning_reason = "Kontur lokal stark auffällig und Maskengeometrie produktrelevant verändert."
+            elif local_notice or (local_strong and high_mask_overlap):
+                tolerated.append("Geringe Rand- oder Konturabweichung bei hoher Maskenüberlappung toleriert")
+                contour_warning_reason = "Hohe Maskenüberlappung; lokale Randabweichung wird als nicht produktkritisch toleriert."
+            continue
         if score < float(thresholds.get("critical_zone_score_max", 78.0)):
             critical.append(zone_labels.get(name, f"Detailzone {name} auffällig"))
         elif score < float(thresholds.get("warning_zone_score_max", 90.0)):
             tolerated.append(zone_labels.get(name, f"Detailzone {name} leicht auffällig, manuelle Prüfung empfohlen"))
     if structure["score"] < float(thresholds.get("failed_structure_min", 80.0)):
         critical.append("Fahrzeugposition, Skalierung, Proportion oder Struktur deutlich abweichend")
-    if color_score["score"] < float(profile.get("reflection_tolerance", {}).get("tolerated_score_below", 82.0)):
-        tolerated.append("Reflexionsunterschiede auf Lack-/Glasflächen oder flächige Lichtabweichung erkannt")
+    reflection_cfg = profile.get("reflection_tolerance", {})
+    reflection_gap = min(structure["score"], detail["score"]) - color_score["score"]
+    stable_structure = structure["score"] >= 92.0 and (mask_iou is None or float(mask_iou) >= 0.98)
+    if color_score["score"] < float(reflection_cfg.get("tolerated_score_below", 82.0)) or reflection_gap >= 6.0 or stable_structure:
+        if color_score["score"] < structure["score"] - 3.0:
+            tolerated.append("Reflexions- oder Helligkeitsunterschied auf Glasfläche erkannt")
+        elif stable_structure and color_score["score"] < 92.0:
+            tolerated.append("Flächige Lichtabweichung ohne eindeutige Strukturänderung erkannt")
+    stable_pass_candidate = (
+        product_score >= float(thresholds.get("soft_pass_product_integrity_min", 88.0))
+        and structure["score"] >= float(thresholds.get("passed_structure_min", 90.0))
+        and detail["score"] >= float(thresholds.get("passed_detail_min", 88.0))
+        and component_scores["car_only_lpips_score"] >= 80.0
+        and not critical
+    )
     if product_score < float(thresholds.get("failed_product_integrity_min", 80.0)) or structure["score"] < float(thresholds.get("failed_structure_min", 80.0)) or detail["score"] < float(thresholds.get("failed_detail_min", 80.0)):
         decision = "failed"
-    elif product_score >= float(thresholds.get("passed_product_integrity_min", 90.0)) and structure["score"] >= float(thresholds.get("passed_structure_min", 90.0)) and detail["score"] >= float(thresholds.get("passed_detail_min", 88.0)) and not critical and not tolerated:
+    elif stable_pass_candidate or (product_score >= float(thresholds.get("passed_product_integrity_min", 90.0)) and component_scores["car_only_lpips_score"] >= 80.0 and not critical):
         decision = "passed"
     else:
         decision = "warning"
+    if critical:
+        interpretation = "Die Fahrzeugmaske und Detailzonen zeigen produktrelevante Abweichungen. Mindestens ein kritischer Struktur-, Kontur- oder Detailhinweis muss geprüft werden."
+        decision_reason = "critical_findings vorhanden oder Kernscore unter Fehlergrenze."
+    elif tolerated:
+        interpretation = "Die Fahrzeugmaske stimmt gut überein. Die Fahrzeugstruktur ist stabil. Erkannte Reflexions-, Helligkeits- oder geringe Randabweichungen werden toleriert; es liegt keine eindeutige Produktabweichung vor."
+        decision_reason = "Keine critical_findings; Abweichungen nur als tolerated_findings klassifiziert."
+    else:
+        interpretation = "Fahrzeugstruktur, Kontur und Detailzonen sind stabil. Es wurden keine produktrelevanten Abweichungen erkannt."
+        decision_reason = "Scores über den Pass-Schwellen und keine Findings."
     debug_paths = {}; debug_paths.update(structure["debug_paths"]); debug_paths.update(detail["debug_paths"]); debug_paths.update(color_score["debug_paths"])
     return {
         "structure_only_score": structure["score"],
@@ -1618,6 +1705,11 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
         "tolerated_findings": tolerated,
         "product_integrity_debug_paths": debug_paths,
         "detail_zone_scores": zone_scores,
+        "product_integrity_interpretation": interpretation,
+        "decision_reason": decision_reason,
+        "contour_warning_reason": contour_warning_reason,
+        "detail_zone_area_ratio": detail["detail_zone_area_ratio"],
+        "structure_masked_area_ratio": structure["structure_masked_area_ratio"],
     }
 
 def compute_delta_e(ref, gen):
@@ -1958,6 +2050,8 @@ def evaluate_pair(
     scope_area = max(float(np.sum(reflection_scope_bool)), 1.0)
     glass_interior_area_ratio = float(np.sum(glass_region_masks["interior"]) / scope_area)
     glass_contour_area_ratio = float(np.sum(glass_region_masks["contour"]) / scope_area)
+    glass_mask_area_ratio = float(np.sum(glass_region_masks["candidate"]) / scope_area)
+    window_contour_area_ratio = glass_contour_area_ratio
     weighted_lpips_region_contributions = summarize_weighted_lpips_regions(
         lpips_map,
         weighted_debug["effective_weight_map"],
@@ -1985,8 +2079,8 @@ def evaluate_pair(
         window_contour_mask_path = str(debug_path / f"{stem}_window_contour_mask.png")
         weighted_lpips_map_path = str(debug_path / f"{stem}_weighted_lpips_map.png")
         effective_weight_map_path = str(debug_path / f"{stem}_weighted_lpips_effective_weight.png")
-        save_weight_debug_map(reflection_weight_map, Path(reflection_weight_map_path))
-        save_weight_debug_map(mercedes_weight_map, Path(mercedes_weight_map_path))
+        save_weight_debug_map(mask_debug_map_to_vehicle(reflection_weight_map, reflection_scope_bool), Path(reflection_weight_map_path))
+        save_weight_debug_map(mask_debug_map_to_vehicle(mercedes_weight_map, reflection_scope_bool), Path(mercedes_weight_map_path))
         save_mask_image(glass_region_masks["interior"], Path(glass_interior_mask_path))
         save_mask_image(glass_region_masks["contour"], Path(window_contour_mask_path))
         save_weight_debug_map(weighted_debug["weighted_map"], Path(weighted_lpips_map_path))
@@ -2034,6 +2128,7 @@ def evaluate_pair(
         profile=product_integrity_profile,
         debug_dir=debug_dir,
         stem=basename,
+        mask_metrics=geometric,
     )
 
     print("------------------------------------------------------------")
@@ -2138,6 +2233,13 @@ def evaluate_pair(
         "tolerated_findings": json.dumps(product_integrity["tolerated_findings"], ensure_ascii=False),
         "product_integrity_profile": product_integrity_profile.get("name", DEFAULT_PRODUCT_INTEGRITY_PROFILE_NAME),
         "product_integrity_debug_paths": json.dumps(product_integrity["product_integrity_debug_paths"], sort_keys=True),
+        "product_integrity_interpretation": product_integrity["product_integrity_interpretation"],
+        "decision_reason": product_integrity["decision_reason"],
+        "contour_warning_reason": product_integrity["contour_warning_reason"],
+        "glass_mask_area_ratio": glass_mask_area_ratio,
+        "window_contour_area_ratio": window_contour_area_ratio,
+        "detail_zone_area_ratio": product_integrity["detail_zone_area_ratio"],
+        "structure_masked_area_ratio": product_integrity["structure_masked_area_ratio"],
         "mercedes_profile_enabled": mercedes_profile_enabled,
         "used_weight_profile": used_weight_profile,
         "reflection_weight_mean": reflection_weight_mean,
