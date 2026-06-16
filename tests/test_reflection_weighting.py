@@ -22,6 +22,93 @@ def test_reflection_areas_are_downweighted_but_edges_stay_high():
     assert float(np.mean(weights[10:30, 39:44])) > 0.78
 
 
+def test_reflection_downweight_detects_soft_vehicle_reflection_change():
+    ref = np.full((80, 140, 3), 0.42, dtype=np.float32)
+    gen = ref.copy()
+    car_mask = np.zeros((80, 140), dtype=bool)
+    car_mask[18:62, 15:125] = True
+    ref[48:58, 32:108] = [0.46, 0.48, 0.50]
+    gen[48:58, 32:108] = [0.66, 0.68, 0.74]
+    ref[:, :10] = 1.0
+    gen[:, :10] = 0.0
+
+    weights = im.build_reflection_downweight_map(ref, gen, car_mask=car_mask)
+    downweighted = car_mask & (weights > 0) & (weights < im.DEFAULT_MERCEDES_WEIGHT_PROFILE["downweight_threshold"])
+
+    assert float(np.sum(downweighted) / np.sum(car_mask)) > 0.05
+    assert np.max(weights[~car_mask]) == 0
+
+
+def test_reflection_color_difference_masks_background():
+    ref, mask = synthetic_car_pair()
+    gen = ref.copy()
+    gen[:18, :] = 1.0
+    gen[68:, :] = 0.0
+    gen[36:48, 45:95] = np.clip(gen[36:48, 45:95] + 0.18, 0.0, 1.0)
+
+    result = im.compute_color_reflection_score(ref, gen, mask=mask)
+
+    assert np.max(result["map"][~mask]) == 0
+    assert np.any(result["map"][mask] > 0)
+
+
+def synthetic_window_pair():
+    ref = np.full((100, 180, 3), 0.50, dtype=np.float32)
+    gen = ref.copy()
+    mask = np.zeros((100, 180), dtype=bool)
+    mask[20:82, 15:165] = True
+    ref[30:55, 35:85] = 0.18
+    ref[30:55, 90:145] = 0.22
+    gen[30:55, 35:85] = 0.72
+    gen[30:55, 90:145] = 0.66
+    ref[28:31, 32:148] = 0.03
+    gen[28:31, 32:148] = 0.03
+    ref[55:58, 35:145] = 0.03
+    gen[55:58, 35:145] = 0.03
+    return ref, gen, mask
+
+
+def test_glass_masks_cover_window_interiors_but_keep_contours_narrow():
+    ref, gen, mask = synthetic_window_pair()
+
+    glass_masks = im.build_glass_region_masks(ref, gen, car_mask=mask)
+
+    assert float(np.mean(glass_masks["interior"][32:53, 38:82])) > 0.55
+    assert float(np.mean(glass_masks["interior"][32:53, 94:142])) > 0.55
+    assert np.sum(glass_masks["contour"]) < np.sum(glass_masks["interior"])
+    assert np.sum(glass_masks["interior"] & ~mask) == 0
+
+
+def test_detail_zones_follow_edges_and_skip_glass_interiors():
+    ref, gen, mask = synthetic_window_pair()
+    glass_masks = im.build_glass_region_masks(ref, gen, car_mask=mask)
+
+    zones = im.build_detail_zone_masks(mask, ref.shape[:2], ref=ref, gen=gen, glass_masks=glass_masks)
+    detail_union = np.zeros(mask.shape, dtype=bool)
+    for zone in zones.values():
+        detail_union |= zone
+
+    assert float(np.sum(detail_union) / np.sum(mask)) < 0.45
+    assert np.sum(zones["window_line"] & glass_masks["contour"]) > 0
+    assert np.sum(detail_union & glass_masks["interior"]) == 0
+
+
+def test_window_reflection_is_tolerated_but_window_line_change_is_critical():
+    ref, gen, mask = synthetic_window_pair()
+
+    reflection_result = im.compute_product_integrity_scores(ref, gen, car_mask=mask, car_only_lpips_score=88.0)
+
+    assert reflection_result["detail_zones_score"] >= 88
+    assert reflection_result["tolerated_findings"]
+
+    changed = ref.copy()
+    changed[28:40, 32:148] = 0.50
+    line_result = im.compute_product_integrity_scores(ref, changed, car_mask=mask, car_only_lpips_score=70.0)
+
+    assert any("Fensterlinie" in item or "Dach" in item for item in line_result["critical_findings"])
+    assert line_result["product_integrity_decision"] in {"warning", "failed"}
+
+
 def test_product_critical_regions_keep_high_mercedes_weight():
     ref = np.full((100, 160, 3), 0.4, dtype=np.float32)
     gen = ref.copy()
@@ -204,6 +291,31 @@ def test_product_integrity_ignores_background_with_vehicle_mask():
     assert result["detail_zones_score"] > 99
     assert result["product_integrity_decision"] == "passed"
 
+
+def test_structure_debug_maps_mask_background_black(tmp_path):
+    ref, mask = synthetic_car_pair()
+    gen = ref.copy()
+    gen[:18, ::2] = 1.0
+    gen[68:, 1::2] = 0.0
+
+    result = im.compute_structure_only_score(ref, gen, mask=mask, debug_dir=tmp_path, stem="bg_only")
+
+    assert result["score"] > 99
+    assert np.max(result["ref_edge"][~mask]) == 0
+    assert np.max(result["gen_edge"][~mask]) == 0
+    assert np.max(result["diff_map"][~mask]) == 0
+
+
+def test_structure_score_resizes_vehicle_mask_for_metric_shape():
+    ref, mask = synthetic_car_pair()
+    gen = ref.copy()
+    gen[:18, :] = 1.0
+    small_mask = mask[::2, ::2]
+
+    result = im.compute_structure_only_score(ref, gen, mask=small_mask)
+
+    assert result["score"] > 99
+    assert result["diff_map"].shape == ref.shape[:2]
 
 def test_csv_and_preview_include_product_integrity_values(tmp_path):
     result = {
