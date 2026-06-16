@@ -122,6 +122,96 @@ DEFAULT_PRODUCT_INTEGRITY_PROFILE = {
         "center_grill_emblem": 1.20,
     },
 }
+
+FINDING_SEVERITY_RANK = {"tolerated": 0, "warning": 1, "critical": 2}
+
+FINDING_TEXTS = {
+    "headlight_light_signature": {
+        "critical": "Kritische Änderung an Scheinwerfer oder Lichtsignatur erkannt",
+        "warning": "Mögliche Änderung an Scheinwerfer oder Lichtsignatur erkannt",
+        "tolerated": "Mögliche Änderung an Scheinwerfer oder Lichtsignatur erkannt",
+    },
+    "grille_front_structure": {
+        "critical": "Mögliche Änderung am Kühlergrill erkannt",
+        "warning": "Mögliche Änderung am Kühlergrill erkannt",
+        "tolerated": "Mögliche Änderung am Kühlergrill erkannt",
+    },
+    "emblem_front_structure": {
+        "critical": "Mögliche Änderung an Mercedes-Stern oder Emblem erkannt",
+        "warning": "Mögliche Änderung an Mercedes-Stern oder Emblem erkannt",
+        "tolerated": "Mögliche Änderung an Mercedes-Stern oder Emblem erkannt",
+    },
+    "wheel_tire_structure": {
+        "critical": "Kritische Änderung an Felgen-, Reifen- oder Radstruktur erkannt",
+        "warning": "Kritische Änderung an Felgen-, Reifen- oder Radstruktur erkannt",
+        "tolerated": "Mögliche Änderung an Felgen-, Reifen- oder Radstruktur erkannt",
+    },
+    "window_line": {
+        "critical": "Fensterlinie oder Dach-/Säulenstruktur auffällig",
+        "warning": "Fensterlinie oder Dach-/Säulenstruktur auffällig",
+        "tolerated": "Fensterlinie oder Dach-/Säulenstruktur auffällig",
+    },
+    "body_line_door_gap": {
+        "critical": "Karosserielinie oder Türfuge auffällig",
+        "warning": "Karosserielinie oder Türfuge auffällig",
+        "tolerated": "Karosserielinie oder Türfuge auffällig",
+    },
+    "silhouette_contour": {
+        "critical": "Relevante Abweichung an Fahrzeugkontur erkannt",
+        "warning": "Geringe Rand- oder Konturabweichung bei hoher Maskenüberlappung toleriert",
+        "tolerated": "Geringe Rand- oder Konturabweichung bei hoher Maskenüberlappung toleriert",
+    },
+    "glass_reflection": {
+        "tolerated": "Reflexions- oder Helligkeitsunterschied auf Glasfläche erkannt",
+        "warning": "Reflexions- oder Helligkeitsunterschied auf Glasfläche erkannt",
+        "critical": "Reflexions- oder Helligkeitsunterschied auf Glasfläche erkannt",
+    },
+    "paint_reflection": {
+        "tolerated": "Flächige Lichtabweichung auf Lackfläche ohne eindeutige Strukturänderung erkannt",
+        "warning": "Flächige Lichtabweichung auf Lackfläche ohne eindeutige Strukturänderung erkannt",
+        "critical": "Flächige Lichtabweichung auf Lackfläche ohne eindeutige Strukturänderung erkannt",
+    },
+    "color_shift": {
+        "critical": "Farb- oder Helligkeitsabweichung mit Strukturbezug erkannt",
+        "warning": "Farb- oder Helligkeitsabweichung mit Strukturbezug erkannt",
+        "tolerated": "Farb- oder Helligkeitsabweichung erkannt",
+    },
+    "mask_alignment": {
+        "critical": "Fahrzeugposition, Skalierung, Proportion oder Struktur deutlich abweichend",
+        "warning": "Fahrzeugposition, Skalierung, Proportion oder Struktur deutlich abweichend",
+        "tolerated": "Fahrzeugposition, Skalierung, Proportion oder Struktur leicht abweichend",
+    },
+    "front_rear_structure": {
+        "critical": "Mögliche Änderung an Front-/Heck-Struktur erkannt",
+        "warning": "Mögliche Änderung an Front-/Heck-Struktur erkannt",
+        "tolerated": "Mögliche Änderung an Front-/Heck-Struktur erkannt",
+    },
+}
+
+def add_finding(findings, canonical_key, severity, source):
+    current = findings.get(canonical_key)
+    if current is None:
+        findings[canonical_key] = {"severity": severity, "sources": [source]}
+        return
+    if FINDING_SEVERITY_RANK.get(severity, 0) > FINDING_SEVERITY_RANK.get(current["severity"], 0):
+        current["severity"] = severity
+    if source not in current["sources"]:
+        current["sources"].append(source)
+
+def split_findings(findings):
+    specific_front = {"headlight_light_signature", "grille_front_structure", "emblem_front_structure"}
+    if "front_rear_structure" in findings and specific_front.intersection(findings):
+        findings.pop("front_rear_structure", None)
+    critical, tolerated = [], []
+    for key, item in findings.items():
+        severity = item["severity"]
+        text = FINDING_TEXTS.get(key, {}).get(severity, key)
+        if severity == "critical":
+            critical.append(text)
+        else:
+            tolerated.append(text)
+    return critical, tolerated
+
 CSV_COLUMN_ORDER = [
     "filename",
     "reference_width",
@@ -1862,11 +1952,13 @@ def compute_component_product_scores(ref, gen, mask=None, structure_debug=None, 
         debug_path = Path(debug_dir); debug_path.mkdir(parents=True, exist_ok=True)
         paths["critical_component_zones"] = str(debug_path / f"{stem}_critical_component_zones.png")
         paths["headlight_zone_diff"] = str(debug_path / f"{stem}_headlight_zone_diff.png")
-        paths["wheel_zones_diff"] = str(debug_path / f"{stem}_wheel_zones_diff.png")
+        paths["wheel_tire_zone_diff"] = str(debug_path / f"{stem}_wheel_tire_zone_diff.png")
+        paths["grille_zone_diff"] = str(debug_path / f"{stem}_grille_zone_diff.png")
         paths["component_attribution_map"] = str(debug_path / f"{stem}_component_attribution_map.png")
         save_weight_debug_map(zone_debug, Path(paths["critical_component_zones"]))
         save_weight_debug_map(np.where(zones["headlight"] | zones["front_light_signature"], component_diff_map, 0.0), Path(paths["headlight_zone_diff"]))
-        save_weight_debug_map(np.where(zones["wheel_tire"], component_diff_map, 0.0), Path(paths["wheel_zones_diff"]))
+        save_weight_debug_map(np.where(zones["wheel_tire"], component_diff_map, 0.0), Path(paths["wheel_tire_zone_diff"]))
+        save_weight_debug_map(np.where(zones["grille"], component_diff_map, 0.0), Path(paths["grille_zone_diff"]))
         save_weight_debug_map(attribution, Path(paths["component_attribution_map"]))
 
     return {
@@ -1874,6 +1966,8 @@ def compute_component_product_scores(ref, gen, mask=None, structure_debug=None, 
         "diffs": component_diffs,
         "zones": zones,
         "debug_paths": paths,
+        "component_diff_map": component_diff_map,
+        "component_attribution_map": attribution,
         "critical_component_mask": (
             zones["headlight"]
             | zones["front_light_signature"]
@@ -1928,6 +2022,7 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
         or (centroid_norm is not None and float(centroid_norm) > float(contour_cfg.get("max_centroid_norm", 0.006)))
         or (mask_area_ratio is not None and abs(float(mask_area_ratio) - 1.0) > float(contour_cfg.get("max_area_ratio_delta", 0.025)))
     )
+    findings = {}
     critical = []
     tolerated = []
     contour_warning_reason = "Keine relevante Konturabweichung erkannt."
@@ -1946,18 +2041,20 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
             local_strong = score < float(contour_cfg.get("critical_zone_score_max", 72.0))
             local_notice = score < float(contour_cfg.get("warning_zone_score_max", 86.0))
             if local_strong and (not high_mask_overlap or contour_geometric_relevant):
-                critical.append("Relevante Abweichung an Fahrzeugkontur erkannt")
+                add_finding(findings, "silhouette_contour", "critical", "detail_zone:silhouette")
                 contour_warning_reason = "Kontur lokal stark auffällig und Maskengeometrie produktrelevant verändert."
             elif local_notice or (local_strong and high_mask_overlap):
-                tolerated.append("Geringe Rand- oder Konturabweichung bei hoher Maskenüberlappung toleriert")
+                add_finding(findings, "silhouette_contour", "tolerated", "detail_zone:silhouette")
                 contour_warning_reason = "Hohe Maskenüberlappung; lokale Randabweichung wird als nicht produktkritisch toleriert."
             continue
         if score < float(thresholds.get("critical_zone_score_max", 78.0)):
-            critical.append(zone_labels.get(name, f"Detailzone {name} auffällig"))
+            zone_key = {"front_rear": "front_rear_structure", "wheels_tires": "wheel_tire_structure", "window_line": "window_line", "body_lines": "body_line_door_gap", "center_grill_emblem": "grille_front_structure"}.get(name, name)
+            add_finding(findings, zone_key, "critical", f"detail_zone:{name}")
         elif score < float(thresholds.get("warning_zone_score_max", 90.0)):
-            tolerated.append(zone_labels.get(name, f"Detailzone {name} leicht auffällig, manuelle Prüfung empfohlen"))
+            zone_key = {"front_rear": "front_rear_structure", "wheels_tires": "wheel_tire_structure", "window_line": "window_line", "body_lines": "body_line_door_gap", "center_grill_emblem": "grille_front_structure"}.get(name, name)
+            add_finding(findings, zone_key, "tolerated", f"detail_zone:{name}")
     if structure["score"] < float(thresholds.get("failed_structure_min", 80.0)):
-        critical.append("Fahrzeugposition, Skalierung, Proportion oder Struktur deutlich abweichend")
+        add_finding(findings, "mask_alignment", "critical", "structure_score")
 
     headlight_score = float(component_values.get("headlight_score", 100.0))
     headlight_diff = float(component_diffs.get("headlight", 0.0))
@@ -1992,38 +2089,88 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
     emblem_warning = emblem_score < float(thresholds.get("warning_emblem_score_max", 84.0)) and emblem_diff > front_diff_gate
 
     if headlight_failed:
-        critical.append("Kritische Änderung an Scheinwerfer oder Lichtsignatur erkannt")
+        add_finding(findings, "headlight_light_signature", "critical", "component:headlight")
         component_findings.append("Scheinwerfer/Lichtsignatur")
     if light_signature_failed and not headlight_failed:
-        critical.append("Kritische Änderung der Lichtsignatur erkannt")
+        add_finding(findings, "headlight_light_signature", "critical", "component:light_signature")
         component_findings.append("Lichtsignatur")
     if wheel_strong:
-        critical.append("Änderung an Felgen-, Reifen- oder Radstruktur erkannt")
+        add_finding(findings, "wheel_tire_structure", "critical", "component:wheel_tire")
         component_findings.append("Felgen/Reifen/Radstruktur")
     elif wheel_warning:
-        tolerated.append("Änderung an Felgen-, Reifen- oder Radstruktur erkannt")
+        add_finding(findings, "wheel_tire_structure", "tolerated", "component:wheel_tire")
         component_findings.append("Felgen/Reifen/Radstruktur")
     if grille_strong:
-        critical.append("Mögliche Änderung am Kühlergrill erkannt")
+        add_finding(findings, "grille_front_structure", "critical", "component:grille")
         component_findings.append("Kühlergrill")
     elif grille_warning:
-        tolerated.append("Mögliche Änderung am Kühlergrill erkannt")
+        add_finding(findings, "grille_front_structure", "tolerated", "component:grille")
         component_findings.append("Kühlergrill")
     if emblem_strong:
-        critical.append("Mögliche Änderung an markenspezifischem Frontbereich erkannt")
+        add_finding(findings, "emblem_front_structure", "critical", "component:emblem")
         component_findings.append("Mercedes-Stern/Emblem")
     elif emblem_warning:
-        tolerated.append("Mögliche Änderung an markenspezifischem Frontbereich erkannt")
+        add_finding(findings, "emblem_front_structure", "tolerated", "component:emblem")
         component_findings.append("Mercedes-Stern/Emblem")
 
     reflection_cfg = profile.get("reflection_tolerance", {})
-    reflection_gap = min(structure["score"], detail["score"]) - color_score["score"]
-    stable_structure = structure["score"] >= 92.0 and (mask_iou is None or float(mask_iou) >= 0.98)
-    if color_score["score"] < float(reflection_cfg.get("tolerated_score_below", 82.0)) or reflection_gap >= 6.0 or stable_structure:
-        if color_score["score"] < structure["score"] - 3.0:
-            tolerated.append("Reflexions- oder Helligkeitsunterschied auf Glasfläche erkannt")
-        elif stable_structure and color_score["score"] < 92.0:
-            tolerated.append("Flächige Lichtabweichung ohne eindeutige Strukturänderung erkannt")
+    reflection_weights = build_reflection_downweight_map(ref, gen, car_mask=scope)
+    downweight_threshold = float(reflection_cfg.get("downweight_threshold", DEFAULT_MERCEDES_WEIGHT_PROFILE.get("downweight_threshold", 0.92)))
+    reflection_candidate = reflection_weights < downweight_threshold
+    critical_component_mask = np.asarray(components["critical_component_mask"], dtype=bool)
+    glass_masks = build_glass_region_masks(ref, gen, car_mask=scope)
+    glass_surface_mask = glass_masks.get("surface", np.zeros(ref.shape[:2], dtype=bool))
+    paint_reflection_zone = (scope if scope is not None else np.ones(ref.shape[:2], dtype=bool)) & ~critical_component_mask & ~glass_masks.get("line", np.zeros(ref.shape[:2], dtype=bool))
+    allowed_reflection_zone = (glass_surface_mask | paint_reflection_zone) & ~critical_component_mask
+    accepted_reflection = reflection_candidate & allowed_reflection_zone
+    rejected_reflection = reflection_candidate & critical_component_mask
+    metric_area = max(float(np.sum(scope)) if scope is not None else float(ref.shape[0] * ref.shape[1]), 1.0)
+    reflection_downweight_area_ratio = float(np.sum(accepted_reflection) / metric_area)
+    accepted_structure_mean = masked_mean(structure["diff_map"], accepted_reflection, default=1.0)
+    has_reflection_evidence = (
+        reflection_downweight_area_ratio >= float(reflection_cfg.get("min_downweight_area_ratio", 0.01))
+        and color_score["score"] < float(reflection_cfg.get("max_color_reflection_score", 92.0))
+        and accepted_structure_mean <= float(reflection_cfg.get("max_structure_diff_mean", 0.12))
+        and np.sum(accepted_reflection & critical_component_mask) == 0
+    )
+    if has_reflection_evidence:
+        if np.sum(accepted_reflection & glass_surface_mask) >= np.sum(accepted_reflection) * 0.5:
+            add_finding(findings, "glass_reflection", "tolerated", "reflection:evidence")
+        else:
+            add_finding(findings, "paint_reflection", "tolerated", "reflection:evidence")
+
+    if debug_dir:
+        debug_path = Path(debug_dir); debug_path.mkdir(parents=True, exist_ok=True)
+        absolute_structure_threshold = float(thresholds.get("absolute_structure_diff_threshold", 0.30))
+        absolute_lpips_threshold = float(thresholds.get("absolute_weighted_lpips_threshold", 0.30))
+        absolute_component_threshold = float(thresholds.get("absolute_component_diff_threshold", 0.30))
+        structure_map = np.clip(np.asarray(structure["diff_map"], dtype=np.float32), 0.0, 1.0)
+        component_map = np.clip(np.asarray(components["component_diff_map"], dtype=np.float32), 0.0, 1.0)
+        lpips_map_local = resize_float_map_to_shape(np.asarray(lpips_component_map, dtype=np.float32), ref.shape[:2]) if lpips_component_map is not None else np.zeros(ref.shape[:2], dtype=np.float32)
+        if np.max(lpips_map_local) > 1.0:
+            lpips_map_local = lpips_map_local / (float(np.percentile(lpips_map_local, 98)) + 1e-8)
+        lpips_map_local = np.clip(lpips_map_local, 0.0, 1.0)
+        absolute_mask = (structure_map >= absolute_structure_threshold) | (lpips_map_local >= absolute_lpips_threshold) | (component_map >= absolute_component_threshold)
+        relative_map = np.maximum(structure_map, component_map)
+        combined_map = np.maximum(relative_map, absolute_mask.astype(np.float32))
+        extra_paths = {
+            "heatmap_relative": debug_path / f"{stem}_heatmap_relative.png",
+            "heatmap_absolute_threshold": debug_path / f"{stem}_heatmap_absolute_threshold.png",
+            "heatmap_combined": debug_path / f"{stem}_heatmap_combined.png",
+            "reflection_candidate_map": debug_path / f"{stem}_reflection_candidate_map.png",
+            "reflection_accepted_map": debug_path / f"{stem}_reflection_accepted_map.png",
+            "reflection_rejected_due_to_critical_component": debug_path / f"{stem}_reflection_rejected_due_to_critical_component.png",
+        }
+        save_weight_debug_map(relative_map, extra_paths["heatmap_relative"])
+        save_weight_debug_map(absolute_mask.astype(np.float32), extra_paths["heatmap_absolute_threshold"])
+        save_weight_debug_map(combined_map, extra_paths["heatmap_combined"])
+        save_weight_debug_map(reflection_candidate.astype(np.float32), extra_paths["reflection_candidate_map"])
+        save_weight_debug_map(accepted_reflection.astype(np.float32), extra_paths["reflection_accepted_map"])
+        save_weight_debug_map(rejected_reflection.astype(np.float32), extra_paths["reflection_rejected_due_to_critical_component"])
+    else:
+        extra_paths = {}
+
+    critical, tolerated = split_findings(findings)
     stable_pass_candidate = (
         product_score >= float(thresholds.get("soft_pass_product_integrity_min", 88.0))
         and structure["score"] >= float(thresholds.get("passed_structure_min", 90.0))
@@ -2058,7 +2205,7 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
         interpretation = "Fahrzeugstruktur, Kontur und Detailzonen sind stabil. Es wurden keine produktrelevanten Abweichungen erkannt."
         decision_reason = "Scores über den Pass-Schwellen und keine Findings."
     critical_component_names = sorted(set(component_findings))
-    debug_paths = {}; debug_paths.update(structure["debug_paths"]); debug_paths.update(detail["debug_paths"]); debug_paths.update(color_score["debug_paths"]); debug_paths.update(components["debug_paths"])
+    debug_paths = {}; debug_paths.update(structure["debug_paths"]); debug_paths.update(detail["debug_paths"]); debug_paths.update(color_score["debug_paths"]); debug_paths.update(components["debug_paths"]); debug_paths.update({k: str(v) for k, v in extra_paths.items()})
     return {
         "structure_only_score": structure["score"],
         "detail_zones_score": detail["score"],

@@ -565,3 +565,64 @@ def test_window_contour_excludes_hood_front_and_exposes_separate_masks():
     assert np.sum(glass_masks["contour"] & hood_front_region) == 0
     assert np.sum(glass_masks["line"] & hood_front_region) == 0
     assert np.sum(glass_masks["contour"] & ~glass_masks["window_candidate_region"]) == 0
+
+def test_headlight_change_stays_visible_with_stronger_front_bumper_debug(tmp_path):
+    ref, mask = synthetic_car_pair()
+    gen = ref.copy()
+    gen[35:39, 20:36] = 0.05
+    gen[40:58, 20:62] = 0.98
+
+    result = im.compute_product_integrity_scores(ref, gen, car_mask=mask, car_only_lpips_score=95.0, debug_dir=tmp_path, stem="case")
+
+    assert result["product_integrity_decision"] == "failed"
+    assert any("Scheinwerfer" in item or "Lichtsignatur" in item for item in result["critical_findings"])
+    assert Path(result["product_integrity_debug_paths"]["headlight_zone_diff"]).exists()
+    assert Path(result["product_integrity_debug_paths"]["heatmap_absolute_threshold"]).exists()
+    assert Path(result["product_integrity_debug_paths"]["heatmap_combined"]).exists()
+
+
+def test_wheel_and_tire_findings_are_consolidated_once():
+    ref, mask = synthetic_car_pair()
+    gen = ref.copy()
+    gen[48:66, 30:48] = 0.85
+    gen[48:66, 92:110] = 0.85
+
+    result = im.compute_product_integrity_scores(ref, gen, car_mask=mask, car_only_lpips_score=84.0)
+    findings = result["critical_findings"] + result["tolerated_findings"]
+    wheel_findings = [item for item in findings if "Felgen" in item or "Reifen" in item or "Radstruktur" in item]
+
+    assert len(wheel_findings) == 1
+
+
+def test_reflection_finding_requires_area_and_color_thresholds():
+    ref, mask = synthetic_car_pair()
+    gen = ref.copy()
+    gen[32:46, 70:105] = np.clip(gen[32:46, 70:105] + 0.25, 0.0, 1.0)
+
+    result = im.compute_product_integrity_scores(ref, gen, car_mask=mask, car_only_lpips_score=92.0)
+
+    assert any("Reflexions" in item or "Lichtabweichung" in item for item in result["tolerated_findings"])
+
+
+def test_no_reflection_finding_without_real_reflection_evidence():
+    ref, mask = synthetic_car_pair()
+    gen = ref.copy()
+    gen[32:34, 70:72] = np.clip(gen[32:34, 70:72] + 0.04, 0.0, 1.0)
+
+    result = im.compute_product_integrity_scores(ref, gen, car_mask=mask, car_only_lpips_score=98.0)
+
+    assert not any("Reflexions" in item or "Lichtabweichung" in item for item in result["tolerated_findings"])
+
+
+def test_headlight_difference_is_rejected_as_reflection(tmp_path):
+    ref, mask = synthetic_car_pair()
+    gen = ref.copy()
+    gen[33:42, 20:43] = 0.05
+    gen[35:39, 20:36] = 0.15
+
+    result = im.compute_product_integrity_scores(ref, gen, car_mask=mask, car_only_lpips_score=95.0, debug_dir=tmp_path, stem="headlight")
+
+    assert result["product_integrity_decision"] == "failed"
+    assert any("Scheinwerfer" in item or "Lichtsignatur" in item for item in result["critical_findings"])
+    assert not any("Reflexions" in item for item in result["tolerated_findings"])
+    assert Path(result["product_integrity_debug_paths"]["reflection_rejected_due_to_critical_component"]).exists()
