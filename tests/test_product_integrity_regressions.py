@@ -13,11 +13,11 @@ def make_car():
     img[28:44, 64:154] = 0.16
     img[51:55, 24:70] = 0.92  # headlight/front bright line
     img[50:72, 30:56] = 0.10  # grille/front
-    img[72:100, 45:78] = 0.06  # front wheel
+    img[72:100, 95:128] = 0.06  # front wheel
     img[72:100, 145:178] = 0.06 # rear wheel
     img[62:66, 75:146] = 0.25 # body line
     yy, xx = np.mgrid[0:120, 0:220]
-    for cx in (61, 161):
+    for cx in (111, 161):
         wheel = ((xx-cx)/16)**2 + ((yy-86)/15)**2 <= 1
         mask |= wheel
         img[wheel] = 0.05
@@ -57,7 +57,7 @@ def test_wheel_finding_requires_valid_zone_and_visible_overlay(tmp_path):
     ref, mask = make_car()
     gen = ref.copy()
     yy, xx = np.mgrid[0:120, 0:220]
-    changed_rim = ((xx-61)/11)**2 + ((yy-86)/11)**2 <= 1
+    changed_rim = ((xx-111)/11)**2 + ((yy-86)/11)**2 <= 1
     gen[changed_rim] = 0.18
 
     changed = im.compute_product_integrity_scores(ref, gen, car_mask=mask, car_only_lpips_score=80.0, debug_dir=tmp_path, stem='wheel')
@@ -74,7 +74,7 @@ def test_massive_wheel_and_rim_deviation_cannot_pass(tmp_path):
     ref, mask = make_car()
     gen = ref.copy()
     yy, xx = np.mgrid[0:120, 0:220]
-    for cx in (61, 161):
+    for cx in (111, 161):
         tire = ((xx-cx)/18)**2 + ((yy-86)/16)**2 <= 1
         rim = ((xx-cx)/11)**2 + ((yy-86)/10)**2 <= 1
         spokes = tire & (((np.abs(xx-cx) < 3) | (np.abs(yy-86) < 3)))
