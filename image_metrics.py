@@ -1866,12 +1866,17 @@ def find_wheel_zone_from_mask(vehicle_mask, bbox, side):
     x0, y0, x1, y1 = bbox
     bw = max(1, x1 - x0)
     bh = max(1, y1 - y0)
+    # Die bisherige Front-Rad-Heuristik suchte im linken unteren Fahrzeugdrittel.
+    # Bei diesem Seitenprofil liegt dort aber Frontschürze/Grill/Kennzeichen.
+    # Suche deshalb nur in plausiblen Radfenstern der unteren Fahrzeughälfte:
+    # Vorderrad bei ca. 40-60 %, Hinterrad bei ca. 78-98 % der Fahrzeugbreite.
     if side == "front":
-        search = bbox_mask_from_fraction(shape, bbox, (0.00, 0.48, 0.46, 1.00))
-        fallback_cx = x0 + 0.24 * bw
+        search_fraction = (0.40, 0.50, 0.62, 1.00)
+        fallback_cx = x0 + 0.50 * bw
     else:
-        search = bbox_mask_from_fraction(shape, bbox, (0.54, 0.48, 1.00, 1.00))
-        fallback_cx = x0 + 0.76 * bw
+        search_fraction = (0.78, 0.50, 0.98, 1.00)
+        fallback_cx = x0 + 0.88 * bw
+    search = bbox_mask_from_fraction(shape, bbox, search_fraction)
     candidates = vehicle & search
     if not np.any(candidates):
         return np.zeros(shape, dtype=bool)
@@ -1880,20 +1885,38 @@ def find_wheel_zone_from_mask(vehicle_mask, bbox, side):
     lower_cut = y0 + int(0.58 * bh)
     lower = candidates & (yy >= lower_cut)
     ys, xs = np.where(lower if np.any(lower) else candidates)
-    cx = int(round(np.median(xs))) if len(xs) else int(round(fallback_cx))
+    if len(xs):
+        # Gewichte die Mitte robuster als den Median, aber klammere sie hart in
+        # das zulässige Radfenster. So kann das Vorderrad nicht mehr in den
+        # Grill-/Frontschürzenbereich (10-35 %) zurückfallen.
+        cx = int(round(np.mean(xs)))
+    else:
+        cx = int(round(fallback_cx))
+    min_cx = int(round(x0 + search_fraction[0] * bw))
+    max_cx = int(round(x0 + search_fraction[2] * bw))
+    cx = int(np.clip(cx, min_cx, max_cx))
     cy = int(round(np.percentile(ys, 58))) if len(ys) else int(round(y0 + 0.76 * bh))
 
     # Verwende bewusst großzügige Rad-Ellipsen: Segmentierungen schneiden dunkle
     # Reifen und offene Felgen häufig aus. Die anschließende Masken-Clip-Operation
     # verhindert Hintergrundanteile, behält aber die gesamte sichtbare Radfläche.
-    rx = max(5, int(round(0.145 * bw)))
+    rx = max(5, int(round(0.115 * bw)))
     ry = max(5, int(round(0.225 * bh)))
     wheel_disc = (((xx - cx) / rx) ** 2 + ((yy - cy) / ry) ** 2) <= 1.0
     rim_core = (((xx - cx) / max(rx * 0.68, 1.0)) ** 2 + ((yy - cy) / max(ry * 0.68, 1.0)) ** 2) <= 1.0
     tire_ring = wheel_disc & ~((((xx - cx) / max(rx * 0.50, 1.0)) ** 2 + ((yy - cy) / max(ry * 0.50, 1.0)) ** 2) <= 1.0)
     arch = ((((xx - cx) / max(rx * 1.12, 1.0)) ** 2 + ((yy - (cy - 0.18 * ry)) / max(ry * 1.05, 1.0)) ** 2) <= 1.0) & (yy <= cy + 0.35 * ry)
     visible_vehicle = dilation(vehicle, disk(3))
-    return (wheel_disc | rim_core | tire_ring | arch) & visible_vehicle & vehicle
+    zone = (wheel_disc | rim_core | tire_ring | arch) & visible_vehicle & vehicle
+
+    # Wenn die Maske im Suchfenster zu wenig Radfläche enthält, nutze einen
+    # positionsbasierten Fallback, aber bleibe weiterhin strikt in der finalen
+    # Fahrzeugmaske und im plausiblen Radfenster.
+    min_area = max(12, int(0.0025 * np.sum(vehicle)))
+    if int(np.sum(zone)) < min_area:
+        fallback_disc = (((xx - int(round(fallback_cx))) / rx) ** 2 + ((yy - cy) / ry) ** 2) <= 1.0
+        zone = fallback_disc & visible_vehicle & vehicle & search
+    return zone & search
 
 
 def build_detail_zone_masks(car_mask, fallback_shape, ref=None, gen=None, glass_masks=None):
@@ -2113,7 +2136,8 @@ def compute_component_product_scores(ref, gen, mask=None, structure_debug=None, 
         scale = 0.085 if name in {"front_wheel", "rear_wheel", "wheel_tire"} else (0.105 if name in {"headlight", "front_light_signature"} else 0.13)
         component_diffs[name] = float(local_diff)
         component_scores[f"{name}_score"] = score_from_error(local_diff, scale)
-        attribution = np.maximum(attribution, np.where(zone, component_diff_map, 0.0))
+        source_diff_map = wheel_component_diff_map if name in {"front_wheel", "rear_wheel", "wheel_tire"} else component_diff_map
+        attribution = np.maximum(attribution, np.where(zone, source_diff_map, 0.0))
         zone_debug = np.maximum(zone_debug, zone.astype(np.float32) * (idx / max(len(zone_order), 1)))
 
     critical_component_mask = (
@@ -2138,6 +2162,8 @@ def compute_component_product_scores(ref, gen, mask=None, structure_debug=None, 
         paths["rear_wheel_zone"] = str(debug_path / f"{stem}_rear_wheel_zone.png")
         paths["wheel_zone_combined"] = str(debug_path / f"{stem}_wheel_zone_combined.png")
         paths["wheel_zone_diff"] = str(debug_path / f"{stem}_wheel_zone_diff.png")
+        paths["front_wheel_score_map"] = str(debug_path / f"{stem}_front_wheel_score_map.png")
+        paths["rear_wheel_score_map"] = str(debug_path / f"{stem}_rear_wheel_score_map.png")
         paths["wheel_score_heatmap"] = str(debug_path / f"{stem}_wheel_score_heatmap.png")
         paths["critical_component_score_map"] = str(debug_path / f"{stem}_critical_component_score_map.png")
         paths["grille_zone"] = str(debug_path / f"{stem}_grille_zone.png")
@@ -2160,8 +2186,14 @@ def compute_component_product_scores(ref, gen, mask=None, structure_debug=None, 
         wheel_combined = zones["front_wheel"] | zones["rear_wheel"] | zones["wheel_tire"]
         save_weight_debug_map(np.where(zones["wheel_tire"], component_diff_map, 0.0), Path(paths["wheel_tire_zone_diff"]))
         save_weight_debug_map(np.where(wheel_combined, component_diff_map, 0.0), Path(paths["wheel_zone_diff"]))
-        save_weight_debug_map(np.where(wheel_combined, component_diff_map, 0.0), Path(paths["wheel_score_heatmap"]))
-        save_weight_debug_map(np.where(critical_component_mask, component_diff_map, 0.0), Path(paths["critical_component_score_map"]))
+        save_weight_debug_map(np.where(zones["front_wheel"], wheel_component_diff_map, 0.0), Path(paths["front_wheel_score_map"]))
+        save_weight_debug_map(np.where(zones["rear_wheel"], wheel_component_diff_map, 0.0), Path(paths["rear_wheel_score_map"]))
+        save_weight_debug_map(np.where(wheel_combined, wheel_component_diff_map, 0.0), Path(paths["wheel_score_heatmap"]))
+        critical_score_map = np.maximum(
+            np.where(critical_component_mask, component_diff_map, 0.0),
+            np.where(wheel_combined, wheel_component_diff_map, 0.0),
+        )
+        save_weight_debug_map(critical_score_map, Path(paths["critical_component_score_map"]))
         save_weight_debug_map(np.where(zones["grille"], component_diff_map, 0.0), Path(paths["grille_zone_diff"]))
         save_weight_debug_map(attribution, Path(paths["component_attribution_map"]))
 
@@ -2277,7 +2309,7 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
 
     product_score = min(
         product_score,
-        (0.72 * base_product_score) + (0.16 * detail["score"]) + (0.07 * critical_component_score) + (0.05 * wheel_score),
+        (0.62 * base_product_score) + (0.14 * detail["score"]) + (0.10 * critical_component_score) + (0.14 * wheel_score),
     )
 
     light_signature_diff = float(component_diffs.get("front_light_signature", 0.0))
@@ -2297,8 +2329,15 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
         and headlight_diff > min(light_diff_gate, 0.08)
     )
     light_signature_failed = light_signature_score < float(thresholds.get("critical_light_signature_score_max", 74.0)) and light_signature_diff > light_diff_gate
-    wheel_strong = min(front_wheel_score, rear_wheel_score, wheel_tire_score) < float(thresholds.get("critical_wheel_score_max", 68.0)) and max(front_wheel_diff, rear_wheel_diff, wheel_tire_diff) > wheel_diff_gate
-    wheel_warning = min(front_wheel_score, rear_wheel_score, wheel_tire_score) < float(thresholds.get("warning_wheel_score_max", 84.0)) and max(front_wheel_diff, rear_wheel_diff, wheel_tire_diff) > wheel_diff_gate
+    critical_wheel_score_max = float(thresholds.get("critical_wheel_score_max", 90.0))
+    warning_wheel_score_max = float(thresholds.get("warning_wheel_score_max", 94.0))
+    wheel_local_diff = max(front_wheel_diff, rear_wheel_diff, wheel_tire_diff)
+    front_wheel_bad = front_wheel_score < warning_wheel_score_max and front_wheel_diff > wheel_diff_gate
+    rear_wheel_bad = rear_wheel_score < warning_wheel_score_max and rear_wheel_diff > wheel_diff_gate
+    wheel_strong = (wheel_score < critical_wheel_score_max and wheel_local_diff > wheel_diff_gate) or (
+        wheel_score < warning_wheel_score_max and wheel_local_diff > max(wheel_diff_gate, 0.16)
+    )
+    wheel_warning = (wheel_score < warning_wheel_score_max and wheel_local_diff > wheel_diff_gate) or front_wheel_bad or rear_wheel_bad
     grille_strong = grille_score < float(thresholds.get("critical_grille_score_max", 70.0)) and grille_diff > front_diff_gate
     grille_warning = grille_score < float(thresholds.get("warning_grille_score_max", 84.0)) and grille_diff > front_diff_gate
     emblem_strong = emblem_score < float(thresholds.get("critical_emblem_score_max", 70.0)) and emblem_diff > front_diff_gate
@@ -2385,6 +2424,8 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
         product_score = min(product_score, wheel_score + 6.0)
     if wheel_strong and wheel_finding_active:
         product_score = min(product_score, wheel_score + 4.0)
+    if wheel_score < float(thresholds.get("warning_wheel_score_max", 94.0)) and wheel_local_diff > wheel_diff_gate:
+        product_score = min(product_score, wheel_score + (4.0 if wheel_score < float(thresholds.get("critical_wheel_score_max", 90.0)) else 6.0))
     if component_findings and critical_component_score < float(thresholds.get("warning_critical_component_score_max", 94.0)):
         product_score = min(product_score, critical_component_score + 6.0)
 
@@ -2449,8 +2490,8 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
         or light_signature_failed
         or grille_strong
         or emblem_strong
-        or (wheel_strong and "wheel_tire_structure" in findings)
-        or (wheel_score < float(thresholds.get("critical_wheel_score_max", 90.0)) and "wheel_tire_structure" in findings)
+        or wheel_strong
+        or (wheel_score < float(thresholds.get("critical_wheel_score_max", 90.0)) and wheel_local_diff > wheel_diff_gate)
     ):
         decision = "failed"
     elif (
@@ -2459,8 +2500,8 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
     ) or structure["score"] < float(thresholds.get("failed_structure_min", 80.0)) or detail["score"] < float(thresholds.get("failed_detail_min", 80.0)):
         decision = "failed"
     elif (
-        (wheel_warning and "wheel_tire_structure" in findings)
-        or (wheel_score < float(thresholds.get("warning_wheel_score_max", 94.0)) and "wheel_tire_structure" in findings)
+        wheel_warning
+        or (wheel_score < float(thresholds.get("warning_wheel_score_max", 94.0)) and wheel_local_diff > wheel_diff_gate)
         or (component_findings and critical_component_score < float(thresholds.get("warning_critical_component_score_max", 94.0)))
         or product_score < float(thresholds.get("passed_product_integrity_min", 95.0))
     ):
