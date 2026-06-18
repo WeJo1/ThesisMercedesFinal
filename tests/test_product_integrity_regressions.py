@@ -68,3 +68,26 @@ def test_wheel_finding_requires_valid_zone_and_visible_overlay(tmp_path):
     invalid_mask[:, :95] = False
     invalid = im.compute_product_integrity_scores(ref, gen, car_mask=invalid_mask, car_only_lpips_score=80.0)
     assert not any('Felgen' in item for item in invalid['critical_findings'])
+
+
+def test_massive_wheel_and_rim_deviation_cannot_pass(tmp_path):
+    ref, mask = make_car()
+    gen = ref.copy()
+    yy, xx = np.mgrid[0:120, 0:220]
+    for cx in (61, 161):
+        tire = ((xx-cx)/18)**2 + ((yy-86)/16)**2 <= 1
+        rim = ((xx-cx)/11)**2 + ((yy-86)/10)**2 <= 1
+        spokes = tire & (((np.abs(xx-cx) < 3) | (np.abs(yy-86) < 3)))
+        gen[tire] = 0.82
+        gen[rim] = 0.18
+        gen[spokes] = 0.95
+
+    result = im.compute_product_integrity_scores(ref, gen, car_mask=mask, car_only_lpips_score=91.0, debug_dir=tmp_path, stem='massive_wheel')
+
+    assert result['product_integrity_decision'] != 'passed'
+    assert result['wheel_score'] < 94
+    assert (tmp_path / 'massive_wheel_front_wheel_zone.png').exists()
+    assert (tmp_path / 'massive_wheel_rear_wheel_zone.png').exists()
+    assert (tmp_path / 'massive_wheel_wheel_zone_combined.png').exists()
+    assert (tmp_path / 'massive_wheel_wheel_score_heatmap.png').exists()
+    assert (tmp_path / 'massive_wheel_critical_component_score_map.png').exists()
