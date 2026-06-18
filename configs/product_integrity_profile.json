@@ -13,20 +13,24 @@
     "car_only_lpips_score": 0.05
   },
   "thresholds": {
-    "passed_product_integrity_min": 90,
+    "passed_product_integrity_min": 95,
     "passed_structure_min": 90,
-    "passed_detail_min": 88,
-    "failed_product_integrity_min": 80,
+    "passed_detail_min": 94,
+    "failed_product_integrity_min": 90,
     "failed_structure_min": 80,
     "failed_detail_min": 80,
     "warning_color_reflection_max": 78,
-    "critical_zone_score_max": 78,
-    "warning_zone_score_max": 90,
-    "soft_pass_product_integrity_min": 88,
+    "critical_zone_score_max": 82,
+    "warning_zone_score_max": 94,
+    "soft_pass_product_integrity_min": 95,
     "finding_overlay_diff_threshold": 0.08,
     "critical_headlight_diff_min": 0.14,
     "critical_light_signature_diff_min": 0.12,
-    "warning_wheel_diff_min": 0.12
+    "warning_wheel_diff_min": 0.12,
+    "warning_wheel_score_max": 94,
+    "critical_wheel_score_max": 90,
+    "warning_critical_component_score_max": 94,
+    "critical_component_score_max": 90
   },
   "reflection_tolerance": {
     "low_edge_difference_bonus": 0.35,
@@ -35,7 +39,7 @@
   "detail_zone_weights": {
     "silhouette": 1.35,
     "front_rear": 1.25,
-    "wheels_tires": 1.35,
+    "wheels_tires": 2.25,
     "window_line": 1.2,
     "body_lines": 1.0,
     "center_grill_emblem": 1.2
