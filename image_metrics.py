@@ -2,6 +2,7 @@ import argparse
 import inspect
 import json
 import random
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -643,7 +644,14 @@ def init_lpips_model(net="alex", use_gpu=False):
     # - pretrained=True lädt die vortrainierten Gewichte.
     # - spatial=True liefert zusätzlich eine räumliche Distanzkarte (Heatmap).
     # Dieses Tool trainiert keine LPIPS-Gewichte nach.
-    model = lpips.LPIPS(net=net, spatial=True, lpips=True, pretrained=True)
+    # LPIPS ruft intern ältere torchvision-Backbones mit ``pretrained=True`` auf.
+    # Das ist nur eine Deprecation-Warnung aus torchvision und kein Laufzeitfehler;
+    # die Initialisierung bleibt bewusst unverändert, damit dieselben trainierten
+    # LPIPS-Gewichte genutzt werden.
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=".*parameter 'pretrained' is deprecated.*", category=UserWarning)
+        warnings.filterwarnings("ignore", message=".*Arguments other than a weight enum or `None` for 'weights'.*", category=UserWarning)
+        model = lpips.LPIPS(net=net, spatial=True, lpips=True, pretrained=True)
     if use_gpu and torch.cuda.is_available():
         model = model.cuda()
     model.eval()
@@ -1489,7 +1497,7 @@ def apply_masked_car_crop(img, mask, bbox):
     return masked_crop, mask_crop
 
 
-def validate_binary_mask(mask, name="mask", min_area_px=1, max_hole_ratio=0.18):
+def validate_binary_mask(mask, name="mask", min_area_px=1, max_hole_ratio=0.18, raise_on_large_holes=True):
     """Validiere eine Fahrzeug-/Zonenmaske und melde typische Pipeline-Defekte früh."""
     mask_bool = np.asarray(mask, dtype=bool)
     if mask_bool.ndim != 2:
@@ -1503,15 +1511,20 @@ def validate_binary_mask(mask, name="mask", min_area_px=1, max_hole_ratio=0.18):
     filled_roi = fill_holes_smaller_than(roi, bbox_area)
     holes = filled_roi & ~roi
     hole_ratio = float(np.sum(holes) / max(float(area), 1.0))
+    warning = None
     if hole_ratio > float(max_hole_ratio):
-        raise ValueError(
-            f"{name} enthält unplausibel große Löcher ({hole_ratio:.2%} der Maskenfläche). "
-            "Prüfe boolesche Maskenkombinationen, Polygon-Fills und Crop/Resize-Koordinaten."
+        warning = (
+            f"{name} enthält große Innenbereiche ({hole_ratio:.2%} der Maskenfläche). "
+            "Das kann bei Fahrzeugen durch Fenster, Radhäuser oder offene Felgen plausibel sein; "
+            "prüfe bei Bedarf die gespeicherten Masken-Overlays."
         )
+        if raise_on_large_holes:
+            raise ValueError(warning)
     return {
         "area_px": area,
         "bbox": (x0, y0, x1, y1),
         "hole_ratio": hole_ratio,
+        "warning": warning,
     }
 
 
@@ -1603,7 +1616,12 @@ def compute_car_only_metrics(
         max_hole_area=mask_max_hole_area,
         trim_px=mask_trim_px,
     )
-    validate_binary_mask(mask, "final_vehicle_mask", min_area_px=max(1, int(min_mask_area) + 1))
+    mask_validation = validate_binary_mask(
+        mask,
+        "final_vehicle_mask",
+        min_area_px=max(1, int(min_mask_area) + 1),
+        raise_on_large_holes=False,
+    )
 
     mask_area = int(np.sum(mask))
     total_area = int(mask.size)
@@ -1616,6 +1634,7 @@ def compute_car_only_metrics(
         "ref_preview_bbox": None,
         "gen_preview_bbox": None,
         "fallback_reason": None,
+        "mask_validation": mask_validation,
         "mask_refine": {
             "grow_px": mask_grow_px,
             "min_object_area": mask_min_object_area,
@@ -1700,8 +1719,12 @@ def compute_car_only_metrics(
         save_mask_image(ref_mask.astype(bool), debug_path / f"{stem}_final_vehicle_mask_reference.png")
         save_mask_image(gen_mask.astype(bool), debug_path / f"{stem}_final_vehicle_mask_comparison.png")
         save_mask_image(mask, debug_path / f"{stem}_mask.png")
+        save_mask_overlay(ref_norm, mask, debug_path / f"{stem}_final_vehicle_mask_overlay_reference.png")
+        save_mask_overlay(gen_norm, mask, debug_path / f"{stem}_final_vehicle_mask_overlay_comparison.png")
         with open(debug_path / f"{stem}_crop_box.json", "w", encoding="utf-8") as fp:
             json.dump(debug["bbox"], fp, indent=2)
+        with open(debug_path / f"{stem}_mask_validation.json", "w", encoding="utf-8") as fp:
+            json.dump(mask_validation, fp, indent=2, ensure_ascii=False)
         np_to_pil_uint8(ref_car).save(debug_path / f"{stem}_ref_neutral.png")
         np_to_pil_uint8(gen_car).save(debug_path / f"{stem}_gen_neutral.png")
         np_to_pil_uint8(ref_preview).save(debug_path / f"{stem}_aligned_reference_vehicle.png")
