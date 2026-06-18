@@ -2,6 +2,7 @@ import argparse
 import inspect
 import json
 import random
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -643,7 +644,20 @@ def init_lpips_model(net="alex", use_gpu=False):
     # - pretrained=True lädt die vortrainierten Gewichte.
     # - spatial=True liefert zusätzlich eine räumliche Distanzkarte (Heatmap).
     # Dieses Tool trainiert keine LPIPS-Gewichte nach.
-    model = lpips.LPIPS(net=net, spatial=True, lpips=True, pretrained=True)
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=".*parameter 'pretrained' is deprecated.*",
+            category=UserWarning,
+            module="torchvision.models._utils",
+        )
+        warnings.filterwarnings(
+            "ignore",
+            message=".*Arguments other than a weight enum or `None` for 'weights' are deprecated.*",
+            category=UserWarning,
+            module="torchvision.models._utils",
+        )
+        model = lpips.LPIPS(net=net, spatial=True, lpips=True, pretrained=True)
     if use_gpu and torch.cuda.is_available():
         model = model.cuda()
     model.eval()
@@ -1349,6 +1363,7 @@ def refine_car_mask(
     min_object_area=500,
     max_hole_area=3000,
     trim_px=1,
+    fill_internal_holes=True,
 ):
     merged_mask = (ref_mask | gen_mask).astype(bool)
     refined_mask = mask.astype(bool)
@@ -1370,6 +1385,16 @@ def refine_car_mask(
     if trim_px > 0:
         refined_mask = erosion(refined_mask, footprint=disk(int(trim_px)))
         refined_mask = remove_objects_smaller_than(refined_mask, min_object_area)
+
+    if fill_internal_holes and np.any(refined_mask):
+        # Erzeuge für die Metriken eine geschlossene Fahrzeug-Silhouette.
+        # Mask R-CNN lässt Fenster, Felgen oder dunkle Innenräume oft als große
+        # Hintergrundinseln stehen. Diese echten Fahrzeugbereiche dürfen die
+        # Car-only-Auswertung nicht abbrechen, deshalb fülle alle vollständig
+        # von der Fahrzeugmaske umschlossenen Löcher erst in der finalen Maske.
+        x0, y0, x1, y1 = compute_mask_roi_bbox(refined_mask, refined_mask.shape)
+        roi = refined_mask[y0:y1, x0:x1]
+        refined_mask[y0:y1, x0:x1] = fill_holes_smaller_than(roi, max(int(roi.size), 1))
 
     return refined_mask.astype(bool)
 

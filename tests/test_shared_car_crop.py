@@ -78,3 +78,26 @@ def test_size_validation_aborts_with_clear_message_for_mismatched_car_crops():
             },
             "Car-Only-Crop",
         )
+
+
+def test_refine_car_mask_fills_large_internal_vehicle_holes_before_validation():
+    mask = np.zeros((100, 140), dtype=bool)
+    mask[20:80, 15:125] = True
+    mask[35:65, 45:95] = False
+
+    with pytest.raises(ValueError, match="unplausibel große Löcher"):
+        im.validate_binary_mask(mask, "synthetic_vehicle_mask")
+
+    refined = im.refine_car_mask(
+        mask,
+        mask,
+        mask,
+        grow_px=1,
+        min_object_area=1,
+        max_hole_area=16,
+        trim_px=0,
+    )
+
+    validation = im.validate_binary_mask(refined, "synthetic_vehicle_mask")
+    assert refined[50, 70]
+    assert validation["hole_ratio"] == pytest.approx(0.0)
