@@ -833,17 +833,22 @@ def build_critical_component_zones(mask, shape):
     """Erzeuge robuste Produktzonen aus Fahrzeugkontur und Bounding-Box."""
     scope = np.asarray(mask, dtype=bool) if mask is not None and np.any(mask) else np.ones(shape, dtype=bool)
     bbox = compute_mask_roi_bbox(scope, shape)
-    headlight_zone = bbox_mask_from_fraction(shape, bbox, (0.00, 0.20, 0.38, 0.58))
-    light_signature_zone = bbox_mask_from_fraction(shape, bbox, (0.00, 0.16, 0.36, 0.54))
-    grille_zone = bbox_mask_from_fraction(shape, bbox, (0.00, 0.34, 0.32, 0.74))
-    emblem_zone = bbox_mask_from_fraction(shape, bbox, (0.16, 0.38, 0.42, 0.66))
+    # Front- und Heckdetails bewusst breiter fassen, danach strikt an der
+    # finalen Fahrzeugmaske schneiden. So bleiben Grill/Stern/Scheinwerfer,
+    # Rücklicht/Heckkontur und Räder geschützt, ohne Hintergrund aufzunehmen.
+    headlight_zone = bbox_mask_from_fraction(shape, bbox, (0.00, 0.16, 0.46, 0.62))
+    light_signature_zone = bbox_mask_from_fraction(shape, bbox, (0.00, 0.12, 0.44, 0.58))
+    grille_zone = bbox_mask_from_fraction(shape, bbox, (0.00, 0.30, 0.40, 0.78))
+    emblem_zone = bbox_mask_from_fraction(shape, bbox, (0.10, 0.34, 0.46, 0.70))
     front_wheel_zone = find_wheel_zone_from_mask(scope, bbox, "front")
     rear_wheel_zone = find_wheel_zone_from_mask(scope, bbox, "rear")
     tire_zone = front_wheel_zone | rear_wheel_zone
-    window_line_zone = bbox_mask_from_fraction(shape, bbox, (0.08, 0.12, 0.92, 0.58))
-    roof_pillar_zone = bbox_mask_from_fraction(shape, bbox, (0.10, 0.05, 0.90, 0.36))
-    side_body_zone = bbox_mask_from_fraction(shape, bbox, (0.10, 0.42, 0.92, 0.76))
-    front_apron_zone = bbox_mask_from_fraction(shape, bbox, (0.00, 0.58, 0.34, 0.90))
+    rear_light_zone = bbox_mask_from_fraction(shape, bbox, (0.70, 0.20, 1.00, 0.66))
+    rear_contour_zone = bbox_mask_from_fraction(shape, bbox, (0.72, 0.18, 1.00, 0.88))
+    window_line_zone = bbox_mask_from_fraction(shape, bbox, (0.06, 0.06, 0.94, 0.56))
+    roof_pillar_zone = bbox_mask_from_fraction(shape, bbox, (0.08, 0.02, 0.92, 0.34))
+    side_body_zone = bbox_mask_from_fraction(shape, bbox, (0.06, 0.38, 0.96, 0.78))
+    front_apron_zone = bbox_mask_from_fraction(shape, bbox, (0.00, 0.56, 0.40, 0.92))
     silhouette_zone = dilation(scope, disk(2)) & ~erosion(scope, disk(3))
     zones = {
         "headlight_zone": headlight_zone,
@@ -853,6 +858,8 @@ def build_critical_component_zones(mask, shape):
         "front_wheel_zone": front_wheel_zone,
         "rear_wheel_zone": rear_wheel_zone,
         "tire_zone": tire_zone,
+        "rear_light_zone": rear_light_zone,
+        "rear_contour_zone": rear_contour_zone,
         "window_line_zone": window_line_zone,
         "roof_pillar_zone": roof_pillar_zone,
         "side_body_zone": side_body_zone,
@@ -866,6 +873,8 @@ def build_critical_component_zones(mask, shape):
         "front_wheel": front_wheel_zone,
         "rear_wheel": rear_wheel_zone,
         "wheel_tire": tire_zone,
+        "rear_light": rear_light_zone,
+        "rear_contour": rear_contour_zone,
         "window_line": window_line_zone,
         "roof_pillar": roof_pillar_zone,
         "side_body": side_body_zone,
@@ -915,6 +924,8 @@ def build_mercedes_importance_map(ref, gen, car_mask=None, profile=None):
         | component_zones["front_wheel_zone"]
         | component_zones["rear_wheel_zone"]
         | component_zones["tire_zone"]
+        | component_zones["rear_light_zone"]
+        | component_zones["rear_contour_zone"]
         | component_zones["window_line_zone"]
         | component_zones["silhouette_zone"]
     )
@@ -975,17 +986,17 @@ def build_glass_region_masks(ref, gen, car_mask=None, profile=None):
     smooth = edge < float(profile.get("glass_smooth_edge_limit", 0.42))
 
     window_candidate_region = (
-        (by >= float(profile.get("window_candidate_y_min", 0.15)))
-        & (by <= float(profile.get("window_candidate_y_max", 0.50)))
-        & (bx >= float(profile.get("window_candidate_x_min", 0.12)))
-        & (bx <= float(profile.get("window_candidate_x_max", 0.92)))
+        (by >= float(profile.get("window_candidate_y_min", 0.06)))
+        & (by <= float(profile.get("window_candidate_y_max", 0.52)))
+        & (bx >= float(profile.get("window_candidate_x_min", 0.08)))
+        & (bx <= float(profile.get("window_candidate_x_max", 0.94)))
         & vehicle
     )
     # Schließe den vorderen unteren Bereich aus: Dort liegen Motorhaube, Grill und
     # Scheinwerferkanten, aber keine Fensterkontur.
     hood_front_exclusion = (
-        (bx <= float(profile.get("window_front_exclusion_x_max", 0.36)))
-        & (by >= float(profile.get("window_front_exclusion_y_min", 0.38)))
+        (bx <= float(profile.get("window_front_exclusion_x_max", 0.34)))
+        & (by >= float(profile.get("window_front_exclusion_y_min", 0.40)))
     )
     window_candidate_region &= ~hood_front_exclusion
     # Begrenze die Kandidaten auf zusammenhängende Kanten im Fensterband statt auf
@@ -993,7 +1004,7 @@ def build_glass_region_masks(ref, gen, car_mask=None, profile=None):
     window_edge_seed = window_candidate_region & (edge >= float(profile.get("window_candidate_edge_min", 0.06)))
     if np.any(window_edge_seed):
         connected_window_band = dilation(window_edge_seed, disk(max(1, int(profile.get("window_candidate_connect_px", 2)))))
-        window_candidate_region &= connected_window_band | (by <= float(profile.get("window_surface_y_max", 0.46)))
+        window_candidate_region &= connected_window_band | (by <= float(profile.get("window_surface_y_max", 0.48)))
 
     glass_band = window_candidate_region
     low_saturation = saturation <= float(profile.get("glass_saturation_limit", 0.50))
@@ -1009,7 +1020,7 @@ def build_glass_region_masks(ref, gen, car_mask=None, profile=None):
 
     max_area = max(1, int(0.34 * np.sum(vehicle)))
     if np.sum(candidate) > max_area:
-        stronger_glass_like = glass_band & low_saturation & (dark_glass | bright_reflection | (smooth_glass & (by <= 0.48)))
+        stronger_glass_like = glass_band & low_saturation & (dark_glass | bright_reflection | (smooth_glass & (by <= 0.50)))
         candidate = fill_holes_smaller_than(closing(stronger_glass_like, disk(2)), min_area + 1)
 
     if not np.any(candidate):
@@ -1867,7 +1878,7 @@ def build_detail_zone_masks(car_mask, fallback_shape, ref=None, gen=None, glass_
         stable_edge = np.clip(np.minimum(ref_edge, gen_edge), 0.0, 1.0)
         edge_delta = np.abs(ref_edge - gen_edge)
         scoped_edge_values = stable_edge[scope]
-        edge_threshold = max(0.035, float(np.percentile(scoped_edge_values, 58)) if scoped_edge_values.size else 0.035)
+        edge_threshold = max(0.04, float(np.percentile(scoped_edge_values, 66)) if scoped_edge_values.size else 0.04)
         detail_edges = (stable_edge >= edge_threshold) & (edge_delta <= 0.16) & scope
         changed_detail_edges = (edge_delta > 0.08) & scope
     else:
@@ -1881,32 +1892,39 @@ def build_detail_zone_masks(car_mask, fallback_shape, ref=None, gen=None, glass_
         glass_contour = np.asarray(glass_masks.get("contour", glass_contour), dtype=bool)
     product_edges = detail_edges & ~glass_interior
 
-    silhouette = (dilation(scope, disk(2)) & ~erosion(scope, disk(3))) & scope
+    silhouette = (dilation(scope, disk(1)) & ~erosion(scope, disk(2))) & scope
     front_wheel = find_wheel_zone_from_mask(scope, bbox, "front")
     rear_wheel = find_wheel_zone_from_mask(scope, bbox, "rear")
     wheels_tires = (front_wheel | rear_wheel) & (product_edges | changed_detail_edges | silhouette | front_wheel | rear_wheel)
 
     front_rear_band = (
-        bbox_mask_from_fraction(fallback_shape, bbox, (0.00, 0.30, 0.22, 0.78))
-        | bbox_mask_from_fraction(fallback_shape, bbox, (0.78, 0.30, 1.00, 0.78))
-    )
-    front_rear = front_rear_band & (product_edges | changed_detail_edges | silhouette)
+        bbox_mask_from_fraction(fallback_shape, bbox, (0.00, 0.22, 0.34, 0.84))
+        | bbox_mask_from_fraction(fallback_shape, bbox, (0.66, 0.22, 1.00, 0.86))
+    ) & scope
+    # Nicht nur Kantenpixel verwenden: Front-/Heckkontur, Grill/Stern,
+    # Scheinwerfer, Rücklichtbereich und seitliche Hecklinie sollen sicher in
+    # der Detailmaske liegen. Durch den Schnitt mit ``scope`` bleibt der
+    # Hintergrund ausgeschlossen.
+    front_rear_core = front_rear_band & (((bx <= 0.02) | (bx >= 0.98)) & (by >= 0.40) & (by <= 0.70))
+    front_rear = front_rear_band & (product_edges | changed_detail_edges | silhouette | front_rear_core)
 
-    window_band = (by >= 0.13) & (by <= 0.58) & (bx >= 0.08) & (bx <= 0.92) & scope
-    changed_window_edges = changed_detail_edges & window_band & (glass_contour | (by <= 0.24) | (silhouette & (by <= 0.34)))
-    window_line = (glass_contour | changed_window_edges | (window_band & product_edges) | (silhouette & (by <= 0.34))) & ~glass_interior
-    body_band = (by >= 0.40) & (by <= 0.78) & (bx >= 0.08) & (bx <= 0.92) & scope
-    body_lines = body_band & product_edges
-    center_band = bbox_mask_from_fraction(fallback_shape, bbox, (0.36, 0.32, 0.64, 0.70))
-    center_grill_emblem = center_band & product_edges
+    window_band = (by >= 0.06) & (by <= 0.58) & (bx >= 0.06) & (bx <= 0.94) & scope
+    changed_window_edges = changed_detail_edges & window_band & (glass_contour | (by <= 0.28) | (silhouette & (by <= 0.36)))
+    window_line_edges = window_band & product_edges & (by <= 0.26)
+    window_line = (glass_contour | changed_window_edges | window_line_edges | (silhouette & (by <= 0.34))) & ~glass_interior
+    body_band = (by >= 0.38) & (by <= 0.80) & (bx >= 0.06) & (bx <= 0.96) & scope
+    body_lines = body_band & (product_edges | changed_detail_edges)
+    center_band = bbox_mask_from_fraction(fallback_shape, bbox, (0.00, 0.28, 0.46, 0.78)) & scope
+    center_front_core = center_band & (bx <= 0.03) & (by >= 0.44) & (by <= 0.64)
+    center_grill_emblem = center_band & (product_edges | changed_detail_edges | center_front_core)
 
     raw_zones = {
-        "silhouette": silhouette,
-        "front_rear": front_rear,
-        "wheels_tires": wheels_tires,
-        "window_line": window_line,
-        "body_lines": body_lines,
-        "center_grill_emblem": center_grill_emblem,
+        "silhouette": silhouette & ~glass_interior,
+        "front_rear": front_rear & ~glass_interior,
+        "wheels_tires": wheels_tires & ~glass_interior,
+        "window_line": window_line & ~glass_interior,
+        "body_lines": body_lines & ~glass_interior,
+        "center_grill_emblem": center_grill_emblem & ~glass_interior,
     }
     zones = {}
     for name, zone in raw_zones.items():
@@ -1966,7 +1984,7 @@ def compute_detail_zones_score(ref, gen, mask=None, profile=None, structure_debu
     for name, zone in zones.items():
         if not np.any(zone):
             continue
-        zone_score = score_from_error(masked_mean(edge_diff, zone), 0.13)
+        zone_score = score_from_error(masked_mean(edge_diff, zone), 0.16)
         zone_scores[name] = zone_score
         weight = float(weights_cfg.get(name, 1.0))
         weighted_sum += zone_score * weight; weight_sum += weight
@@ -2097,6 +2115,8 @@ def compute_component_product_scores(ref, gen, mask=None, structure_debug=None, 
             | zones["wheel_tire"]
             | zones["grille"]
             | zones["emblem"]
+            | zones["rear_light"]
+            | zones["rear_contour"]
         ),
     }
 
@@ -2200,7 +2220,10 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
     wheel_diff_gate = float(thresholds.get("warning_wheel_diff_min", 0.12))
     front_diff_gate = float(thresholds.get("warning_front_detail_diff_min", 0.17))
 
-    headlight_failed = headlight_diff > headlight_diff_gate or (headlight_score < float(thresholds.get("critical_headlight_score_max", 72.0)) and headlight_diff > light_diff_gate)
+    headlight_failed = headlight_diff > headlight_diff_gate or (
+        headlight_score < float(thresholds.get("critical_headlight_score_max", 72.0))
+        and headlight_diff > min(light_diff_gate, 0.08)
+    )
     light_signature_failed = light_signature_score < float(thresholds.get("critical_light_signature_score_max", 74.0)) and light_signature_diff > light_diff_gate
     wheel_strong = min(front_wheel_score, rear_wheel_score, wheel_tire_score) < float(thresholds.get("critical_wheel_score_max", 68.0)) and max(front_wheel_diff, rear_wheel_diff, wheel_tire_diff) > wheel_diff_gate
     wheel_warning = min(front_wheel_score, rear_wheel_score, wheel_tire_score) < float(thresholds.get("warning_wheel_score_max", 84.0)) and max(front_wheel_diff, rear_wheel_diff, wheel_tire_diff) > wheel_diff_gate
@@ -2257,11 +2280,12 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
     reflection_cfg = profile.get("reflection_tolerance", {})
     reflection_weights = build_reflection_downweight_map(ref, gen, car_mask=scope)
     downweight_threshold = float(reflection_cfg.get("downweight_threshold", DEFAULT_MERCEDES_WEIGHT_PROFILE.get("downweight_threshold", 0.92)))
-    reflection_candidate = reflection_weights < downweight_threshold
+    scope_mask_for_reflection = scope if scope is not None else np.ones(ref.shape[:2], dtype=bool)
+    reflection_candidate = (reflection_weights < downweight_threshold) & scope_mask_for_reflection
     critical_component_mask = np.asarray(components["critical_component_mask"], dtype=bool)
     glass_masks = build_glass_region_masks(ref, gen, car_mask=scope)
     glass_surface_mask = glass_masks.get("surface", np.zeros(ref.shape[:2], dtype=bool))
-    paint_reflection_zone = (scope if scope is not None else np.ones(ref.shape[:2], dtype=bool)) & ~critical_component_mask & ~glass_masks.get("line", np.zeros(ref.shape[:2], dtype=bool))
+    paint_reflection_zone = scope_mask_for_reflection & ~critical_component_mask & ~glass_masks.get("line", np.zeros(ref.shape[:2], dtype=bool))
     allowed_reflection_zone = (glass_surface_mask | paint_reflection_zone) & ~critical_component_mask
     accepted_reflection = reflection_candidate & allowed_reflection_zone
     rejected_reflection = reflection_candidate & critical_component_mask
@@ -2311,6 +2335,7 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
             "reflection_candidate_map": debug_path / f"{stem}_reflection_candidate_map.png",
             "reflection_accepted_map": debug_path / f"{stem}_reflection_accepted_map.png",
             "reflection_rejected_due_to_critical_component": debug_path / f"{stem}_reflection_rejected_due_to_critical_component.png",
+            "reflection_downweight": debug_path / f"{stem}_reflection_downweight.png",
         }
         save_weight_debug_map(structure_map, extra_paths["structure_diff_map"])
         save_weight_debug_map(color_score["map"] * scope_mask.astype(np.float32), extra_paths["reflection_diff_map"])
@@ -2328,6 +2353,7 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
         save_weight_debug_map(reflection_candidate.astype(np.float32), extra_paths["reflection_candidate_map"])
         save_weight_debug_map(accepted_reflection.astype(np.float32), extra_paths["reflection_accepted_map"])
         save_weight_debug_map(rejected_reflection.astype(np.float32), extra_paths["reflection_rejected_due_to_critical_component"])
+        save_weight_debug_map(mask_debug_map_to_vehicle(reflection_weights, scope_mask), extra_paths["reflection_downweight"])
     else:
         extra_paths = {}
 
@@ -2745,6 +2771,8 @@ def evaluate_pair(
         | critical_component_zones["front_wheel_zone"]
         | critical_component_zones["rear_wheel_zone"]
         | critical_component_zones["tire_zone"]
+        | critical_component_zones["rear_light_zone"]
+        | critical_component_zones["rear_contour_zone"]
         | critical_component_zones["window_line_zone"]
     )
     protected_reflection_weight_map = np.where(critical_component_mask, 1.0, reflection_weight_map)
