@@ -45,8 +45,10 @@ const structureOnlyScore = document.getElementById('structureOnlyScore');
 const detailZonesScore = document.getElementById('detailZonesScore');
 const colorReflectionScore = document.getElementById('colorReflectionScore');
 const productIntegrityScore = document.getElementById('productIntegrityScore');
+const productIntegrityBaseFinal = document.getElementById('productIntegrityBaseFinal');
 const productIntegrityDecision = document.getElementById('productIntegrityDecision');
 const productIntegrityInterpretation = document.getElementById('productIntegrityInterpretation');
+const productIntegrityCapExplanation = document.getElementById('productIntegrityCapExplanation');
 const criticalFindings = document.getElementById('criticalFindings');
 const toleratedFindings = document.getElementById('toleratedFindings');
 const maskIou = document.getElementById('maskIou');
@@ -1294,6 +1296,21 @@ function normalizeFindings(value) {
   }
 }
 
+function parseJsonList(value) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+  if (typeof value !== 'string' || !value.trim()) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+}
+
 function renderFindingsList(node, findings, emptyText) {
   if (!node) {
     return;
@@ -1331,9 +1348,31 @@ function renderMetrics(data) {
   detailZonesScore.textContent = formatScore(data.detail_zones_score);
   colorReflectionScore.textContent = formatScore(data.color_reflection_score);
   productIntegrityScore.textContent = formatScore(data.product_integrity_score);
+  const baseScore = Number(data.product_integrity_base_score_before_caps);
+  const finalScore = Number(data.product_integrity_final_score_after_caps ?? data.product_integrity_score);
+  if (productIntegrityBaseFinal) {
+    productIntegrityBaseFinal.textContent = Number.isFinite(baseScore) && Number.isFinite(finalScore)
+      ? `Basis ${baseScore.toFixed(2)} % → Final ${finalScore.toFixed(2)} %`
+      : '--';
+  }
   productIntegrityDecision.textContent = data.product_integrity_decision || '--';
   if (productIntegrityInterpretation) {
     productIntegrityInterpretation.textContent = data.product_integrity_interpretation || data.decision_reason || 'Keine Interpretation verfügbar.';
+  }
+  if (productIntegrityCapExplanation) {
+    const adjustments = [
+      ...parseJsonList(data.applied_caps),
+      ...parseJsonList(data.applied_penalties),
+    ];
+    const delta = Number.isFinite(baseScore) && Number.isFinite(finalScore) ? baseScore - finalScore : 0;
+    if (delta > 0.5 && adjustments.length) {
+      const strongest = adjustments.reduce((best, item) => Number(item?.delta || 0) > Number(best?.delta || 0) ? item : best, adjustments[0]);
+      productIntegrityCapExplanation.textContent = `Basisscore ${baseScore.toFixed(2)} %. Finalscore ${finalScore.toFixed(2)} %, weil ${strongest.name || strongest.type} für ${strongest.affected_component || strongest.affected_area || 'eine kritische Komponente'} ausgelöst wurde (Score/Schwelle: ${strongest.threshold ?? 'n/a'}).`;
+    } else if (delta > 0.5) {
+      productIntegrityCapExplanation.textContent = `Basisscore ${baseScore.toFixed(2)} %. Finalscore ${finalScore.toFixed(2)} %. WARNUNG: Keine sichtbare Cap-/Penalty-Regel im Payload gefunden.`;
+    } else {
+      productIntegrityCapExplanation.textContent = 'Keine relevante Score-Reduktion durch Caps oder Penalties aktiv.';
+    }
   }
   renderFindingsList(criticalFindings, data.critical_findings, 'Keine kritischen Produktabweichungen erkannt.');
   renderFindingsList(toleratedFindings, data.tolerated_findings, 'Keine tolerierten Reflexions-/Lichthinweise.');
