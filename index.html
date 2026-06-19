@@ -176,7 +176,7 @@
                 <p class="stat-label">LPIPS (Wert + %)</p>
                 <details class="metric-info">
                   <summary aria-label="LPIPS Erklärung anzeigen">ⓘ</summary>
-                  <p>Zeigt die perzeptuelle Abweichung via offiziellem LPIPS-Forward auf dem vollständigen normalisierten Bildpaar.</p>
+                  <p>Vergleicht, wie ähnlich die beiden Bilder für ein Wahrnehmungsmodell wirken. Niedriger Wert und hoher Prozentwert sind besser.</p>
                 </details>
               </div>
               <p id="lpips" class="stat-value">--</p>
@@ -186,7 +186,7 @@
                 <p class="stat-label">SSIM (Wert + %)</p>
                 <details class="metric-info">
                   <summary aria-label="SSIM Erklärung anzeigen">ⓘ</summary>
-                  <p>Zeigt die strukturelle Ähnlichkeit im gültigen Bildinhalt. Letterbox-Ränder werden nicht mitbewertet.</p>
+                  <p>Vergleicht Formen und Kanten im eigentlichen Bild. Schwarze oder gepaddete Ränder zählen nicht mit.</p>
                 </details>
               </div>
               <p id="ssim" class="stat-value">--</p>
@@ -196,43 +196,29 @@
                 <p class="stat-label">ΔE CIEDE2000 (Wert + %)</p>
                 <details class="metric-info">
                   <summary aria-label="DeltaE Erklärung anzeigen">ⓘ</summary>
-                  <p>Zeigt die sichtbare Farbabweichung im gültigen Bildinhalt. Gepaddete Randbereiche werden ignoriert.</p>
+                  <p>Zeigt, wie stark sich die Farben sichtbar unterscheiden. Randbereiche außerhalb des Motivs werden ignoriert.</p>
                 </details>
               </div>
               <p id="deltaE" class="stat-value">--</p>
             </article>
             <article class="metric-card metric-card-priority">
-              <div class="stat-label-row">
-                <p class="stat-label">LPIPS car-only (Wert + %)</p>
-                <details class="metric-info">
-                  <summary aria-label="LPIPS car-only Erklärung anzeigen">ⓘ</summary>
-                  <p>Bewertet die Fahrzeug-ROI per offiziellem LPIPS-Forward auf zugeschnittenem Bildbereich. Ist der Modus aus, bleibt der Wert leer.</p>
-                </details>
-              </div>
-              <p id="lpipsCar" class="stat-value">--</p>
-            </article>
-            <article class="metric-card metric-card-priority">
-              <div class="stat-label-row"><p class="stat-label">Product-Integrity-Score</p><details class="metric-info"><summary aria-label="Product Integrity Erklärung anzeigen">ⓘ</summary><p>Gesamtbewertung: Structure-only 50 %, Detail-Zones 40 %, Color/Reflection 5 %, Car-only-LPIPS 5 %. Harte Komponentenregeln für Scheinwerfer, Lichtsignatur, Räder/Felgen/Reifen, Grill und Emblem haben Vorrang.</p></details></div>
+              <div class="stat-label-row"><p class="stat-label">Product-Integrity-Score</p><details class="metric-info"><summary aria-label="Product Integrity Erklärung anzeigen">ⓘ</summary><p>Fasst Struktur, wichtige Detailbereiche sowie Farb- und Reflexionshinweise zusammen. Kritische Teile wie Licht, Räder, Grill und Emblem zählen besonders stark.</p></details></div>
               <p id="productIntegrityScore" class="stat-value">--</p>
             </article>
             <article class="metric-card metric-card-priority">
-              <div class="stat-label-row"><p class="stat-label">Product-Integrity Basis / Final</p><details class="metric-info"><summary aria-label="Product Integrity Caps anzeigen">ⓘ</summary><p>Zeigt den gewichteten Basisscore vor Caps und den Finalscore nach sichtbaren Caps/Penalties.</p></details></div>
-              <p id="productIntegrityBaseFinal" class="stat-value">--</p>
-            </article>
-            <article class="metric-card metric-card-priority">
-              <div class="stat-label-row"><p class="stat-label">Product-Integrity-Entscheidung</p><details class="metric-info"><summary aria-label="Entscheidung Erklärung anzeigen">ⓘ</summary><p>passed, warning oder failed nach konfigurierbaren Schwellenwerten für Produktstruktur und kritische Detailzonen.</p></details></div>
+              <div class="stat-label-row"><p class="stat-label">Product-Integrity-Entscheidung</p><details class="metric-info"><summary aria-label="Entscheidung Erklärung anzeigen">ⓘ</summary><p>Zeigt das Ergebnis als passed, warning oder failed. Die Entscheidung richtet sich nach den eingestellten Grenzen für Struktur und wichtige Detailbereiche.</p></details></div>
               <p id="productIntegrityDecision" class="stat-value">--</p>
             </article>
             <article class="metric-card">
-              <div class="stat-label-row"><p class="stat-label">Structure-Only-Score</p><details class="metric-info"><summary aria-label="Structure-only Erklärung anzeigen">ⓘ</summary><p>Vergleicht geglättete Graustufen-Kanten innerhalb der Fahrzeugmaske und ignoriert Farbton sowie Reflexe weitgehend.</p></details></div>
+              <div class="stat-label-row"><p class="stat-label">Structure-Only-Score</p><details class="metric-info"><summary aria-label="Structure-only Erklärung anzeigen">ⓘ</summary><p>Vergleicht vor allem Form und Kanten des Fahrzeugs. Farbe und Reflexe spielen hier kaum eine Rolle.</p></details></div>
               <p id="structureOnlyScore" class="stat-value">--</p>
             </article>
             <article class="metric-card">
-              <div class="stat-label-row"><p class="stat-label">Detail-Zones-Score</p><details class="metric-info"><summary aria-label="Detailzonen Erklärung anzeigen">ⓘ</summary><p>Prüft Scheinwerfer-/Front-/Heckbereiche, Felgen, Fensterlinie, Karosserielinien, Grill/Emblem und Silhouette stärker.</p></details></div>
+              <div class="stat-label-row"><p class="stat-label">Detail-Zones-Score</p><details class="metric-info"><summary aria-label="Detailzonen Erklärung anzeigen">ⓘ</summary><p>Bewertet die Bereiche, die für die Fahrzeugidentität wichtig sind. Dazu gehören Licht, Räder, Fensterlinie, Karosserie, Grill, Emblem und Silhouette.</p></details></div>
               <p id="detailZonesScore" class="stat-value">--</p>
             </article>
             <article class="metric-card">
-              <div class="stat-label-row"><p class="stat-label">Color-Reflection-Score</p><details class="metric-info"><summary aria-label="Color Reflection Erklärung anzeigen">ⓘ</summary><p>Separater Hinweiswert für Farb-, Helligkeits- und Reflexionsänderungen auf glatten Bereichen. Glasflächen und globale Lichtstimmung werden robust gedämpft; niedrige Werte wirken nur als weicher Hinweis auf Product-Integrity.</p></details></div>
+              <div class="stat-label-row"><p class="stat-label">Color-Reflection-Score</p><details class="metric-info"><summary aria-label="Color Reflection Erklärung anzeigen">ⓘ</summary><p>Zeigt Auffälligkeiten bei Farbe, Helligkeit und Reflexionen. Der Wert ist ein Hinweis und entscheidet nicht allein über das Ergebnis.</p></details></div>
               <p id="colorReflectionScore" class="stat-value">--</p>
             </article>
             <article class="metric-card metric-card-wide">
@@ -246,7 +232,7 @@
                 <p class="stat-label">Mask IoU</p>
                 <details class="metric-info">
                   <summary aria-label="Mask IoU Erklärung anzeigen">ⓘ</summary>
-                  <p>Zeigt die Überdeckung der segmentierten Fahrzeugflächen zwischen Referenz- und Vergleichsbild. Nur verfügbar, wenn Car-only/Fahrzeugsegmentierung erfolgreich war.</p>
+                  <p>Zeigt, wie gut sich die erkannten Fahrzeugflächen überdecken. Der Wert erscheint nur, wenn die Segmentierung geklappt hat.</p>
                 </details>
               </div>
               <p id="maskIou" class="stat-value">--</p>
@@ -256,7 +242,7 @@
                 <p class="stat-label">Mask Dice</p>
                 <details class="metric-info">
                   <summary aria-label="Mask Dice Erklärung anzeigen">ⓘ</summary>
-                  <p>Zeigt die Flächenübereinstimmung der segmentierten Fahrzeugmasken mit stärkerem Gewicht auf gemeinsame Bereiche. Nur verfügbar, wenn Car-only/Fahrzeugsegmentierung erfolgreich war.</p>
+                  <p>Zeigt, wie ähnlich die erkannten Fahrzeugmasken sind. Gemeinsame Flächen zählen dabei besonders.</p>
                 </details>
               </div>
               <p id="maskDice" class="stat-value">--</p>
