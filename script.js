@@ -1337,9 +1337,11 @@ function renderMetrics(data) {
   lpipsValue.textContent = formatMetricPair(data.lpips, data.lpips_similarity_percent);
   ssim.textContent = formatMetricPair(data.ssim, data.ssim_percent);
   deltaE.textContent = formatMetricPair(data.delta_e_ciede2000, data.delta_e_similarity_percent);
-  lpipsCar.textContent = hasCarOnlyMetric
-    ? formatMetricPair(data.lpips_car_only, data.lpips_car_only_similarity_percent)
-    : '--';
+  if (lpipsCar) {
+    lpipsCar.textContent = hasCarOnlyMetric
+      ? formatMetricPair(data.lpips_car_only, data.lpips_car_only_similarity_percent)
+      : '--';
+  }
   structureOnlyScore.textContent = formatScore(data.structure_only_score);
   detailZonesScore.textContent = formatScore(data.detail_zones_score);
   colorReflectionScore.textContent = formatScore(data.color_reflection_score);
@@ -1363,11 +1365,11 @@ function renderMetrics(data) {
     const delta = Number.isFinite(baseScore) && Number.isFinite(finalScore) ? baseScore - finalScore : 0;
     if (delta > 0.5 && adjustments.length) {
       const strongest = adjustments.reduce((best, item) => Number(item?.delta || 0) > Number(best?.delta || 0) ? item : best, adjustments[0]);
-      productIntegrityCapExplanation.textContent = `Basisscore ${baseScore.toFixed(2)} %. Finalscore ${finalScore.toFixed(2)} %, weil ${strongest.name || strongest.type} für ${strongest.affected_component || strongest.affected_area || 'eine kritische Komponente'} ausgelöst wurde (Score/Schwelle: ${strongest.threshold ?? 'n/a'}).`;
+      productIntegrityCapExplanation.textContent = `Der Score wurde reduziert: ${strongest.name || strongest.type} bei ${strongest.affected_component || strongest.affected_area || 'einer kritischen Komponente'} (Grenze: ${strongest.threshold ?? 'n/a'}).`;
     } else if (delta > 0.5) {
-      productIntegrityCapExplanation.textContent = `Basisscore ${baseScore.toFixed(2)} %. Finalscore ${finalScore.toFixed(2)} %. WARNUNG: Keine sichtbare Cap-/Penalty-Regel im Payload gefunden.`;
+      productIntegrityCapExplanation.textContent = 'Der Score wurde reduziert, aber der genaue Auslöser wurde nicht mitgeliefert.';
     } else {
-      productIntegrityCapExplanation.textContent = 'Keine relevante Score-Reduktion durch Caps oder Penalties aktiv.';
+      productIntegrityCapExplanation.textContent = 'Keine zusätzliche Score-Reduktion aktiv.';
     }
   }
   renderFindingsList(criticalFindings, data.critical_findings, 'Keine kritischen Produktabweichungen erkannt.');
@@ -1668,7 +1670,9 @@ function resetInterface() {
   comparisonList.innerHTML = '';
 
   [lpipsValue, ssim, deltaE, lpipsCar, maskIou, maskDice].forEach((node) => {
-    node.textContent = node.id.includes('Similarity') ? '-- %' : '--';
+    if (node) {
+      node.textContent = node.id.includes('Similarity') ? '-- %' : '--';
+    }
   });
 
   previewText.textContent = 'Lade zwei Bilder hoch und starte den Vergleich.';
