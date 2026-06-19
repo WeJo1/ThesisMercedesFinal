@@ -93,6 +93,12 @@ def test_massive_wheel_and_rim_deviation_cannot_pass(tmp_path):
     assert (tmp_path / 'massive_wheel_critical_component_score_map.png').exists()
 
 
+def test_distance_to_similarity_score_inverts_lpips_distance_once():
+    assert im.distance_to_similarity_score(0.0575) == 94.25
+    assert im.convert_lpips_to_similarity_percent(0.0575) == 94.25
+    assert im.normalize_lpips_car_only_similarity_percent(0.0575, fallback_similarity_pct=50.0) == 94.25
+    assert im.normalize_lpips_car_only_similarity_percent(94.25, fallback_similarity_pct=50.0) == 94.25
+
 def test_product_integrity_debug_sanity_checks_for_lpips_direction():
     ref, mask = make_car()
     result = im.compute_product_integrity_scores(ref, ref.copy(), car_mask=mask, car_only_lpips_score=0.0575)
