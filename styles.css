@@ -905,9 +905,6 @@ button {
   font-size: 1.2rem;
 }
 
-.metric-card-profile .stat-value {
-  font-size: 0.98rem;
-}
 @media (prefers-reduced-motion: reduce) {
   .stats-grid article,
   .stats-grid article::after {
