@@ -284,6 +284,7 @@ CSV_COLUMN_ORDER = [
     "critical_component_names",
     "product_integrity_profile",
     "product_integrity_debug_paths",
+    "product_integrity_debug",
     "product_integrity_interpretation",
     "decision_reason",
     "contour_warning_reason",
@@ -2295,6 +2296,7 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
     components = compute_component_product_scores(ref, gen, mask=scope, structure_debug=structure, lpips_component_map=lpips_component_map, debug_dir=debug_dir, stem=stem)
     component_values = components["scores"]
     component_diffs = components["diffs"]
+    lpips_car_only_raw = None if car_only_lpips_score is None else float(car_only_lpips_score)
     lpips_car_only_similarity_pct = normalize_lpips_car_only_similarity_percent(
         car_only_lpips_score,
         fallback_similarity_pct=structure["score"],
@@ -2330,6 +2332,7 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
     denom_without_color = denom - color_reflection_weight
     final_without_color_score_pct = float(total_without_color / denom_without_color) if denom_without_color > 0 else base_final_product_integrity_score_pct
     raw_color_reflection_influence = final_without_color_score_pct - base_final_product_integrity_score_pct
+    score_adjustments = []
     reflection_cfg = profile.get("reflection_tolerance", {})
     stable_for_color_cap = (
         structure["score"] >= float(reflection_cfg.get("stable_structure_for_color_cap", 90.0))
@@ -2337,7 +2340,15 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
     )
     if stable_for_color_cap:
         max_color_penalty = float(reflection_cfg.get("color_score_penalty_cap_when_structure_stable", 1.2))
-        base_final_product_integrity_score_pct = max(base_final_product_integrity_score_pct, final_without_color_score_pct - max_color_penalty)
+        capped_base = max(base_final_product_integrity_score_pct, final_without_color_score_pct - max_color_penalty)
+        if capped_base != base_final_product_integrity_score_pct:
+            score_adjustments.append({
+                "type": "color_reflection_penalty_cap",
+                "before": float(base_final_product_integrity_score_pct),
+                "after": float(capped_base),
+                "reason": "Structure und Detail stabil; Color-/Reflection-Einfluss begrenzt.",
+            })
+        base_final_product_integrity_score_pct = capped_base
     final_product_integrity_score_pct = base_final_product_integrity_score_pct
     thresholds = profile.get("thresholds", {})
     contour_cfg = profile.get("contour_warning", {})
@@ -2363,6 +2374,7 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
     tolerated = []
     contour_warning_reason = "Keine relevante Konturabweichung erkannt."
     component_findings = []
+    critical_component_findings = []
     zone_scores = detail["zone_scores"]
     zone_labels = {
         "silhouette": "Abweichung an Fahrzeugkontur erkannt",
@@ -2414,10 +2426,15 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
     )
     wheel_score = min(front_wheel_score, rear_wheel_score, wheel_tire_score)
 
-    final_product_integrity_score_pct = min(
-        final_product_integrity_score_pct,
-        (0.62 * base_final_product_integrity_score_pct) + (0.14 * detail["score"]) + (0.10 * critical_component_score) + (0.14 * wheel_score),
-    )
+    component_blend_cap = (0.62 * base_final_product_integrity_score_pct) + (0.14 * detail["score"]) + (0.10 * critical_component_score) + (0.14 * wheel_score)
+    if component_blend_cap < final_product_integrity_score_pct:
+        score_adjustments.append({
+            "type": "component_blend_cap",
+            "before": float(final_product_integrity_score_pct),
+            "after": float(component_blend_cap),
+            "reason": "Detail-, Rad- und kritische Bauteil-Scores begrenzen den Endscore weich.",
+        })
+    final_product_integrity_score_pct = min(final_product_integrity_score_pct, component_blend_cap)
 
     light_signature_diff = float(component_diffs.get("front_light_signature", 0.0))
     front_wheel_diff = float(component_diffs.get("front_wheel", 0.0))
@@ -2453,24 +2470,29 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
     if headlight_failed:
         add_finding(findings, "headlight_light_signature", "critical", "component:headlight")
         component_findings.append("Scheinwerfer/Lichtsignatur")
+        critical_component_findings.append("Scheinwerfer/Lichtsignatur")
     if light_signature_failed and not headlight_failed:
         add_finding(findings, "headlight_light_signature", "critical", "component:light_signature")
         component_findings.append("Lichtsignatur")
+        critical_component_findings.append("Lichtsignatur")
     if wheel_strong:
         add_finding(findings, "wheel_tire_structure", "critical", "component:wheel_tire")
         component_findings.append("Felgen/Reifen/Radstruktur")
+        critical_component_findings.append("Felgen/Reifen/Radstruktur")
     elif wheel_warning:
         add_finding(findings, "wheel_tire_structure", "tolerated", "component:wheel_tire")
         component_findings.append("Felgen/Reifen/Radstruktur")
     if grille_strong:
         add_finding(findings, "grille_front_structure", "critical", "component:grille")
         component_findings.append("Kühlergrill")
+        critical_component_findings.append("Kühlergrill")
     elif grille_warning:
         add_finding(findings, "grille_front_structure", "tolerated", "component:grille")
         component_findings.append("Kühlergrill")
     if emblem_strong:
         add_finding(findings, "emblem_front_structure", "critical", "component:emblem")
         component_findings.append("Mercedes-Stern/Emblem")
+        critical_component_findings.append("Mercedes-Stern/Emblem")
     elif emblem_warning:
         add_finding(findings, "emblem_front_structure", "tolerated", "component:emblem")
         component_findings.append("Mercedes-Stern/Emblem")
@@ -2526,17 +2548,27 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
                 findings["body_line_door_gap"]["reason"] = "reflection:tolerated_body_line"
             final_product_integrity_score_pct = max(final_product_integrity_score_pct, min(base_final_product_integrity_score_pct, float(thresholds.get("failed_product_integrity_min", 90.0))))
 
+    def apply_score_cap(cap_value, cap_type, reason, hard=False):
+        nonlocal final_product_integrity_score_pct
+        cap_value = float(cap_value)
+        before = float(final_product_integrity_score_pct)
+        after = min(before, cap_value)
+        if after < before:
+            score_adjustments.append({"type": cap_type, "before": before, "after": after, "delta": float(before - after), "hard": bool(hard), "reason": reason})
+        final_product_integrity_score_pct = after
+
     if headlight_failed or light_signature_failed:
-        final_product_integrity_score_pct = min(final_product_integrity_score_pct, min(headlight_score, light_signature_score) + 18.0)
+        apply_score_cap(min(headlight_score, light_signature_score) + 18.0, "critical_headlight_light_signature_cap", "Harte Critical-Fail-Regel für Scheinwerfer/Lichtsignatur.", hard=True)
     wheel_finding_active = "wheel_tire_structure" in findings
     if wheel_warning and wheel_finding_active:
-        final_product_integrity_score_pct = min(final_product_integrity_score_pct, wheel_score + 6.0)
+        apply_score_cap(wheel_score + 6.0, "tolerated_wheel_warning_cap", "Tolerierter Rad-Hinweis; nur begrenzte weiche Deckelung.", hard=False)
     if wheel_strong and wheel_finding_active:
-        final_product_integrity_score_pct = min(final_product_integrity_score_pct, wheel_score + 4.0)
-    if wheel_score < float(thresholds.get("warning_wheel_score_max", 94.0)) and wheel_local_diff > wheel_diff_gate:
-        final_product_integrity_score_pct = min(final_product_integrity_score_pct, wheel_score + (4.0 if wheel_score < float(thresholds.get("critical_wheel_score_max", 90.0)) else 6.0))
-    if component_findings and critical_component_score < float(thresholds.get("warning_critical_component_score_max", 94.0)):
-        final_product_integrity_score_pct = min(final_product_integrity_score_pct, critical_component_score + 6.0)
+        apply_score_cap(wheel_score + 4.0, "critical_wheel_cap", "Harte Critical-Fail-Regel für Felgen/Reifen/Radstruktur.", hard=True)
+    if wheel_strong and wheel_score < float(thresholds.get("warning_wheel_score_max", 94.0)) and wheel_local_diff > wheel_diff_gate:
+        apply_score_cap(wheel_score + (4.0 if wheel_score < float(thresholds.get("critical_wheel_score_max", 90.0)) else 6.0), "critical_wheel_local_diff_cap", "Rad-Score und lokale Raddifferenz überschreiten Critical-Grenze.", hard=True)
+    has_critical_finding_before_split = any(item.get("severity") == "critical" for item in findings.values())
+    if has_critical_finding_before_split and component_findings and critical_component_score < float(thresholds.get("warning_critical_component_score_max", 94.0)):
+        apply_score_cap(critical_component_score + 6.0, "critical_component_cap", "Kritischer Bauteilfund begrenzt Endscore.", hard=True)
 
     if debug_dir:
         debug_path = Path(debug_dir); debug_path.mkdir(parents=True, exist_ok=True)
@@ -2637,7 +2669,7 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
     else:
         interpretation = "Fahrzeugstruktur, Kontur und Detailzonen sind stabil. Es wurden keine produktrelevanten Abweichungen erkannt."
         decision_reason = "Scores über den Pass-Schwellen und keine Findings."
-    critical_component_names = sorted(set(component_findings))
+    critical_component_names = sorted(set(critical_component_findings))
     color_debug = dict(color_score.get("debug", {}))
     color_debug.update({
         "configured_weight": float(color_reflection_weight),
@@ -2646,6 +2678,54 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
         "capped_final_score_influence_points": float(final_without_color_score_pct - base_final_product_integrity_score_pct),
         "final_score_without_color_reflection": float(final_without_color_score_pct),
     })
+    sanity_checks = []
+    def add_sanity_check(name, passed, message):
+        sanity_checks.append({"name": name, "passed": bool(passed), "message": message})
+
+    all_main_scores = [structure["score"], detail["score"], color_score["score"], lpips_car_only_similarity_pct]
+    hard_adjustments = [item for item in score_adjustments if item.get("hard")]
+    strongest_adjustment = max(score_adjustments, key=lambda item: item.get("delta", item.get("before", 0.0) - item.get("after", 0.0)), default=None)
+    if lpips_car_only_raw is not None and 0.0 <= lpips_car_only_raw < 0.10:
+        add_sanity_check("lpips_distance_below_0_10_similarity_above_90", lpips_car_only_similarity_pct > 90.0, f"LPIPS-Distanz {lpips_car_only_raw:.4f} ergibt Similarity {lpips_car_only_similarity_pct:.2f}%.")
+    add_sanity_check("all_components_above_85_not_below_20_without_hard_fail", not (all(score > 85.0 for score in all_main_scores) and final_product_integrity_score_pct < 20.0 and not hard_adjustments), "Alle Teilwerte >85%; Endscore darf ohne harte Critical-Fail-Regel nicht <20% fallen.")
+    add_sanity_check("low_final_score_has_cause", not (final_product_integrity_score_pct < 20.0 and not (critical or score_adjustments)), "Endscore <20% muss durch kritische Findings oder dokumentierte Penalties erklärt sein.")
+    if lpips_car_only_raw is not None and 0.0 <= lpips_car_only_raw <= 1.0:
+        add_sanity_check("final_score_not_raw_lpips_distance_times_100", abs(final_product_integrity_score_pct - (lpips_car_only_raw * 100.0)) > 0.75, "Endscore darf nicht nahezu LPIPS-Distanz*100 entsprechen; sonst Richtungsfehler-Verdacht.")
+    add_sanity_check("color_reflection_drop_has_attribution", not (color_score["score"] + 8.0 < structure["score"] and not color_score.get("debug")), "Starker Color-/Reflection-Abfall muss im Debug attributierbar sein.")
+    tolerated_penalty = sum(item.get("delta", 0.0) for item in score_adjustments if item["type"].startswith("tolerated"))
+    add_sanity_check("tolerated_findings_do_not_massively_reduce_score", tolerated_penalty <= 8.0, f"Tolerierte Hinweise senken den Score um {tolerated_penalty:.2f} Punkte.")
+    low_score_explanation = ""
+    if final_product_integrity_score_pct < 20.0:
+        if hard_adjustments:
+            low_score_explanation = "; ".join(f"{item['type']}: {item['reason']}" for item in hard_adjustments)
+        elif strongest_adjustment:
+            low_score_explanation = f"Stärkste Penalty {strongest_adjustment['type']}: {strongest_adjustment['reason']}"
+        elif critical:
+            low_score_explanation = "Critical Findings: " + ", ".join(critical)
+        else:
+            low_score_explanation = "WARNUNG: Kein harter Fehler und keine Penalty als Ursache dokumentiert."
+
+    product_debug = {
+        "score_direction": "Alle Product-Integrity-Teilwerte sind Similarity-Prozente: höher ist besser. LPIPS-Distanzen werden vor Gewichtung zu Similarity invertiert.",
+        "raw_inputs": {"lpips_car_only_input": lpips_car_only_raw, "lpips_car_only_similarity_pct": float(lpips_car_only_similarity_pct)},
+        "component_scores_pct": {k: float(v) for k, v in component_scores.items()},
+        "weights": {k: float(weights.get(k, 0.0)) for k in weights},
+        "base_final_before_caps_pct": float(base_final_product_integrity_score_pct),
+        "final_without_color_reflection_pct": float(final_without_color_score_pct),
+        "final_product_integrity_score_pct": float(final_product_integrity_score_pct),
+        "score_adjustments": score_adjustments,
+        "critical_findings": critical,
+        "tolerated_findings": tolerated,
+        "low_score_explanation": low_score_explanation,
+        "reflection_attribution": {
+            "accepted_area_ratio": float(reflection_downweight_area_ratio),
+            "accepted_structure_diff_mean": float(accepted_structure_mean),
+            "glass_surface_area_ratio": float(np.sum(glass_surface_mask & scope_mask_for_reflection) / metric_area),
+            "rejected_critical_component_area_ratio": float(np.sum(rejected_reflection) / metric_area),
+            "debug_paths": {key: str(value) for key, value in extra_paths.items() if key.startswith("reflection")},
+        },
+        "sanity_checks": sanity_checks,
+    }
     debug_paths = {}; debug_paths.update(structure["debug_paths"]); debug_paths.update(detail["debug_paths"]); debug_paths.update(color_score["debug_paths"]); debug_paths.update(components["debug_paths"]); debug_paths.update({k: str(v) for k, v in extra_paths.items()})
     return {
         "structure_only_score": structure["score"],
@@ -2682,6 +2762,7 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
         "detail_zone_area_ratio": detail["detail_zone_area_ratio"],
         "structure_masked_area_ratio": structure["structure_masked_area_ratio"],
         "color_reflection_debug": color_debug,
+        "product_integrity_debug": product_debug,
     }
 
 def compute_delta_e(ref, gen):
@@ -3232,6 +3313,14 @@ def evaluate_pair(
     print(f"  Front Wheel Score       : {product_integrity['front_wheel_score']:.2f}%")
     print(f"  Rear Wheel Score        : {product_integrity['rear_wheel_score']:.2f}%")
     print(f"  Critical Components     : {', '.join(product_integrity['critical_component_names']) or 'keine'}")
+    product_debug = product_integrity.get("product_integrity_debug", {})
+    print("  Product Integrity Debug : Similarity-Richtung: höher ist besser; Distance/Similarity/Penalty getrennt")
+    print(f"  PI Base before caps     : {product_debug.get('base_final_before_caps_pct', product_integrity['product_integrity_score']):.2f}%")
+    print(f"  PI without Color/Refl.  : {product_debug.get('final_without_color_reflection_pct', product_integrity['product_integrity_score']):.2f}%")
+    print(f"  PI adjustments          : {json.dumps(product_debug.get('score_adjustments', []), ensure_ascii=False)}")
+    print(f"  PI sanity checks        : {json.dumps(product_debug.get('sanity_checks', []), ensure_ascii=False)}")
+    if product_debug.get("low_score_explanation"):
+        print(f"  PI low-score cause      : {product_debug['low_score_explanation']}")
     if segmenter is not None:
         print(f"  Mask area (%)      : {car_metrics['debug']['mask_area_ratio'] * 100.0:.2f}%")
         print(f"  BBox (Metrik)      : {car_metrics['debug']['metric_bbox']}")
@@ -3312,6 +3401,7 @@ def evaluate_pair(
         "critical_component_names": json.dumps(product_integrity["critical_component_names"], ensure_ascii=False),
         "product_integrity_profile": product_integrity_profile.get("name", DEFAULT_PRODUCT_INTEGRITY_PROFILE_NAME),
         "product_integrity_debug_paths": json.dumps(product_integrity["product_integrity_debug_paths"], sort_keys=True),
+        "product_integrity_debug": json.dumps(product_integrity.get("product_integrity_debug", {}), ensure_ascii=False, sort_keys=True),
         "product_integrity_interpretation": product_integrity["product_integrity_interpretation"],
         "decision_reason": product_integrity["decision_reason"],
         "contour_warning_reason": product_integrity["contour_warning_reason"],

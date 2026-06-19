@@ -91,3 +91,33 @@ def test_massive_wheel_and_rim_deviation_cannot_pass(tmp_path):
     assert (tmp_path / 'massive_wheel_wheel_zone_combined.png').exists()
     assert (tmp_path / 'massive_wheel_wheel_score_heatmap.png').exists()
     assert (tmp_path / 'massive_wheel_critical_component_score_map.png').exists()
+
+
+def test_product_integrity_debug_sanity_checks_for_lpips_direction():
+    ref, mask = make_car()
+    result = im.compute_product_integrity_scores(ref, ref.copy(), car_mask=mask, car_only_lpips_score=0.0575)
+    debug = result["product_integrity_debug"]
+    checks = {item["name"]: item for item in debug["sanity_checks"]}
+
+    assert result["lpips_car_only_similarity_pct"] > 90.0
+    assert result["product_integrity_score"] > 90.0
+    assert checks["lpips_distance_below_0_10_similarity_above_90"]["passed"]
+    assert checks["final_score_not_raw_lpips_distance_times_100"]["passed"]
+    assert debug["raw_inputs"]["lpips_car_only_input"] == 0.0575
+    assert debug["score_direction"].startswith("Alle Product-Integrity-Teilwerte")
+
+
+def test_tolerated_findings_are_separate_from_critical_component_failures():
+    ref, mask = make_car()
+    gen = ref.copy()
+    # Eine breite, glatte Farb-/Reflexionsänderung erzeugt tolerierte Hinweise, aber keinen harten Bauteil-Fail.
+    gen[mask] = np.clip(ref[mask] + np.array([0.14, 0.08, 0.02], dtype=np.float32), 0, 1)
+
+    result = im.compute_product_integrity_scores(ref, gen, car_mask=mask, car_only_lpips_score=92.0)
+    debug = result["product_integrity_debug"]
+    checks = {item["name"]: item for item in debug["sanity_checks"]}
+
+    assert not result["critical_findings"]
+    assert result["critical_component_names"] == []
+    assert checks["tolerated_findings_do_not_massively_reduce_score"]["passed"]
+    assert all(not item.get("hard") for item in debug["score_adjustments"] if item["type"].startswith("tolerated"))
