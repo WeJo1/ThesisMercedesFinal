@@ -121,3 +121,53 @@ def test_tolerated_findings_are_separate_from_critical_component_failures():
     assert result["critical_component_names"] == []
     assert checks["tolerated_findings_do_not_massively_reduce_score"]["passed"]
     assert all(not item.get("hard") for item in debug["score_adjustments"] if item["type"].startswith("tolerated"))
+
+
+
+def test_color_reflection_uses_weighted_local_glass_change_debug_fields():
+    ref, mask = make_car()
+    gen = ref.copy()
+    gen[28:44, 64:154] = np.clip(ref[28:44, 64:154] + np.array([0.18, 0.12, 0.04], dtype=np.float32), 0, 1)
+
+    result = im.compute_color_reflection_score(ref, gen, mask=mask)
+    debug = result["debug"]
+
+    assert debug["area_weight_map_used_in_final_error"] is True
+    assert debug["active_mask_area_px"] > 0
+    assert debug["glass_interior_area_px"] > 0
+    assert debug["final_color_reflection_error"] > 0.0
+    assert debug["color_reflection_score_after_clipping"] < 100.0
+    assert result["score"] == debug["color_reflection_score_after_clipping"]
+
+
+def test_product_integrity_example_values_use_similarity_percent_without_hidden_cap():
+    ref, mask = make_car()
+    result = im.compute_product_integrity_scores(ref, ref.copy(), car_mask=mask, car_only_lpips_score=96.87)
+    debug = result["product_integrity_debug"]
+    expected = (0.535 * result["structure_only_score"] + 0.400 * result["detail_zones_score"] + 0.015 * result["color_reflection_score"] + 0.050 * 96.87)
+
+    assert debug["configured_weights"] == {
+        "structure_weight": 0.535,
+        "detail_weight": 0.4,
+        "color_reflection_weight": 0.015,
+        "car_only_lpips_weight": 0.05,
+    }
+    assert debug["car_only_lpips_similarity_percent"] == 96.87
+    assert result["product_integrity_score"] == np.float64(expected).item()
+    assert debug["applied_caps"] == []
+    assert debug["hidden_findings_count"] == 0
+
+
+def test_product_integrity_lower_than_base_requires_visible_reason():
+    ref, mask = make_car()
+    gen = ref.copy()
+    yy, xx = np.mgrid[0:120, 0:220]
+    tire = ((xx-111)/18)**2 + ((yy-86)/16)**2 <= 1
+    gen[tire] = 0.82
+
+    result = im.compute_product_integrity_scores(ref, gen, car_mask=mask, car_only_lpips_score=96.0)
+    debug = result["product_integrity_debug"]
+
+    if debug["product_integrity_score_delta_due_to_caps"] > 0.3:
+        assert debug["applied_caps"] or debug["applied_penalties"]
+        assert debug["visible_findings"]
