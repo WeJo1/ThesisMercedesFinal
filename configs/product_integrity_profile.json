@@ -7,9 +7,9 @@
     "car_only_lpips_score": true
   },
   "weights": {
-    "structure_only_score": 0.535,
+    "structure_only_score": 0.5,
     "detail_zones_score": 0.4,
-    "color_reflection_score": 0.015,
+    "color_reflection_score": 0.05,
     "car_only_lpips_score": 0.05
   },
   "thresholds": {
@@ -41,7 +41,7 @@
     "glass_interior_color_weight": 0.12,
     "glass_contour_color_weight": 0.45,
     "paint_color_weight": 1.0,
-    "color_score_error_scale": 0.08,
+    "color_score_error_scale": 0.22,
     "color_score_quantile": 0.9,
     "max_color_reflection_score": 98
   },
