@@ -138,6 +138,21 @@ DEFAULT_PRODUCT_INTEGRITY_PROFILE = {
 
 FINDING_SEVERITY_RANK = {"tolerated": 0, "warning": 1, "critical": 2}
 
+PUBLIC_PRODUCT_INTEGRITY_MESSAGES = {
+    "headlight_light_signature": "Scheinwerfer oder Lichtsignatur sollten geprüft werden.",
+    "wheel_tire_structure": "Felgen-, Reifen- oder Radstruktur sollten geprüft werden.",
+    "window_line": "Fensterlinie oder Dach-/Säulenstruktur wirkt auffällig.",
+    "body_line_door_gap": "Karosserielinie oder Türfuge sollte geprüft werden.",
+    "grille_front_structure": "Kühlergrill sollte geprüft werden.",
+    "emblem_front_structure": "Mercedes-Stern oder Emblem sollte geprüft werden.",
+    "silhouette_contour": "Fahrzeugkontur oder Proportionen sollten geprüft werden.",
+    "front_rear_structure": "Front- oder Heckstruktur sollte geprüft werden.",
+    "mask_alignment": "Fahrzeugposition, Skalierung oder Proportionen sollten geprüft werden.",
+    "glass_reflection": "Reflexionen oder Helligkeitsunterschiede auf Glasflächen wurden erkannt.",
+    "paint_reflection": "Flächige Lichtabweichung auf der Lackfläche wurde erkannt.",
+    "color_shift": "Farb- oder Helligkeitswirkung sollte geprüft werden.",
+}
+
 FINDING_TEXTS = {
     "headlight_light_signature": {
         "critical": "Kritische Änderung an Scheinwerfer oder Lichtsignatur erkannt",
@@ -211,6 +226,37 @@ def add_finding(findings, canonical_key, severity, source):
     if source not in current["sources"]:
         current["sources"].append(source)
 
+
+def build_product_integrity_hints(findings, score_adjustments):
+    """Trenne fachliche UI-Hinweise strikt von technischen Debug-Hinweisen."""
+    public = []
+    seen_public = set()
+    for component, item in findings.items():
+        message = PUBLIC_PRODUCT_INTEGRITY_MESSAGES.get(component)
+        if not message or component in seen_public:
+            continue
+        public.append({
+            "severity": item.get("severity", "warning"),
+            "component": component,
+            "message": message,
+        })
+        seen_public.add(component)
+
+    debug = []
+    for adjustment in score_adjustments:
+        debug.append({
+            "rule_id": adjustment.get("type") or adjustment.get("rule_name"),
+            "component": adjustment.get("affected_component") or adjustment.get("affected_area"),
+            "threshold": adjustment.get("threshold"),
+            "reason": adjustment.get("reason"),
+            "trigger": adjustment.get("trigger"),
+            "before": adjustment.get("before"),
+            "after": adjustment.get("after"),
+            "delta": adjustment.get("delta"),
+            "hard": adjustment.get("hard"),
+        })
+    return {"public": public, "debug": debug}
+
 def split_findings(findings):
     specific_front = {"headlight_light_signature", "grille_front_structure", "emblem_front_structure"}
     if "front_rear_structure" in findings and specific_front.intersection(findings):
@@ -271,6 +317,7 @@ CSV_COLUMN_ORDER = [
     "score_delta_due_to_penalties",
     "applied_caps",
     "applied_penalties",
+    "product_integrity_hints",
     "hidden_findings_count",
     "product_integrity_decision",
     "critical_findings",
@@ -2876,6 +2923,7 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
     visible_findings_preview = critical + tolerated
     applied_caps = [item for item in score_adjustments if item.get("after", item.get("before", 0.0)) < item.get("before", 0.0) and ("cap" in item.get("type", "") or item.get("hard"))]
     applied_penalties = [item for item in score_adjustments if item.get("after", item.get("before", 0.0)) < item.get("before", 0.0) and item not in applied_caps]
+    product_integrity_hints = build_product_integrity_hints(findings, score_adjustments)
     hidden_findings_count = sum(1 for item in score_adjustments if item.get("visible") is False)
     score_delta_due_to_caps = float(product_integrity_base_score_before_caps - final_product_integrity_score_pct)
     score_delta_due_to_penalties = float(sum(item.get("delta", 0.0) for item in applied_penalties))
@@ -2945,6 +2993,7 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
         "score_adjustments": score_adjustments,
         "applied_caps": applied_caps,
         "applied_penalties": applied_penalties,
+        "product_integrity_hints": product_integrity_hints,
         "visible_findings": visible_findings_preview,
         "hidden_findings_count": int(hidden_findings_count),
         "critical_findings": critical,
@@ -2989,6 +3038,7 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
         "score_delta_due_to_penalties": score_delta_due_to_penalties,
         "applied_caps": applied_caps,
         "applied_penalties": applied_penalties,
+        "product_integrity_hints": product_integrity_hints,
         "hidden_findings_count": hidden_findings_count,
         "product_integrity_decision": decision,
         "critical_findings": critical,
@@ -3647,6 +3697,7 @@ def evaluate_pair(
         "score_delta_due_to_penalties": product_integrity.get("score_delta_due_to_penalties"),
         "applied_caps": json.dumps(product_integrity.get("applied_caps", []), ensure_ascii=False),
         "applied_penalties": json.dumps(product_integrity.get("applied_penalties", []), ensure_ascii=False),
+        "product_integrity_hints": json.dumps(product_integrity.get("product_integrity_hints", {"public": [], "debug": []}), ensure_ascii=False),
         "hidden_findings_count": product_integrity.get("hidden_findings_count", 0),
         "product_integrity_decision": product_integrity["product_integrity_decision"],
         "critical_findings": json.dumps(product_integrity["critical_findings"], ensure_ascii=False),
