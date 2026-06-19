@@ -2363,6 +2363,21 @@ def compute_component_product_scores(ref, gen, mask=None, structure_debug=None, 
     }
 
 
+def distance_to_similarity_score(distance: float, max_distance: float = 1.0) -> float:
+    """Wandle einen Distanzwert in einen Similarity-Score von 0..100 um.
+
+    Distanzwerte folgen der LPIPS-Richtung: 0 bedeutet identisch, höhere Werte
+    bedeuten stärkere Abweichung. Score-Werte folgen der Product-Integrity-
+    Richtung: 100 bedeutet sehr ähnlich, 0 bedeutet sehr unterschiedlich.
+    """
+    max_distance = float(max_distance)
+    if max_distance <= 0.0:
+        raise ValueError("max_distance muss größer als 0 sein")
+
+    distance = max(0.0, min(float(distance), max_distance))
+    return max(0.0, min(100.0, (1.0 - distance / max_distance) * 100.0))
+
+
 def normalize_lpips_car_only_similarity_percent(lpips_car_only_value, fallback_similarity_pct):
     """Gib immer eine Similarity in Prozent zurück; LPIPS-Distanzen (0..1) werden invertiert."""
     if lpips_car_only_value is None:
@@ -2370,7 +2385,7 @@ def normalize_lpips_car_only_similarity_percent(lpips_car_only_value, fallback_s
 
     numeric_value = float(lpips_car_only_value)
     if 0.0 <= numeric_value <= 1.0:
-        return convert_lpips_to_similarity_percent(numeric_value)
+        return distance_to_similarity_score(numeric_value)
     return float(np.clip(numeric_value, 0.0, 100.0))
 
 
@@ -3011,7 +3026,7 @@ def compute_masked_delta_e(ref, gen, mask):
 
 def convert_metrics_to_percent(ssim_val, lpips_val, delta_e_val):
     ssim_percent = float(np.clip(ssim_val * 100.0, 0.0, 100.0))
-    lpips_similarity_percent = float(np.clip((1.0 - lpips_val) * 100.0, 0.0, 100.0))
+    lpips_similarity_percent = distance_to_similarity_score(float(lpips_val))
     delta_e_similarity_percent = float(np.clip(100.0 - delta_e_val, 0.0, 100.0))
 
     return {
@@ -3024,7 +3039,7 @@ def convert_metrics_to_percent(ssim_val, lpips_val, delta_e_val):
 def convert_lpips_to_similarity_percent(lpips_val):
     if lpips_val is None:
         return None
-    return float(np.clip((1.0 - lpips_val) * 100.0, 0.0, 100.0))
+    return distance_to_similarity_score(float(lpips_val))
 
 
 def compute_foreground_mask_union(ref, gen):
