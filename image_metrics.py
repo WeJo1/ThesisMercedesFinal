@@ -85,7 +85,7 @@ DEFAULT_PRODUCT_INTEGRITY_PROFILE = {
     "weights": {
         "structure_only_score": 0.50,
         "detail_zones_score": 0.42,
-        "color_reflection_score": 0.03,
+        "color_reflection_score": 0.015,
         "car_only_lpips_score": 0.05,
         "legacy_weighted_lpips_weight": 0.0,
     },
@@ -117,6 +117,14 @@ DEFAULT_PRODUCT_INTEGRITY_PROFILE = {
     "reflection_tolerance": {
         "low_edge_difference_bonus": 0.35,
         "tolerated_score_below": 82.0,
+        "color_score_penalty_cap_when_structure_stable": 1.2,
+        "stable_structure_for_color_cap": 90.0,
+        "stable_detail_for_color_cap": 92.0,
+        "glass_interior_color_weight": 0.12,
+        "glass_contour_color_weight": 0.45,
+        "paint_color_weight": 1.0,
+        "color_score_error_scale": 0.08,
+        "color_score_quantile": 0.90,
     },
     "detail_zone_weights": {
         "silhouette": 1.35,
@@ -255,6 +263,7 @@ CSV_COLUMN_ORDER = [
     "structure_only_score",
     "detail_zones_score",
     "color_reflection_score",
+    "color_reflection_debug",
     "product_integrity_score",
     "product_integrity_decision",
     "critical_findings",
@@ -2064,24 +2073,81 @@ def compute_detail_zones_score(ref, gen, mask=None, profile=None, structure_debu
     return {"score": score, "zone_scores": zone_scores, "zones": zones, "debug_paths": paths, "detail_zone_area_ratio": detail_zone_area_ratio}
 
 
-def compute_color_reflection_score(ref, gen, mask=None, edge_diff=None, debug_dir=None, stem="pair"):
-    """Bewerte Farb-/Lichtänderungen getrennt und dämpfe strukturstarke Pixel."""
+def compute_color_reflection_score(ref, gen, mask=None, edge_diff=None, debug_dir=None, stem="pair", profile=None):
+    """Bewerte Farb-/Lichtänderungen robust innerhalb der Fahrzeugmaske.
+
+    Behandle Glasinnenflächen nur als weichen Hinweis, gleiche globale
+    Helligkeitsstimmungen ab und nutze robuste Quantile statt eines anfälligen
+    Pixel-Mittelwerts.
+    """
+    profile = profile or DEFAULT_PRODUCT_INTEGRITY_PROFILE
+    reflection_cfg = profile.get("reflection_tolerance", {})
     metric_mask = prepare_metric_mask(mask, ref, gen)
     if metric_mask is None:
         metric_mask = np.ones(ref.shape[:2], dtype=bool)
-    color_diff = np.mean(np.abs(ref - gen), axis=2)
+
+    glass_masks = build_glass_region_masks(ref, gen, car_mask=metric_mask)
+    glass_interior = glass_masks.get("interior", np.zeros(ref.shape[:2], dtype=bool)) & metric_mask
+    glass_contour = glass_masks.get("contour", np.zeros(ref.shape[:2], dtype=bool)) & metric_mask
+    glass_surface = glass_masks.get("surface", np.zeros(ref.shape[:2], dtype=bool)) & metric_mask
+    paint_mask = metric_mask & ~glass_surface
+
+    ref_lab = color.rgb2lab(ref).astype(np.float32)
+    gen_lab = color.rgb2lab(gen).astype(np.float32)
+    lab_delta = gen_lab - ref_lab
+    # Entferne globale Licht-/Farbstimmung auf Lackflächen; wenn die Lackmaske
+    # fehlt, nutze die Fahrzeugmaske als robuste Fallback-Basis.
+    calibration_mask = paint_mask if np.any(paint_mask) else metric_mask
+    median_shift = np.median(lab_delta[calibration_mask], axis=0) if np.any(calibration_mask) else np.zeros(3, dtype=np.float32)
+    residual_lab_delta = lab_delta - median_shift.reshape(1, 1, 3)
+    chroma_residual = np.linalg.norm(residual_lab_delta[..., 1:3], axis=2) / 42.0
+    luminance_residual = np.abs(residual_lab_delta[..., 0]) / 100.0
+    color_diff = np.clip((0.72 * chroma_residual) + (0.28 * luminance_residual), 0.0, 1.0).astype(np.float32)
+
     if edge_diff is None:
         edge_diff = np.abs(sobel(color.rgb2gray(ref)) - sobel(color.rgb2gray(gen)))
-    low_edge_weight = np.clip(1.0 - (edge_diff / 0.20), 0.25, 1.0)
-    reflection_map = color_diff * low_edge_weight
+    low_edge_weight = np.clip(1.0 - (edge_diff / 0.20), 0.20, 1.0).astype(np.float32)
+
+    area_weight = np.zeros(ref.shape[:2], dtype=np.float32)
+    area_weight[paint_mask] = float(reflection_cfg.get("paint_color_weight", 1.0))
+    area_weight[glass_contour] = float(reflection_cfg.get("glass_contour_color_weight", 0.45))
+    area_weight[glass_interior] = float(reflection_cfg.get("glass_interior_color_weight", 0.12))
+    effective_mask = metric_mask & (area_weight > 0)
+
+    reflection_map = color_diff * low_edge_weight * area_weight
     reflection_map = reflection_map * metric_mask.astype(np.float32)
-    score = score_from_error(masked_mean(reflection_map, metric_mask), 0.22)
+    weighted_values = reflection_map[effective_mask]
+    if weighted_values.size:
+        mean_diff = float(np.average(color_diff[effective_mask], weights=np.maximum(area_weight[effective_mask], 1e-6)))
+        median_diff = float(np.median(weighted_values))
+        robust_quantile = float(np.quantile(weighted_values, float(reflection_cfg.get("color_score_quantile", 0.75))))
+    else:
+        mean_diff = median_diff = robust_quantile = 0.0
+    score = score_from_error(robust_quantile, float(reflection_cfg.get("color_score_error_scale", 0.30)))
+
+    metric_area = max(float(np.sum(metric_mask)), 1.0)
+    excluded_ratio = float(1.0 - (np.sum(metric_mask) / max(float(ref.shape[0] * ref.shape[1]), 1.0)))
+    debug = {
+        "mask": "vehicle_mask_without_background_with_glass_downweighted",
+        "window_area_ratio": float(np.sum(glass_surface) / metric_area),
+        "paint_area_ratio": float(np.sum(paint_mask) / metric_area),
+        "excluded_area_ratio": excluded_ratio,
+        "mean_color_difference": mean_diff,
+        "median_weighted_color_difference": median_diff,
+        "robust_color_difference_quantile": robust_quantile,
+        "global_lab_shift_removed": [float(x) for x in median_shift],
+        "score_before_weighting": score,
+    }
+
     paths = {}
     if debug_dir:
         paths["reflection_color_difference"] = str(Path(debug_dir) / f"{stem}_reflection_color_difference.png")
+        paths["color_reflection_metric_mask"] = str(Path(debug_dir) / f"{stem}_color_reflection_metric_mask.png")
+        paths["color_reflection_area_weights"] = str(Path(debug_dir) / f"{stem}_color_reflection_area_weights.png")
         save_weight_debug_map(reflection_map, Path(paths["reflection_color_difference"]))
-    return {"score": score, "map": reflection_map, "debug_paths": paths}
-
+        save_weight_debug_map(metric_mask.astype(np.float32), Path(paths["color_reflection_metric_mask"]))
+        save_weight_debug_map(area_weight, Path(paths["color_reflection_area_weights"]))
+    return {"score": score, "map": reflection_map, "debug_paths": paths, "debug": debug}
 
 def compute_component_product_scores(ref, gen, mask=None, structure_debug=None, lpips_component_map=None, debug_dir=None, stem="pair"):
     """Bewerte harte Produktbauteile lokal, damit Details nicht im Gesamtscore verschwinden."""
@@ -2225,7 +2291,7 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
     scope = car_mask if car_mask is not None and np.any(car_mask) else None
     structure = compute_structure_only_score(ref, gen, mask=scope, debug_dir=debug_dir, stem=stem)
     detail = compute_detail_zones_score(ref, gen, mask=scope, profile=profile, structure_debug=structure, debug_dir=debug_dir, stem=stem)
-    color_score = compute_color_reflection_score(ref, gen, mask=scope, edge_diff=structure["diff_map"], debug_dir=debug_dir, stem=stem)
+    color_score = compute_color_reflection_score(ref, gen, mask=scope, edge_diff=structure["diff_map"], debug_dir=debug_dir, stem=stem, profile=profile)
     components = compute_component_product_scores(ref, gen, mask=scope, structure_debug=structure, lpips_component_map=lpips_component_map, debug_dir=debug_dir, stem=stem)
     component_values = components["scores"]
     component_diffs = components["diffs"]
@@ -2248,11 +2314,30 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
     enabled = profile.get("enabled_components", {})
     weights = profile.get("weights", {})
     total = 0.0; denom = 0.0
+    color_reflection_weight = 0.0
+    color_reflection_weighted_score = float(color_score["score"])
     for key, value in component_scores.items():
         profile_key = profile_weight_key_by_component[key]
         if enabled.get(profile_key, True):
-            weight = float(weights.get(profile_key, 0.0)); total += float(value) * weight; denom += weight
+            weight = float(weights.get(profile_key, 0.0))
+            if profile_key == "color_reflection_score":
+                color_reflection_weight = weight
+                color_reflection_weighted_score = float(value)
+            total += float(value) * weight
+            denom += weight
     base_final_product_integrity_score_pct = float(total / denom) if denom else float(np.mean(list(component_scores.values())))
+    total_without_color = total - (color_reflection_weighted_score * color_reflection_weight)
+    denom_without_color = denom - color_reflection_weight
+    final_without_color_score_pct = float(total_without_color / denom_without_color) if denom_without_color > 0 else base_final_product_integrity_score_pct
+    raw_color_reflection_influence = final_without_color_score_pct - base_final_product_integrity_score_pct
+    reflection_cfg = profile.get("reflection_tolerance", {})
+    stable_for_color_cap = (
+        structure["score"] >= float(reflection_cfg.get("stable_structure_for_color_cap", 90.0))
+        and detail["score"] >= float(reflection_cfg.get("stable_detail_for_color_cap", 92.0))
+    )
+    if stable_for_color_cap:
+        max_color_penalty = float(reflection_cfg.get("color_score_penalty_cap_when_structure_stable", 1.2))
+        base_final_product_integrity_score_pct = max(base_final_product_integrity_score_pct, final_without_color_score_pct - max_color_penalty)
     final_product_integrity_score_pct = base_final_product_integrity_score_pct
     thresholds = profile.get("thresholds", {})
     contour_cfg = profile.get("contour_warning", {})
@@ -2410,7 +2495,6 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
             continue
         overlay_evidence |= local_activity
 
-    reflection_cfg = profile.get("reflection_tolerance", {})
     reflection_weights = build_reflection_downweight_map(ref, gen, car_mask=scope)
     downweight_threshold = float(reflection_cfg.get("downweight_threshold", DEFAULT_MERCEDES_WEIGHT_PROFILE.get("downweight_threshold", 0.92)))
     scope_mask_for_reflection = scope if scope is not None else np.ones(ref.shape[:2], dtype=bool)
@@ -2427,7 +2511,7 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
     accepted_structure_mean = masked_mean(structure["diff_map"], accepted_reflection, default=1.0)
     has_reflection_evidence = (
         reflection_downweight_area_ratio >= float(reflection_cfg.get("min_downweight_area_ratio", 0.01))
-        and color_score["score"] < float(reflection_cfg.get("max_color_reflection_score", 92.0))
+        and color_score["score"] < float(reflection_cfg.get("max_color_reflection_score", 98.0))
         and accepted_structure_mean <= float(reflection_cfg.get("max_structure_diff_mean", 0.12))
         and np.sum(accepted_reflection & critical_component_mask) == 0
     )
@@ -2437,6 +2521,9 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
         else:
             add_finding(findings, "paint_reflection", "tolerated", "reflection:evidence")
         if not component_findings:
+            if "body_line_door_gap" in findings and accepted_structure_mean <= float(reflection_cfg.get("max_structure_diff_mean", 0.12)):
+                findings["body_line_door_gap"]["severity"] = "tolerated"
+                findings["body_line_door_gap"]["reason"] = "reflection:tolerated_body_line"
             final_product_integrity_score_pct = max(final_product_integrity_score_pct, min(base_final_product_integrity_score_pct, float(thresholds.get("failed_product_integrity_min", 90.0))))
 
     if headlight_failed or light_signature_failed:
@@ -2551,6 +2638,14 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
         interpretation = "Fahrzeugstruktur, Kontur und Detailzonen sind stabil. Es wurden keine produktrelevanten Abweichungen erkannt."
         decision_reason = "Scores über den Pass-Schwellen und keine Findings."
     critical_component_names = sorted(set(component_findings))
+    color_debug = dict(color_score.get("debug", {}))
+    color_debug.update({
+        "configured_weight": float(color_reflection_weight),
+        "score_after_weighting": float(color_reflection_weighted_score * color_reflection_weight),
+        "raw_final_score_influence_points": float(raw_color_reflection_influence),
+        "capped_final_score_influence_points": float(final_without_color_score_pct - base_final_product_integrity_score_pct),
+        "final_score_without_color_reflection": float(final_without_color_score_pct),
+    })
     debug_paths = {}; debug_paths.update(structure["debug_paths"]); debug_paths.update(detail["debug_paths"]); debug_paths.update(color_score["debug_paths"]); debug_paths.update(components["debug_paths"]); debug_paths.update({k: str(v) for k, v in extra_paths.items()})
     return {
         "structure_only_score": structure["score"],
@@ -2586,6 +2681,7 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
         "contour_warning_reason": contour_warning_reason,
         "detail_zone_area_ratio": detail["detail_zone_area_ratio"],
         "structure_masked_area_ratio": structure["structure_masked_area_ratio"],
+        "color_reflection_debug": color_debug,
     }
 
 def compute_delta_e(ref, gen):
@@ -3195,6 +3291,7 @@ def evaluate_pair(
         "structure_only_score": product_integrity["structure_only_score"],
         "detail_zones_score": product_integrity["detail_zones_score"],
         "color_reflection_score": product_integrity["color_reflection_score"],
+        "color_reflection_debug": json.dumps(product_integrity.get("color_reflection_debug", {}), sort_keys=True),
         "product_integrity_score": product_integrity["product_integrity_score"],
         "product_integrity_decision": product_integrity["product_integrity_decision"],
         "critical_findings": json.dumps(product_integrity["critical_findings"], ensure_ascii=False),

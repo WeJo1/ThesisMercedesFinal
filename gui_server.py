@@ -82,6 +82,7 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             "structure_only_score": row.get("structure_only_score"),
             "detail_zones_score": row.get("detail_zones_score"),
             "color_reflection_score": row.get("color_reflection_score"),
+            "color_reflection_debug": row.get("color_reflection_debug"),
             "product_integrity_score": row.get("product_integrity_score"),
             "product_integrity_decision": row.get("product_integrity_decision"),
             "critical_findings": row.get("critical_findings"),
