@@ -83,9 +83,9 @@ DEFAULT_PRODUCT_INTEGRITY_PROFILE = {
         "car_only_lpips_score": True,
     },
     "weights": {
-        "structure_only_score": 0.535,
+        "structure_only_score": 0.50,
         "detail_zones_score": 0.40,
-        "color_reflection_score": 0.015,
+        "color_reflection_score": 0.05,
         "car_only_lpips_score": 0.05,
         "legacy_weighted_lpips_weight": 0.0,
     },
@@ -123,7 +123,7 @@ DEFAULT_PRODUCT_INTEGRITY_PROFILE = {
         "glass_interior_color_weight": 0.12,
         "glass_contour_color_weight": 0.45,
         "paint_color_weight": 1.0,
-        "color_score_error_scale": 0.08,
+        "color_score_error_scale": 0.22,
         "color_score_quantile": 0.90,
     },
     "detail_zone_weights": {
@@ -2083,10 +2083,11 @@ def compute_detail_zones_score(ref, gen, mask=None, profile=None, structure_debu
 def compute_color_reflection_score(ref, gen, mask=None, edge_diff=None, debug_dir=None, stem="pair", profile=None):
     """Bewerte Farb-/Lichtänderungen robust innerhalb der Fahrzeugmaske.
 
-    Behandle Glasinnenflächen nur als weichen Hinweis, gleiche globale
-    Helligkeitsstimmungen ab und nutze robuste Quantile statt eines anfälligen
-    Pixel-Mittelwerts. Die Flächengewichte gehen direkt in den finalen Fehler
-    ein; Glasflächen werden gedämpft, aber nicht aus der Messung entfernt.
+    Korrigiere zuerst globale LAB-Licht-/Farbstimmung auf stabilen Lackflächen.
+    Bewerte anschließend den CIEDE2000-Restfehler flächengewichtet und robust:
+    Lack bleibt maßgeblich, Glasinnenflächen werden stark gedämpft, Glaskonturen
+    moderat berücksichtigt und harte Kanten/Produktbauteile bleiben durch die
+    separaten Struktur-, Detail- und Komponenten-Scores geschützt.
     """
     profile = profile or DEFAULT_PRODUCT_INTEGRITY_PROFILE
     reflection_cfg = profile.get("reflection_tolerance", {})
@@ -2094,62 +2095,87 @@ def compute_color_reflection_score(ref, gen, mask=None, edge_diff=None, debug_di
     if metric_mask is None:
         metric_mask = np.ones(ref.shape[:2], dtype=bool)
 
-    glass_masks = build_glass_region_masks(ref, gen, car_mask=metric_mask)
-    glass_interior = glass_masks.get("interior", np.zeros(ref.shape[:2], dtype=bool)) & metric_mask
-    glass_contour = glass_masks.get("contour", np.zeros(ref.shape[:2], dtype=bool)) & metric_mask
-    glass_surface = glass_masks.get("surface", np.zeros(ref.shape[:2], dtype=bool)) & metric_mask
-    paint_mask = metric_mask & ~glass_surface
+    vehicle_scope = metric_mask.astype(bool)
+    glass_masks = build_glass_region_masks(ref, gen, car_mask=vehicle_scope)
+    glass_interior = glass_masks.get("interior", np.zeros(ref.shape[:2], dtype=bool)) & vehicle_scope
+    glass_contour = glass_masks.get("contour", np.zeros(ref.shape[:2], dtype=bool)) & vehicle_scope
+    glass_surface = glass_masks.get("surface", np.zeros(ref.shape[:2], dtype=bool)) & vehicle_scope
+    paint_mask = vehicle_scope & ~glass_surface
+    critical_zones = build_critical_component_zones(vehicle_scope, ref.shape[:2])
+    critical_component_mask = np.zeros(ref.shape[:2], dtype=bool)
+    for zone in critical_zones.values():
+        critical_component_mask |= np.asarray(zone, dtype=bool)
+    critical_component_mask &= vehicle_scope
 
     ref_lab = color.rgb2lab(ref).astype(np.float32)
     gen_lab = color.rgb2lab(gen).astype(np.float32)
     lab_delta = gen_lab - ref_lab
-    raw_chroma_delta = np.linalg.norm(lab_delta[..., 1:3], axis=2) / 42.0
-    raw_luminance_delta = np.abs(lab_delta[..., 0]) / 100.0
-    raw_color_diff = np.clip((0.72 * raw_chroma_delta) + (0.28 * raw_luminance_delta), 0.0, 1.0).astype(np.float32)
+    raw_delta_e = color.deltaE_ciede2000(ref_lab, gen_lab).astype(np.float32)
 
-    # Entferne globale Licht-/Farbstimmung auf Lackflächen; wenn die Lackmaske
-    # fehlt, nutze die Fahrzeugmaske als robuste Fallback-Basis. Lokale
-    # Frontscheiben-/Reflexionsänderungen bleiben als Residuum messbar.
-    calibration_mask = paint_mask if np.any(paint_mask) else metric_mask
-    median_shift = np.median(lab_delta[calibration_mask], axis=0) if np.any(calibration_mask) else np.zeros(3, dtype=np.float32)
-    residual_lab_delta = lab_delta - median_shift.reshape(1, 1, 3)
-    chroma_residual = np.linalg.norm(residual_lab_delta[..., 1:3], axis=2) / 42.0
-    luminance_residual = np.abs(residual_lab_delta[..., 0]) / 100.0
-    color_diff = np.clip((0.72 * chroma_residual) + (0.28 * luminance_residual), 0.0, 1.0).astype(np.float32)
-
+    # Nutze ruhige Lackflächen für die globale Korrektur. Damit erklären ein
+    # anderer Hintergrund, Weißabgleich oder Gesamthelligkeit nicht sofort einen
+    # Produktfehler. Wenn keine ruhige Lackfläche vorliegt, fällt die Methode auf
+    # die komplette Fahrzeugmaske zurück, niemals auf den Hintergrund.
     if edge_diff is None:
         edge_diff = np.abs(sobel(color.rgb2gray(ref)) - sobel(color.rgb2gray(gen)))
-    low_edge_weight = np.clip(1.0 - (edge_diff / 0.20), 0.20, 1.0).astype(np.float32)
+    stable_paint = paint_mask & (np.asarray(edge_diff) <= float(reflection_cfg.get("global_correction_edge_max", 0.10)))
+    calibration_mask = stable_paint if np.sum(stable_paint) >= 64 else (paint_mask if np.any(paint_mask) else vehicle_scope)
+    median_shift = np.median(lab_delta[calibration_mask], axis=0) if np.any(calibration_mask) else np.zeros(3, dtype=np.float32)
+    residual_lab_delta = lab_delta - median_shift.reshape(1, 1, 3)
+    corrected_lab = ref_lab + residual_lab_delta
+    corrected_delta_e = color.deltaE_ciede2000(ref_lab, corrected_lab).astype(np.float32)
 
+    raw_error = np.clip(raw_delta_e / 100.0, 0.0, 1.0).astype(np.float32)
+    corrected_error = np.clip(corrected_delta_e / 100.0, 0.0, 1.0).astype(np.float32)
+
+    # Glatte Reflexionsflächen dürfen sichtbar bleiben, aber den Score nicht
+    # dominieren. Kanten werden für Color/Reflection gedämpft, weil sie in den
+    # Struktur-/Detail-Scores fachlich strenger bewertet werden.
+    low_edge_weight = np.clip(1.0 - (np.asarray(edge_diff, dtype=np.float32) / 0.20), 0.35, 1.0).astype(np.float32)
     area_weight = np.zeros(ref.shape[:2], dtype=np.float32)
     area_weight[paint_mask] = float(reflection_cfg.get("paint_color_weight", 1.0))
     area_weight[glass_contour] = float(reflection_cfg.get("glass_contour_color_weight", 0.45))
     area_weight[glass_interior] = float(reflection_cfg.get("glass_interior_color_weight", 0.12))
-    effective_mask = metric_mask & (area_weight > 0)
+    # Kritische Komponenten werden im Color-Score nicht künstlich gehärtet; sie
+    # laufen über Detail-/Komponentenregeln. Ein leichter Floor verhindert aber,
+    # dass echte Material-/Farbänderungen dort komplett verschwinden.
+    area_weight[critical_component_mask & paint_mask] = np.maximum(area_weight[critical_component_mask & paint_mask], 0.85)
+    effective_mask = vehicle_scope & (area_weight > 0)
 
-    weighted_error_map = color_diff * low_edge_weight * area_weight
-    weighted_error_map = weighted_error_map * metric_mask.astype(np.float32)
-    raw_weighted_error_map = raw_color_diff * low_edge_weight * area_weight * metric_mask.astype(np.float32)
+    weighted_error_map = corrected_error * low_edge_weight * area_weight * vehicle_scope.astype(np.float32)
+    raw_weighted_error_map = raw_error * low_edge_weight * area_weight * vehicle_scope.astype(np.float32)
     weighted_values = weighted_error_map[effective_mask]
-    if weighted_values.size:
-        color_reflection_weighted_mean = float(np.sum(weighted_error_map[effective_mask]) / max(float(np.sum(area_weight[effective_mask])), 1e-6))
-        raw_weighted_mean = float(np.sum(raw_weighted_error_map[effective_mask]) / max(float(np.sum(area_weight[effective_mask])), 1e-6))
-        quantiles = {q: float(np.quantile(weighted_values, q / 100.0)) for q in (75, 90, 95, 98, 99)}
-        median_diff = float(np.median(weighted_values))
-    else:
-        color_reflection_weighted_mean = raw_weighted_mean = median_diff = 0.0
-        quantiles = {q: 0.0 for q in (75, 90, 95, 98, 99)}
+    raw_values = raw_error[vehicle_scope]
+    corrected_values = corrected_error[vehicle_scope]
 
-    # Verwende eine lokale Hochquantil-Komponente zusätzlich zum gewichteten Mittel.
-    # Dadurch kann eine sichtbare, räumlich begrenzte Frontscheibenänderung nicht
-    # durch Median/90%-Quantil auf exakt 0 fallen, bleibt aber wegen der Glasgewichte
-    # deutlich weniger kritisch als Struktur- oder Bauteiländerungen.
-    final_error = max(color_reflection_weighted_mean, quantiles[95], quantiles[98] * 0.85, quantiles[99] * 0.70)
-    score_before_clipping = 100.0 * (1.0 - float(final_error) / max(float(reflection_cfg.get("color_score_error_scale", 0.30)), 1e-8))
+    if weighted_values.size:
+        denom = max(float(np.sum(area_weight[effective_mask])), 1e-6)
+        color_reflection_weighted_mean = float(np.sum(weighted_error_map[effective_mask]) / denom)
+        raw_weighted_mean = float(np.sum(raw_weighted_error_map[effective_mask]) / denom)
+        quantiles = {q: float(np.quantile(weighted_values, q / 100.0)) for q in (50, 75, 90, 95, 98, 99)}
+        raw_quantiles = {q: float(np.quantile(raw_values, q / 100.0)) for q in (90, 95)} if raw_values.size else {90: 0.0, 95: 0.0}
+        corrected_quantiles = {q: float(np.quantile(corrected_values, q / 100.0)) for q in (90, 95)} if corrected_values.size else {90: 0.0, 95: 0.0}
+    else:
+        color_reflection_weighted_mean = raw_weighted_mean = 0.0
+        quantiles = {q: 0.0 for q in (50, 75, 90, 95, 98, 99)}
+        raw_quantiles = {90: 0.0, 95: 0.0}
+        corrected_quantiles = {90: 0.0, 95: 0.0}
+
+    # Ursache des 4%-Falls war die Kombination aus sehr kleiner Skala (0.08) und
+    # einem harten max(P95, P98, P99). Nutze stattdessen eine robuste Mischung:
+    # Mittelwert dominiert, P90 schützt vor größeren Bereichen, P95 wirkt nur
+    # gedämpft gegen echte flächige Abweichungen.
+    final_error = max(
+        color_reflection_weighted_mean,
+        (0.70 * color_reflection_weighted_mean) + (0.30 * quantiles[90]),
+        (0.60 * color_reflection_weighted_mean) + (0.25 * quantiles[90]) + (0.15 * quantiles[95]),
+    )
+    error_scale = max(float(reflection_cfg.get("color_score_error_scale", 0.22)), 1e-8)
+    score_before_clipping = 100.0 * (1.0 - float(final_error) / error_scale)
     score = float(np.clip(score_before_clipping, 0.0, 100.0))
 
-    metric_area = max(float(np.sum(metric_mask)), 1.0)
-    excluded_ratio = float(1.0 - (np.sum(metric_mask) / max(float(ref.shape[0] * ref.shape[1]), 1.0)))
+    metric_area = max(float(np.sum(vehicle_scope)), 1.0)
+    background_leakage_area_px = int(np.sum(effective_mask & ~vehicle_scope))
     def region_error(region):
         region = np.asarray(region, dtype=bool) & effective_mask
         if not np.any(region):
@@ -2157,18 +2183,39 @@ def compute_color_reflection_score(ref, gen, mask=None, edge_diff=None, debug_di
         return float(np.sum(weighted_error_map[region]) / max(float(np.sum(area_weight[region])), 1e-6))
 
     debug = {
-        "mask": "vehicle_mask_without_background_with_glass_downweighted",
+        "mask": "final_vehicle_mask_only_with_glass_and_reflection_downweighting",
+        "active_mask_area_px": int(np.sum(effective_mask)),
+        "background_leakage_area_px": background_leakage_area_px,
+        "glass_interior_area_px": int(np.sum(glass_interior)),
+        "glass_contour_area_px": int(np.sum(glass_contour)),
+        "paint_area_px": int(np.sum(paint_mask)),
+        "critical_component_area_px": int(np.sum(critical_component_mask)),
+        "raw_delta_e_mean": float(np.mean(raw_delta_e[vehicle_scope])) if np.any(vehicle_scope) else 0.0,
+        "raw_delta_e_p90": float(raw_quantiles[90] * 100.0),
+        "raw_delta_e_p95": float(raw_quantiles[95] * 100.0),
+        "corrected_delta_e_mean": float(np.mean(corrected_delta_e[vehicle_scope])) if np.any(vehicle_scope) else 0.0,
+        "corrected_delta_e_p90": float(corrected_quantiles[90] * 100.0),
+        "corrected_delta_e_p95": float(corrected_quantiles[95] * 100.0),
+        "weighted_color_error_mean": color_reflection_weighted_mean,
+        "weighted_color_error_p90": quantiles[90],
+        "weighted_color_error_p95": quantiles[95],
+        "final_color_reflection_error": float(final_error),
+        "color_reflection_error_scale": float(error_scale),
+        "color_reflection_score_before_clipping": float(score_before_clipping),
+        "color_reflection_score_after_clipping": float(score),
+        "color_reflection_interpretation": "Globale LAB-Licht-/Farbstimmung wurde innerhalb der Fahrzeugmaske entfernt; der Score basiert auf robusten, flächengewichteten Restfehlern.",
         "window_area_ratio": float(np.sum(glass_surface) / metric_area),
         "paint_area_ratio": float(np.sum(paint_mask) / metric_area),
-        "excluded_area_ratio": excluded_ratio,
+        "excluded_area_ratio": float(1.0 - (np.sum(vehicle_scope) / max(float(ref.shape[0] * ref.shape[1]), 1.0))),
         "mean_color_difference": color_reflection_weighted_mean,
-        "median_weighted_color_difference": median_diff,
+        "median_weighted_color_difference": quantiles[50],
         "robust_color_difference_quantile": quantiles[90],
         "global_lab_shift_removed": [float(x) for x in median_shift],
         "score_before_weighting": score,
         "color_reflection_error_before_calibration": raw_weighted_mean,
         "color_reflection_error_after_calibration": color_reflection_weighted_mean,
         "color_reflection_weighted_mean": color_reflection_weighted_mean,
+        "color_reflection_p50": quantiles[50],
         "color_reflection_p75": quantiles[75],
         "color_reflection_p90": quantiles[90],
         "color_reflection_p95": quantiles[95],
@@ -2177,13 +2224,6 @@ def compute_color_reflection_score(ref, gen, mask=None, edge_diff=None, debug_di
         "glass_interior_error": region_error(glass_interior),
         "glass_contour_error": region_error(glass_contour),
         "paint_error": region_error(paint_mask),
-        "active_mask_area_px": int(np.sum(effective_mask)),
-        "glass_interior_area_px": int(np.sum(glass_interior)),
-        "glass_contour_area_px": int(np.sum(glass_contour)),
-        "paint_area_px": int(np.sum(paint_mask)),
-        "final_color_reflection_error": float(final_error),
-        "color_reflection_score_before_clipping": float(score_before_clipping),
-        "color_reflection_score_after_clipping": float(score),
         "area_weight_map_used_in_final_error": True,
     }
 
@@ -2193,7 +2233,7 @@ def compute_color_reflection_score(ref, gen, mask=None, edge_diff=None, debug_di
         paths["color_reflection_metric_mask"] = str(Path(debug_dir) / f"{stem}_color_reflection_metric_mask.png")
         paths["color_reflection_area_weights"] = str(Path(debug_dir) / f"{stem}_color_reflection_area_weights.png")
         save_weight_debug_map(weighted_error_map, Path(paths["reflection_color_difference"]))
-        save_weight_debug_map(metric_mask.astype(np.float32), Path(paths["color_reflection_metric_mask"]))
+        save_weight_debug_map(vehicle_scope.astype(np.float32), Path(paths["color_reflection_metric_mask"]))
         save_weight_debug_map(area_weight, Path(paths["color_reflection_area_weights"]))
     return {"score": score, "map": weighted_error_map, "debug_paths": paths, "debug": debug}
 

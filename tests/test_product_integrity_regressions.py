@@ -144,12 +144,12 @@ def test_product_integrity_example_values_use_similarity_percent_without_hidden_
     ref, mask = make_car()
     result = im.compute_product_integrity_scores(ref, ref.copy(), car_mask=mask, car_only_lpips_score=96.87)
     debug = result["product_integrity_debug"]
-    expected = (0.535 * result["structure_only_score"] + 0.400 * result["detail_zones_score"] + 0.015 * result["color_reflection_score"] + 0.050 * 96.87)
+    expected = (0.500 * result["structure_only_score"] + 0.400 * result["detail_zones_score"] + 0.050 * result["color_reflection_score"] + 0.050 * 96.87)
 
     assert debug["configured_weights"] == {
-        "structure_weight": 0.535,
+        "structure_weight": 0.5,
         "detail_weight": 0.4,
-        "color_reflection_weight": 0.015,
+        "color_reflection_weight": 0.05,
         "car_only_lpips_weight": 0.05,
     }
     assert debug["car_only_lpips_similarity_percent"] == 96.87
@@ -157,6 +157,20 @@ def test_product_integrity_example_values_use_similarity_percent_without_hidden_
     assert debug["applied_caps"] == []
     assert debug["hidden_findings_count"] == 0
 
+
+def test_color_reflection_tolerates_global_light_and_reflection_shift():
+    ref, mask = make_car()
+    gen = np.clip(ref * 1.10 + np.array([0.04, 0.03, 0.015], dtype=np.float32), 0, 1)
+    gen[30:45, 72:150] = np.clip(gen[30:45, 72:150] + np.array([0.16, 0.12, 0.04], dtype=np.float32), 0, 1)
+
+    result = im.compute_color_reflection_score(ref, gen, mask=mask)
+    debug = result["debug"]
+
+    assert debug["background_leakage_area_px"] == 0
+    assert debug["raw_delta_e_mean"] > debug["corrected_delta_e_mean"]
+    assert debug["color_reflection_error_scale"] == 0.22
+    assert result["score"] > 35.0
+    assert result["score"] < 100.0
 
 def test_product_integrity_lower_than_base_requires_visible_reason():
     ref, mask = make_car()
