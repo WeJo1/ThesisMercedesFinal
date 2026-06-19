@@ -1,3 +1,5 @@
+import json
+
 import numpy as np
 
 import image_metrics as im
@@ -297,3 +299,37 @@ def test_failed_decision_does_not_overwrite_product_integrity_score_with_six(mon
     assert result["product_integrity_score"] != 6.0
     assert debug["final_score_after_caps"] == debug["base_score_before_caps"]
     assert any(item.get("decision_only") for item in debug["score_adjustments"])
+
+
+def test_product_integrity_hints_separate_public_and_debug_details():
+    ref, mask = make_car()
+    gen = ref.copy()
+    gen[51:55, 24:70] = 0.05
+
+    profile = im.merge_profile_defaults(im.DEFAULT_PRODUCT_INTEGRITY_PROFILE, {
+        "thresholds": {
+            "critical_headlight_score_max": 90.0,
+            "critical_light_signature_score_max": 90.0,
+            "critical_headlight_diff_min": 0.001,
+            "critical_light_signature_diff_min": 0.001,
+        }
+    })
+    result = im.compute_product_integrity_scores(ref, gen, car_mask=mask, car_only_lpips_score=96.0, profile=profile)
+    hints = result["product_integrity_hints"]
+
+    assert "public" in hints
+    assert "debug" in hints
+    assert hints["public"]
+    public_text = json.dumps(hints["public"], ensure_ascii=False)
+    forbidden_public_tokens = [
+        "critical_headlight_light_signature_cap",
+        "threshold",
+        "Grenze",
+        "cap",
+        "penalty",
+        "hard_fail",
+        "debug",
+    ]
+    assert not any(token in public_text for token in forbidden_public_tokens)
+    assert any(item["message"] == "Scheinwerfer oder Lichtsignatur sollten geprüft werden." for item in hints["public"])
+    assert any(item.get("rule_id") == "critical_headlight_light_signature_cap" for item in hints["debug"])

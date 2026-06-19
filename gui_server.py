@@ -90,6 +90,7 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             "score_delta_due_to_penalties": row.get("score_delta_due_to_penalties"),
             "applied_caps": row.get("applied_caps"),
             "applied_penalties": row.get("applied_penalties"),
+            "product_integrity_hints": row.get("product_integrity_hints"),
             "hidden_findings_count": row.get("hidden_findings_count"),
             "product_integrity_decision": row.get("product_integrity_decision"),
             "critical_findings": row.get("critical_findings"),

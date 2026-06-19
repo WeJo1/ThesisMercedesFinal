@@ -67,6 +67,8 @@ const heatmapUpperStretchPivot = 0.85;
 const heatmapUpperStretchFactor = 1.45;
 const heatmapEdgeBoostStrength = 0.24;
 const heatmapEdgeBoostClamp = 0.32;
+const debugSearchParams = new URLSearchParams(window.location.search);
+const productIntegrityDebugEnabled = ['debug', 'showDebug'].some((key) => ['1', 'true', 'yes'].includes((debugSearchParams.get(key) || '').toLowerCase()));
 
 const mercedesStarIconPath = 'icons/stern.svg';
 maskSource.value = 'union';
@@ -1310,6 +1312,17 @@ function parseJsonList(value) {
   }
 }
 
+function parseJsonObject(value) {
+  if (!value) return {};
+  if (typeof value === 'object' && !Array.isArray(value)) return value;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch (error) {
+    return {};
+  }
+}
+
 function renderFindingsList(node, findings, emptyText) {
   if (!node) {
     return;
@@ -1358,18 +1371,17 @@ function renderMetrics(data) {
     productIntegrityInterpretation.textContent = data.product_integrity_interpretation || data.decision_reason || 'Keine Interpretation verfügbar.';
   }
   if (productIntegrityCapExplanation) {
-    const adjustments = [
-      ...parseJsonList(data.applied_caps),
-      ...parseJsonList(data.applied_penalties),
-    ];
-    const delta = Number.isFinite(baseScore) && Number.isFinite(finalScore) ? baseScore - finalScore : 0;
-    if (delta > 0.5 && adjustments.length) {
-      const strongest = adjustments.reduce((best, item) => Number(item?.delta || 0) > Number(best?.delta || 0) ? item : best, adjustments[0]);
-      productIntegrityCapExplanation.textContent = `Der Score wurde reduziert: ${strongest.name || strongest.type} bei ${strongest.affected_component || strongest.affected_area || 'einer kritischen Komponente'} (Grenze: ${strongest.threshold ?? 'n/a'}).`;
-    } else if (delta > 0.5) {
-      productIntegrityCapExplanation.textContent = 'Der Score wurde reduziert, aber der genaue Auslöser wurde nicht mitgeliefert.';
+    const hints = parseJsonObject(data.product_integrity_hints);
+    const publicHints = Array.isArray(hints?.public) ? hints.public : [];
+    const debugHints = Array.isArray(hints?.debug) ? hints.debug : [];
+    if (productIntegrityDebugEnabled && debugHints.length) {
+      productIntegrityCapExplanation.textContent = debugHints
+        .map((hint) => `${hint.rule_id || 'interne Regel'} bei ${hint.component || 'Komponente'}${hint.threshold !== null && hint.threshold !== undefined ? ` (threshold: ${hint.threshold})` : ''}`)
+        .join(' · ');
+    } else if (publicHints.length) {
+      productIntegrityCapExplanation.textContent = publicHints.map((hint) => hint.message).join(' ');
     } else {
-      productIntegrityCapExplanation.textContent = 'Keine zusätzliche Score-Reduktion aktiv.';
+      productIntegrityCapExplanation.textContent = 'Keine zusätzlichen Product-Integrity-Hinweise.';
     }
   }
   renderFindingsList(criticalFindings, data.critical_findings, 'Keine kritischen Produktabweichungen erkannt.');
