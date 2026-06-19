@@ -37,7 +37,6 @@ const topbar = document.querySelector('.topbar');
 const contentGrid = document.querySelector('.content-grid');
 
 const lpipsValue = document.getElementById('lpips');
-const mercedesProfileStatus = document.getElementById('mercedesProfileStatus');
 const ssim = document.getElementById('ssim');
 const deltaE = document.getElementById('deltaE');
 const lpipsCar = document.getElementById('lpipsCar');
@@ -1336,9 +1335,6 @@ function renderMetrics(data) {
   const hasCarMaskMetrics = Boolean(data?.mask_metrics_available) && maskMetricScope === 'car_mask';
 
   lpipsValue.textContent = formatMetricPair(data.lpips, data.lpips_similarity_percent);
-  const profileEnabled = String(data.mercedes_profile_enabled).toLowerCase() === 'true';
-  const profileName = data.used_weight_profile || 'Default';
-  mercedesProfileStatus.textContent = profileEnabled ? `Aktiv: ${profileName}` : `Inaktiv: ${profileName}`;
   ssim.textContent = formatMetricPair(data.ssim, data.ssim_percent);
   deltaE.textContent = formatMetricPair(data.delta_e_ciede2000, data.delta_e_similarity_percent);
   lpipsCar.textContent = hasCarOnlyMetric
@@ -1671,7 +1667,7 @@ function resetInterface() {
   comparisonSection.hidden = true;
   comparisonList.innerHTML = '';
 
-  [lpipsValue, mercedesProfileStatus, ssim, deltaE, lpipsCar, maskIou, maskDice].forEach((node) => {
+  [lpipsValue, ssim, deltaE, lpipsCar, maskIou, maskDice].forEach((node) => {
     node.textContent = node.id.includes('Similarity') ? '-- %' : '--';
   });
 
