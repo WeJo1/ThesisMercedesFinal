@@ -480,16 +480,19 @@ def test_weighted_lpips_is_legacy_debug_not_main_csv_or_ui():
 def test_product_integrity_uses_interpretable_scores_not_weighted_lpips():
     ref, mask = synthetic_car_pair()
     profile = im.merge_profile_defaults(im.DEFAULT_PRODUCT_INTEGRITY_PROFILE, {})
-    result = im.compute_product_integrity_scores(ref, ref.copy(), car_mask=mask, car_only_lpips_score=0.0, profile=profile)
+    result = im.compute_product_integrity_scores(ref, ref.copy(), car_mask=mask, car_only_lpips_score=0.0575, profile=profile)
 
+    expected_car_only_similarity = 94.25
     expected = (
         result["structure_only_score"] * 0.40
         + result["detail_zones_score"] * 0.45
         + result["color_reflection_score"] * 0.10
-        + 0.0 * 0.05
+        + expected_car_only_similarity * 0.05
     )
     assert profile["weights"].get("legacy_weighted_lpips_weight") == 0.0
+    assert result["lpips_car_only_similarity_pct"] == pytest.approx(expected_car_only_similarity)
     assert result["product_integrity_score"] == pytest.approx(expected)
+    assert result["product_integrity_score"] > 90.0
 
 
 def test_headlight_hard_fail_overrides_good_legacy_or_car_only_scores():
