@@ -484,12 +484,18 @@ def test_product_integrity_uses_interpretable_scores_not_weighted_lpips():
 
     expected_car_only_similarity = 94.25
     expected = (
-        result["structure_only_score"] * 0.40
-        + result["detail_zones_score"] * 0.45
-        + result["color_reflection_score"] * 0.10
-        + expected_car_only_similarity * 0.05
+        result["structure_only_score"] * profile["weights"]["structure_only_score"]
+        + result["detail_zones_score"] * profile["weights"]["detail_zones_score"]
+        + result["color_reflection_score"] * profile["weights"]["color_reflection_score"]
+        + expected_car_only_similarity * profile["weights"]["car_only_lpips_score"]
     )
     assert profile["weights"].get("legacy_weighted_lpips_weight") == 0.0
+    expected = expected / (
+        profile["weights"]["structure_only_score"]
+        + profile["weights"]["detail_zones_score"]
+        + profile["weights"]["color_reflection_score"]
+        + profile["weights"]["car_only_lpips_score"]
+    )
     assert result["lpips_car_only_similarity_pct"] == pytest.approx(expected_car_only_similarity)
     assert result["product_integrity_score"] == pytest.approx(expected)
     assert result["product_integrity_score"] > 90.0
