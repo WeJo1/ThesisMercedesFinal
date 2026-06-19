@@ -2208,6 +2208,17 @@ def compute_component_product_scores(ref, gen, mask=None, structure_debug=None, 
     }
 
 
+def normalize_lpips_car_only_similarity_percent(lpips_car_only_value, fallback_similarity_pct):
+    """Gib immer eine Similarity in Prozent zurück; LPIPS-Distanzen (0..1) werden invertiert."""
+    if lpips_car_only_value is None:
+        return float(fallback_similarity_pct)
+
+    numeric_value = float(lpips_car_only_value)
+    if 0.0 <= numeric_value <= 1.0:
+        return convert_lpips_to_similarity_percent(numeric_value)
+    return float(np.clip(numeric_value, 0.0, 100.0))
+
+
 def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_score=None, profile=None, debug_dir=None, stem="pair", mask_metrics=None, lpips_component_map=None):
     """Führe Structure, Detail-Zones, Color/Reflection und Car-only-LPIPS zur Produktintegrität zusammen."""
     profile = profile or DEFAULT_PRODUCT_INTEGRITY_PROFILE
@@ -2218,20 +2229,31 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
     components = compute_component_product_scores(ref, gen, mask=scope, structure_debug=structure, lpips_component_map=lpips_component_map, debug_dir=debug_dir, stem=stem)
     component_values = components["scores"]
     component_diffs = components["diffs"]
+    lpips_car_only_similarity_pct = normalize_lpips_car_only_similarity_percent(
+        car_only_lpips_score,
+        fallback_similarity_pct=structure["score"],
+    )
     component_scores = {
-        "structure_only_score": structure["score"],
-        "detail_zones_score": detail["score"],
-        "color_reflection_score": color_score["score"],
-        "car_only_lpips_score": car_only_lpips_score if car_only_lpips_score is not None else structure["score"],
+        "structure_similarity_pct": structure["score"],
+        "detail_zones_similarity_pct": detail["score"],
+        "color_reflection_similarity_pct": color_score["score"],
+        "car_only_lpips_score": lpips_car_only_similarity_pct,
+    }
+    profile_weight_key_by_component = {
+        "structure_similarity_pct": "structure_only_score",
+        "detail_zones_similarity_pct": "detail_zones_score",
+        "color_reflection_similarity_pct": "color_reflection_score",
+        "car_only_lpips_score": "car_only_lpips_score",
     }
     enabled = profile.get("enabled_components", {})
     weights = profile.get("weights", {})
     total = 0.0; denom = 0.0
     for key, value in component_scores.items():
-        if enabled.get(key, True):
-            weight = float(weights.get(key, 0.0)); total += float(value) * weight; denom += weight
-    base_product_score = float(total / denom) if denom else float(np.mean(list(component_scores.values())))
-    product_score = base_product_score
+        profile_key = profile_weight_key_by_component[key]
+        if enabled.get(profile_key, True):
+            weight = float(weights.get(profile_key, 0.0)); total += float(value) * weight; denom += weight
+    base_final_product_integrity_score_pct = float(total / denom) if denom else float(np.mean(list(component_scores.values())))
+    final_product_integrity_score_pct = base_final_product_integrity_score_pct
     thresholds = profile.get("thresholds", {})
     contour_cfg = profile.get("contour_warning", {})
     mask_metrics = mask_metrics or {}
@@ -2307,9 +2329,9 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
     )
     wheel_score = min(front_wheel_score, rear_wheel_score, wheel_tire_score)
 
-    product_score = min(
-        product_score,
-        (0.62 * base_product_score) + (0.14 * detail["score"]) + (0.10 * critical_component_score) + (0.14 * wheel_score),
+    final_product_integrity_score_pct = min(
+        final_product_integrity_score_pct,
+        (0.62 * base_final_product_integrity_score_pct) + (0.14 * detail["score"]) + (0.10 * critical_component_score) + (0.14 * wheel_score),
     )
 
     light_signature_diff = float(component_diffs.get("front_light_signature", 0.0))
@@ -2415,19 +2437,19 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
         else:
             add_finding(findings, "paint_reflection", "tolerated", "reflection:evidence")
         if not component_findings:
-            product_score = max(product_score, min(base_product_score, float(thresholds.get("failed_product_integrity_min", 90.0))))
+            final_product_integrity_score_pct = max(final_product_integrity_score_pct, min(base_final_product_integrity_score_pct, float(thresholds.get("failed_product_integrity_min", 90.0))))
 
     if headlight_failed or light_signature_failed:
-        product_score = min(product_score, min(headlight_score, light_signature_score) + 18.0)
+        final_product_integrity_score_pct = min(final_product_integrity_score_pct, min(headlight_score, light_signature_score) + 18.0)
     wheel_finding_active = "wheel_tire_structure" in findings
     if wheel_warning and wheel_finding_active:
-        product_score = min(product_score, wheel_score + 6.0)
+        final_product_integrity_score_pct = min(final_product_integrity_score_pct, wheel_score + 6.0)
     if wheel_strong and wheel_finding_active:
-        product_score = min(product_score, wheel_score + 4.0)
+        final_product_integrity_score_pct = min(final_product_integrity_score_pct, wheel_score + 4.0)
     if wheel_score < float(thresholds.get("warning_wheel_score_max", 94.0)) and wheel_local_diff > wheel_diff_gate:
-        product_score = min(product_score, wheel_score + (4.0 if wheel_score < float(thresholds.get("critical_wheel_score_max", 90.0)) else 6.0))
+        final_product_integrity_score_pct = min(final_product_integrity_score_pct, wheel_score + (4.0 if wheel_score < float(thresholds.get("critical_wheel_score_max", 90.0)) else 6.0))
     if component_findings and critical_component_score < float(thresholds.get("warning_critical_component_score_max", 94.0)):
-        product_score = min(product_score, critical_component_score + 6.0)
+        final_product_integrity_score_pct = min(final_product_integrity_score_pct, critical_component_score + 6.0)
 
     if debug_dir:
         debug_path = Path(debug_dir); debug_path.mkdir(parents=True, exist_ok=True)
@@ -2479,10 +2501,10 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
 
     critical, tolerated = split_findings(findings)
     stable_pass_candidate = (
-        product_score >= float(thresholds.get("soft_pass_product_integrity_min", 88.0))
+        final_product_integrity_score_pct >= float(thresholds.get("soft_pass_product_integrity_min", 88.0))
         and structure["score"] >= float(thresholds.get("passed_structure_min", 90.0))
         and detail["score"] >= float(thresholds.get("passed_detail_min", 88.0))
-        and component_scores["car_only_lpips_score"] >= 80.0
+        and lpips_car_only_similarity_pct >= 80.0
         and not critical
     )
     if (
@@ -2495,18 +2517,18 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
     ):
         decision = "failed"
     elif (
-        product_score < float(thresholds.get("failed_product_integrity_min", 90.0))
-        and not (has_reflection_evidence and not component_findings and product_score >= float(thresholds.get("reflection_tolerated_product_min", 88.0)))
+        final_product_integrity_score_pct < float(thresholds.get("failed_product_integrity_min", 90.0))
+        and not (has_reflection_evidence and not component_findings and final_product_integrity_score_pct >= float(thresholds.get("reflection_tolerated_product_min", 88.0)))
     ) or structure["score"] < float(thresholds.get("failed_structure_min", 80.0)) or detail["score"] < float(thresholds.get("failed_detail_min", 80.0)):
         decision = "failed"
     elif (
         wheel_warning
         or (wheel_score < float(thresholds.get("warning_wheel_score_max", 94.0)) and wheel_local_diff > wheel_diff_gate)
         or (component_findings and critical_component_score < float(thresholds.get("warning_critical_component_score_max", 94.0)))
-        or product_score < float(thresholds.get("passed_product_integrity_min", 95.0))
+        or final_product_integrity_score_pct < float(thresholds.get("passed_product_integrity_min", 95.0))
     ):
         decision = "warning"
-    elif stable_pass_candidate or (product_score >= float(thresholds.get("passed_product_integrity_min", 95.0)) and component_scores["car_only_lpips_score"] >= 80.0 and not critical):
+    elif stable_pass_candidate or (final_product_integrity_score_pct >= float(thresholds.get("passed_product_integrity_min", 95.0)) and lpips_car_only_similarity_pct >= 80.0 and not critical):
         decision = "passed"
     else:
         decision = "warning"
@@ -2534,7 +2556,9 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
         "structure_only_score": structure["score"],
         "detail_zones_score": detail["score"],
         "color_reflection_score": color_score["score"],
-        "product_integrity_score": product_score,
+        "lpips_car_only_similarity_pct": lpips_car_only_similarity_pct,
+        "final_product_integrity_score_pct": final_product_integrity_score_pct,
+        "product_integrity_score": final_product_integrity_score_pct,
         "product_integrity_decision": decision,
         "critical_findings": critical,
         "tolerated_findings": tolerated,
