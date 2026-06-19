@@ -70,7 +70,7 @@ const heatmapEdgeBoostClamp = 0.32;
 const debugSearchParams = new URLSearchParams(window.location.search);
 const productIntegrityDebugEnabled = ['debug', 'showDebug'].some((key) => ['1', 'true', 'yes'].includes((debugSearchParams.get(key) || '').toLowerCase()));
 
-const mercedesStarIconPath = 'icons/stern.svg';
+const mercedesStarIconPath = 'icons/stern1.png';
 maskSource.value = 'union';
 
 function logBrowser(message, details = null) {
