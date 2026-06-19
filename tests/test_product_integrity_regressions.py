@@ -244,3 +244,56 @@ def test_product_integrity_lower_than_base_requires_visible_reason():
     if debug["product_integrity_score_delta_due_to_caps"] > 0.3:
         assert debug["applied_caps"] or debug["applied_penalties"]
         assert debug["visible_findings"]
+
+
+def test_failed_decision_does_not_overwrite_product_integrity_score_with_six(monkeypatch):
+    ref, mask = make_car()
+    empty_paths = {"debug_paths": {}}
+    monkeypatch.setattr(im, "compute_structure_only_score", lambda *args, **kwargs: {
+        "score": 91.49,
+        "diff_map": np.zeros(ref.shape[:2], dtype=np.float32),
+        "structure_masked_area_ratio": 1.0,
+        **empty_paths,
+    })
+    monkeypatch.setattr(im, "compute_detail_zones_score", lambda *args, **kwargs: {
+        "score": 89.07,
+        "zone_scores": {"silhouette": 95.0, "front_rear": 95.0, "wheels_tires": 95.0, "window_line": 95.0, "body_lines": 95.0, "center_grill_emblem": 95.0},
+        "detail_zone_area_ratio": 1.0,
+        **empty_paths,
+    })
+    monkeypatch.setattr(im, "compute_color_reflection_score", lambda *args, **kwargs: {
+        "score": 74.31,
+        "map": np.zeros(ref.shape[:2], dtype=np.float32),
+        "debug": {},
+        **empty_paths,
+    })
+    component_scores = {
+        "headlight_score": 0.0,
+        "front_light_signature_score": 100.0,
+        "grille_score": 100.0,
+        "emblem_score": 100.0,
+        "front_wheel_score": 100.0,
+        "rear_wheel_score": 100.0,
+        "wheel_tire_score": 100.0,
+        "window_line_score": 100.0,
+        "silhouette_score": 100.0,
+        "rear_light_score": 100.0,
+    }
+    monkeypatch.setattr(im, "compute_component_product_scores", lambda *args, **kwargs: {
+        "scores": component_scores,
+        "diffs": {"headlight": 0.2},
+        "zones": {key: np.ones(ref.shape[:2], dtype=bool) for key in ("front_wheel", "rear_wheel", "wheel_tire", "headlight", "front_light_signature", "grille", "emblem")},
+        "component_diff_map": np.ones(ref.shape[:2], dtype=np.float32),
+        "critical_component_mask": np.ones(ref.shape[:2], dtype=bool),
+        **empty_paths,
+    })
+
+    result = im.compute_product_integrity_scores(ref, ref.copy(), car_mask=mask, car_only_lpips_score=0.4878)
+    debug = result["product_integrity_debug"]
+    expected = (91.49 * 0.5) + (89.07 * 0.4) + (74.31 * 0.05) + (51.22 * 0.05)
+
+    assert result["product_integrity_decision"] == "failed"
+    assert result["product_integrity_score"] == np.float64(expected).item()
+    assert result["product_integrity_score"] != 6.0
+    assert debug["final_score_after_caps"] == debug["base_score_before_caps"]
+    assert any(item.get("decision_only") for item in debug["score_adjustments"])
