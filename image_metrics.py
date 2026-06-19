@@ -2725,6 +2725,24 @@ def compute_product_integrity_scores(ref, gen, car_mask=None, car_only_lpips_sco
         cap_value = float(cap_value)
         before = float(final_product_integrity_score_pct)
         after = min(before, cap_value)
+        if hard:
+            if after < before:
+                adjustment = build_score_adjustment(
+                    adjustment_type=cap_type,
+                    before=before,
+                    after=before,
+                    reason=f"{reason} Die Fail-Entscheidung wird separat gesetzt; der numerische Product-Integrity-Score wird nicht auf den Fail-Cap überschrieben.",
+                    rule_name=cap_type,
+                    trigger=trigger,
+                    component=component,
+                    threshold=threshold,
+                    hard=hard,
+                    visible=True,
+                )
+                adjustment["decision_only"] = True
+                adjustment["suppressed_cap_value"] = cap_value
+                score_adjustments.append(adjustment)
+            return
         if after < before:
             score_adjustments.append(build_score_adjustment(
                 adjustment_type=cap_type,
