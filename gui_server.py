@@ -29,6 +29,13 @@ class MetricsHandler(SimpleHTTPRequestHandler):
         clean = re.sub(r"[^a-zA-Z0-9_.-]+", "_", value or "").strip("._")
         return clean or fallback
 
+    def to_project_path(self, path):
+        path = Path(path)
+        try:
+            return str(path.resolve().relative_to(BASE_DIR))
+        except ValueError:
+            return str(path)
+
     def create_run_paths(self, payload):
         ref_name = self.sanitize_token(Path(payload["ref_image"].filename).stem, "ref")
         gen_name = self.sanitize_token(Path(payload["gen_image"].filename).stem, "gen")
@@ -161,15 +168,15 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             sys.executable,
             str(BASE_DIR / "image_metrics.py"),
             "--output-csv",
-            str(run_paths["csv_path"]),
+            self.to_project_path(run_paths["csv_path"]),
             "--out",
-            str(run_paths["norm_dir"]),
+            self.to_project_path(run_paths["norm_dir"]),
             "--lpips-net",
             payload["lpips_net"],
         ]
 
         if payload["enable_heatmap"]:
-            command.extend(["--lpips-heatmap-dir", str(run_paths["spatial_dir"])])
+            command.extend(["--lpips-heatmap-dir", self.to_project_path(run_paths["spatial_dir"])])
         else:
             command.extend(["--lpips-heatmap-dir", "none"])
 
@@ -177,9 +184,9 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             command.extend(
                 [
                     "--reference-dir",
-                    str(ref_asset["path"]),
+                    self.to_project_path(ref_asset["path"]),
                     "--generated-dir",
-                    str(gen_asset["path"]),
+                    self.to_project_path(gen_asset["path"]),
                     "--skip-hausdorff",
                 ]
             )
@@ -187,9 +194,9 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             command.extend(
                 [
                     "--ref",
-                    str(ref_asset["path"]),
+                    self.to_project_path(ref_asset["path"]),
                     "--gen",
-                    str(gen_asset["path"]),
+                    self.to_project_path(gen_asset["path"]),
                 ]
             )
 
@@ -202,7 +209,7 @@ class MetricsHandler(SimpleHTTPRequestHandler):
                     "--mask-source",
                     payload["mask_source"],
                     "--car-only-dir",
-                    str(run_paths["car_only_dir"]),
+                    self.to_project_path(run_paths["car_only_dir"]),
                 ]
             )
 
@@ -220,7 +227,7 @@ class MetricsHandler(SimpleHTTPRequestHandler):
         for index, row in enumerate(rows):
             should_include_previews = not compare_as_batch or index == 0
             comparison_payload = self.build_preview_payload(row, include_previews=should_include_previews)
-            comparison_payload["run_dir"] = str(run_paths["run_root"])
+            comparison_payload["run_dir"] = self.to_project_path(run_paths["run_root"])
             comparisons.append(comparison_payload)
 
         first_comparison = comparisons[0]
@@ -233,7 +240,7 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             "comparison_count": len(comparisons),
             "batch_mode": compare_as_batch,
             "batch_previews_limited": compare_as_batch and len(comparisons) > 1,
-            "run_dir": str(run_paths["run_root"]),
+            "run_dir": self.to_project_path(run_paths["run_root"]),
         }
 
     def store_upload_asset(self, file_field, tmp_path, prefix):
