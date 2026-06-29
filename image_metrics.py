@@ -232,7 +232,10 @@ def build_excel_output_paths(output_csv):
     stem = output_path.stem
     parent = output_path.parent if output_path.parent != Path("") else Path(".")
     full_xlsx = parent / f"{stem}.xlsx"
-    summary_xlsx = parent / f"{stem.replace('_results', '_summary')}.xlsx"
+    summary_stem = stem.replace("_results", "_summary")
+    if summary_stem == stem:
+        summary_stem = f"{stem}_summary"
+    summary_xlsx = parent / f"{summary_stem}.xlsx"
     excel_csv = parent / f"{stem}_excel.csv"
     return full_xlsx, summary_xlsx, excel_csv
 
@@ -306,16 +309,26 @@ def write_excel_workbook(path, df, sheet_name, include_car_only=True, lpips_net=
 
 
 def write_result_files(df, output_csv, include_car_only=True, lpips_net="alex"):
-    full_xlsx, summary_xlsx, excel_csv = build_excel_output_paths(output_csv)
+    output_path = Path(output_csv)
+    full_xlsx, summary_xlsx, excel_csv = build_excel_output_paths(output_path)
     export_df = prepare_export_dataframe(df, include_car_only=include_car_only, summary=False)
 
-    write_excel_workbook(full_xlsx, df, "Alle Ergebnisse", include_car_only=include_car_only, lpips_net=lpips_net, summary=False)
-    write_excel_workbook(summary_xlsx, df, "Kurzfassung", include_car_only=include_car_only, lpips_net=lpips_net, summary=True)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    export_df.to_csv(output_path, index=False, encoding="utf-8", float_format="%.6f", na_rep="")
+
+    try:
+        write_excel_workbook(full_xlsx, df, "Alle Ergebnisse", include_car_only=include_car_only, lpips_net=lpips_net, summary=False)
+        write_excel_workbook(summary_xlsx, df, "Kurzfassung", include_car_only=include_car_only, lpips_net=lpips_net, summary=True)
+    except ModuleNotFoundError as exc:
+        if exc.name != "openpyxl":
+            raise
+        print("[WARNUNG] openpyxl ist nicht installiert. Überspringe Excel-Export und schreibe CSV-Dateien weiter.")
 
     csv_df = rename_columns_for_excel(export_df)
     csv_df.to_csv(excel_csv, index=False, sep=";", encoding="utf-8-sig", decimal=",", float_format="%.4f", na_rep="")
 
     return {
+        "csv": str(output_path),
         "xlsx": str(full_xlsx),
         "summary_xlsx": str(summary_xlsx),
         "excel_csv": str(excel_csv),
