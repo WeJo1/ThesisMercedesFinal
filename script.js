@@ -1,7 +1,7 @@
 const refImage = document.getElementById('refImage');
 const genImage = document.getElementById('genImage');
 const lpipsNet = document.getElementById('lpipsNet');
-const enableHeatmap = document.getElementById('enableHeatmap');
+const shouldGenerateSpatialMatrix = true;
 const carOnlyMode = document.getElementById('carOnlyMode');
 const carMode = document.getElementById('carMode');
 const maskSource = document.getElementById('maskSource');
@@ -482,7 +482,7 @@ function computeHotspots(values, maxCount = spatialHotspotLimit, globalMax = Num
   const denominator = Math.max(Number(globalMax), 1e-8);
   return hotspots.slice(0, Math.max(1, maxCount)).map((entry, index) => {
     const normalizedToMax = entry.value / denominator;
-    const category = normalizedToMax >= 0.9 ? 'sehr hoch' : normalizedToMax >= 0.75 ? 'hoch' : 'moderat';
+    const category = normalizedToMax >= 0.9 ? 'sehr hoch' : normalizedToMax >= 0.75 ? 'hoch' : 'gering';
     return {
       ...entry,
       rank: index + 1,
@@ -1491,7 +1491,7 @@ async function runComparison() {
   payload.append('ref_image', refFile);
   payload.append('gen_image', genFile);
   payload.append('lpips_net', lpipsNet.value);
-  payload.append('enable_heatmap', String(enableHeatmap.checked));
+  payload.append('enable_heatmap', String(shouldGenerateSpatialMatrix));
   payload.append('enable_car_only', String(carOnlyMode.checked));
   payload.append('car_mode', carMode.value);
   payload.append('mask_source', maskSource.value);
@@ -1501,7 +1501,7 @@ async function runComparison() {
       refFile: refFile.name,
       genFile: genFile.name,
       lpipsNet: lpipsNet.value,
-      enableHeatmap: enableHeatmap.checked,
+      enableSpatialMatrix: shouldGenerateSpatialMatrix,
       enableCarOnly: carOnlyMode.checked,
       carMode: carMode.value,
       maskSource: maskSource.value,
@@ -1545,7 +1545,6 @@ function resetInterface() {
   refImage.value = '';
   genImage.value = '';
   lpipsNet.value = 'alex';
-  enableHeatmap.checked = true;
   carOnlyMode.checked = true;
   carMode.value = 'neutralize_crop';
   maskSource.value = 'union';
