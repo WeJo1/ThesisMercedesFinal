@@ -15,22 +15,22 @@
           </div>
           <div>
             <p class="eyebrow">Mercedes-Benz</p>
-            <h1>Einstellungen</h1>
+            <h1>Bildanalyse</h1>
           </div>
         </div>
       </header>
 
       <main class="content-grid">
         <section class="panel panel-input">
-          <h2>Quality-Check starten</h2>
+          <h2>Einstellungen</h2>
           <p class="panel-intro">
-            Wähle Referenz- und Kandidatenbild aus und starte den visuellen Qualitäts-Scan.
+            Wähle Referenz- und Vergleichsbild aus und starte die Analyse.
           </p>
 
           <label for="refImage">Referenzbild oder ZIP</label>
           <input id="refImage" type="file" accept="image/*,.zip,application/zip" />
 
-          <label for="genImage">Kandidatenbild oder ZIP</label>
+          <label for="genImage">Vergleichsbild oder ZIP</label>
           <input id="genImage" type="file" accept="image/*,.zip,application/zip" />
 
           <div class="field-row">
@@ -74,7 +74,7 @@
 
           <div class="actions">
             <button class="secondary-btn" id="resetForm" type="button">Zurücksetzen</button>
-            <button class="primary-btn" id="runModel" type="button">Quality-Scan starten</button>
+            <button class="primary-btn" id="runModel" type="button">Analyse starten</button>
           </div>
         </section>
 
@@ -88,13 +88,13 @@
             <p class="preview-title">Status</p>
             <div id="loadingIndicator" class="loading-indicator" hidden>
               <span class="loading-spinner" aria-hidden="true"></span>
-              <span>Quality-Scan läuft...</span>
+              <span>Analyse läuft...</span>
             </div>
-            <p id="previewText">Lade zwei Bilder hoch und starte den Quality-Check.</p>
+            <p id="previewText">Lade zwei Bilder hoch und starte die Analyse.</p>
           </div>
 
           <section id="comparisonSection" class="comparison-section" hidden>
-            <p class="preview-title">Scan-Paare (Dateiname anklicken)</p>
+            <p class="preview-title">Analyse-Paare (Dateiname anklicken)</p>
             <div id="comparisonList" class="comparison-list"></div>
           </section>
 
@@ -104,8 +104,8 @@
               <img id="refPreview" alt="Referenz Vorschau" />
             </figure>
             <figure class="preview-figure">
-              <figcaption>Kandidatenbild</figcaption>
-              <img id="genPreview" alt="Kandidatenbild Vorschau" />
+              <figcaption>Vergleichsbild</figcaption>
+              <img id="genPreview" alt="Vergleichsbild Vorschau" />
             </figure>
           </div>
 
@@ -117,8 +117,8 @@
                 <img id="carRefPreview" alt="Fahrzeug Referenz Vorschau" />
               </figure>
               <figure class="preview-figure">
-                <figcaption>Fahrzeug Kandidat</figcaption>
-                <img id="carGenPreview" alt="Fahrzeug Kandidat Vorschau" />
+                <figcaption>Fahrzeug Vergleich</figcaption>
+                <img id="carGenPreview" alt="Fahrzeug Vergleich Vorschau" />
               </figure>
             </div>
           </section>
@@ -216,7 +216,7 @@
                 <p class="stat-label">Mask IoU</p>
                 <details class="metric-info">
                   <summary aria-label="Mask IoU Erklärung anzeigen">ⓘ</summary>
-                  <p>Zeigt die Überdeckung der segmentierten Fahrzeugflächen zwischen Referenz- und Kandidatenbild. Nur verfügbar, wenn Car-only/Fahrzeugsegmentierung erfolgreich war.</p>
+                  <p>Zeigt die Überdeckung der segmentierten Fahrzeugflächen zwischen Referenz- und Vergleichsbild. Nur verfügbar, wenn Car-only/Fahrzeugsegmentierung erfolgreich war.</p>
                 </details>
               </div>
               <p id="maskIou" class="stat-value">--</p>
