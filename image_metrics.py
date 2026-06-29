@@ -77,6 +77,111 @@ CSV_COLUMN_ORDER = [
     "lpips_spatial_path",
 ]
 
+
+IMPORTANT_RESULT_COLUMNS = [
+    "filename",
+    "ssim_percent",
+    "lpips_similarity_percent",
+    "lpips_car_only_similarity_percent",
+    "mask_iou",
+    "ssim_car_only",
+    "mask_metric_scope",
+    "content_mask_area_ratio",
+]
+
+SUMMARY_COLUMN_ORDER = [
+    "filename",
+    "ssim_percent",
+    "lpips_similarity_percent",
+    "lpips_car_only_similarity_percent",
+    "ssim_car_only",
+    "mask_metric_scope",
+    "mask_iou",
+    "content_mask_area_ratio",
+]
+
+DISTANCE_COLUMNS = {
+    "ssim",
+    "lpips",
+    "lpips_map_mean",
+    "lpips_foreground",
+    "delta_e_ciede2000",
+    "lpips_car_only",
+    "ssim_car_only",
+    "mask_iou",
+    "mask_dice",
+    "mask_area_ratio",
+    "centroid_distance_px",
+    "centroid_distance_norm",
+    "hausdorff_px",
+    "hausdorff_norm",
+    "car_mask_area_ratio",
+    "content_mask_area_ratio",
+    "metric_scale_factor",
+}
+
+PERCENT_COLUMNS = {
+    "ssim_percent",
+    "lpips_similarity_percent",
+    "lpips_foreground_similarity_percent",
+    "delta_e_similarity_percent",
+    "lpips_car_only_similarity_percent",
+}
+
+EXCEL_COLUMN_LABELS = {
+    "filename": "Dateiname",
+    "reference_width": "Referenz Breite px",
+    "reference_height": "Referenz Höhe px",
+    "generated_width": "Generated Breite px",
+    "generated_height": "Generated Höhe px",
+    "normalized_width": "Normalisiert Breite px",
+    "normalized_height": "Normalisiert Höhe px",
+    "metric_scale_factor": "Metrik Skalierungsfaktor",
+    "normalization_mode": "Normalisierung",
+    "main_metric_scope": "Hauptmetrik Bereich",
+    "content_mask_area_px": "Content-Maske Fläche px",
+    "content_mask_area_ratio": "Content-Maske Anteil",
+    "ssim": "SSIM Distanz/Rohwert",
+    "ssim_percent": "SSIM Ähnlichkeit_percent",
+    "lpips": "LPIPS Distanz",
+    "lpips_similarity_percent": "LPIPS Ähnlichkeit_percent",
+    "lpips_map_mean": "LPIPS Spatial Mittelwert",
+    "lpips_foreground": "LPIPS Vordergrund",
+    "lpips_foreground_similarity_percent": "LPIPS Vordergrund Ähnlichkeit_percent",
+    "delta_e_ciede2000": "Delta E CIEDE2000",
+    "delta_e_similarity_percent": "Delta E Ähnlichkeit_percent",
+    "lpips_car_only": "LPIPS Car-only Distanz",
+    "lpips_car_only_similarity_percent": "LPIPS Car-only Ähnlichkeit_percent",
+    "ssim_car_only": "SSIM Car-only",
+    "mask_metric_scope": "Maskenmetrik Bereich",
+    "mask_iou": "Mask IoU",
+    "mask_dice": "Mask Dice",
+    "mask_area_ratio": "Maskenflächen Verhältnis",
+    "centroid_distance_px": "Schwerpunktdistanz px",
+    "centroid_distance_norm": "Schwerpunktdistanz normiert",
+    "hausdorff_px": "Hausdorff Distanz px",
+    "hausdorff_norm": "Hausdorff Distanz normiert",
+    "car_mask_area_ratio": "Car-Maske Anteil",
+    "car_bbox": "Car Bounding Box",
+    "car_fallback_reason": "Car Fallback Grund",
+    "ref_norm_path": "Pfad Referenz normalisiert",
+    "gen_norm_path": "Pfad Generated normalisiert",
+    "car_only_ref_path": "Pfad Car-only Referenz",
+    "car_only_gen_path": "Pfad Car-only Generated",
+    "lpips_spatial_path": "Pfad LPIPS Spatial",
+}
+
+CAR_ONLY_EXPORT_COLUMNS = {
+    "lpips_car_only",
+    "lpips_car_only_similarity_percent",
+    "ssim_car_only",
+    "car_mask_area_ratio",
+    "car_bbox",
+    "car_fallback_reason",
+    "car_only_ref_path",
+    "car_only_gen_path",
+}
+
 CSV_FLOAT_COLUMNS = [
     "content_mask_area_ratio",
     "ssim",
@@ -120,6 +225,101 @@ def build_result_dataframe(results):
             df[column] = pd.to_numeric(df[column], errors="coerce")
 
     return df
+
+
+def build_excel_output_paths(output_csv):
+    output_path = Path(output_csv)
+    stem = output_path.stem
+    parent = output_path.parent if output_path.parent != Path("") else Path(".")
+    full_xlsx = parent / f"{stem}.xlsx"
+    summary_xlsx = parent / f"{stem.replace('_results', '_summary')}.xlsx"
+    excel_csv = parent / f"{stem}_excel.csv"
+    return full_xlsx, summary_xlsx, excel_csv
+
+
+def get_lpips_net_label(lpips_net):
+    if lpips_net == "alex":
+        return "alex (Standard)"
+    return str(lpips_net)
+
+
+def prepare_export_dataframe(df, include_car_only=True, summary=False):
+    if summary:
+        columns = [column for column in SUMMARY_COLUMN_ORDER if column in df.columns]
+    else:
+        priority_columns = [column for column in IMPORTANT_RESULT_COLUMNS if column in df.columns]
+        remaining_columns = [column for column in df.columns if column not in priority_columns]
+        columns = priority_columns + remaining_columns
+
+    if not include_car_only:
+        columns = [column for column in columns if column not in CAR_ONLY_EXPORT_COLUMNS]
+
+    export_df = df.loc[:, columns].copy()
+    for column in export_df.columns:
+        if column in PERCENT_COLUMNS:
+            export_df[column] = pd.to_numeric(export_df[column], errors="coerce").round(2)
+        elif column in DISTANCE_COLUMNS:
+            export_df[column] = pd.to_numeric(export_df[column], errors="coerce").round(4)
+
+    return export_df
+
+
+def rename_columns_for_excel(df):
+    return df.rename(columns={column: EXCEL_COLUMN_LABELS.get(column, column) for column in df.columns})
+
+
+def format_excel_sheet(writer, sheet_name, dataframe):
+    worksheet = writer.sheets[sheet_name]
+    worksheet.freeze_panes = "A2"
+    worksheet.auto_filter.ref = worksheet.dimensions
+
+    from openpyxl.styles import Font, PatternFill
+
+    header_fill = PatternFill(fill_type="solid", fgColor="D9EAF7")
+    for cell in worksheet[1]:
+        cell.font = Font(bold=True)
+        cell.fill = header_fill
+
+    for index, column_name in enumerate(dataframe.columns, start=1):
+        series = dataframe[column_name].fillna("")
+        max_content_width = series.map(lambda value: len(str(value))).max() if not series.empty else 0
+        width = min(max(max_content_width, len(str(column_name))) + 2, 60)
+        worksheet.column_dimensions[worksheet.cell(row=1, column=index).column_letter].width = width
+
+
+def write_excel_workbook(path, df, sheet_name, include_car_only=True, lpips_net="alex", summary=False):
+    export_df = prepare_export_dataframe(df, include_car_only=include_car_only, summary=summary)
+    display_df = rename_columns_for_excel(export_df)
+
+    with pd.ExcelWriter(path, engine="openpyxl") as writer:
+        display_df.to_excel(writer, sheet_name=sheet_name, index=False)
+        format_excel_sheet(writer, sheet_name, display_df)
+
+        metadata = pd.DataFrame(
+            [
+                {"Eigenschaft": "LPIPS CNN", "Wert": get_lpips_net_label(lpips_net)},
+                {"Eigenschaft": "Car-only Modus", "Wert": "aktiv" if include_car_only else "deaktiviert"},
+            ]
+        )
+        metadata.to_excel(writer, sheet_name="Info", index=False)
+        format_excel_sheet(writer, "Info", metadata)
+
+
+def write_result_files(df, output_csv, include_car_only=True, lpips_net="alex"):
+    full_xlsx, summary_xlsx, excel_csv = build_excel_output_paths(output_csv)
+    export_df = prepare_export_dataframe(df, include_car_only=include_car_only, summary=False)
+
+    write_excel_workbook(full_xlsx, df, "Alle Ergebnisse", include_car_only=include_car_only, lpips_net=lpips_net, summary=False)
+    write_excel_workbook(summary_xlsx, df, "Kurzfassung", include_car_only=include_car_only, lpips_net=lpips_net, summary=True)
+
+    csv_df = rename_columns_for_excel(export_df)
+    csv_df.to_csv(excel_csv, index=False, sep=";", encoding="utf-8-sig", decimal=",", float_format="%.4f", na_rep="")
+
+    return {
+        "xlsx": str(full_xlsx),
+        "summary_xlsx": str(summary_xlsx),
+        "excel_csv": str(excel_csv),
+    }
 
 
 def load_image(path):
@@ -1317,6 +1517,8 @@ def evaluate_folders(
     roi_min_size_px=64,
     roi_square=True,
     max_metric_long_edge=1600,
+    car_only_enabled=False,
+    lpips_net="alex",
 ):
     ref_dir = Path(reference_dir)
     gen_dir = Path(generated_dir)
@@ -1376,29 +1578,29 @@ def evaluate_folders(
         raise RuntimeError("Keine auswertbaren Bildpaare gefunden.")
 
     df = build_result_dataframe(results)
-    df.to_csv(output_csv, index=False, float_format="%.6f", na_rep="")
+    output_paths = write_result_files(df, output_csv, include_car_only=car_only_enabled, lpips_net=lpips_net)
 
     print("============================================================")
-    print(f"[INFO] Ergebnisse gespeichert: {output_csv}")
-    print(
-        df[
-            [
-                "filename",
-                "ssim",
-                "ssim_percent",
-                "lpips",
-                "lpips_similarity_percent",
-                "lpips_foreground",
-                "lpips_foreground_similarity_percent",
-                "delta_e_ciede2000",
-                "delta_e_similarity_percent",
-                "lpips_car_only",
-                "lpips_car_only_similarity_percent",
-                "mask_iou",
-                "mask_dice",
-            ]
-        ].head()
-    )
+    print(f"[INFO] Excel-Ergebnisse gespeichert: {output_paths['xlsx']}")
+    print(f"[INFO] Excel-Kurzfassung gespeichert: {output_paths['summary_xlsx']}")
+    print(f"[INFO] Excel-kompatible CSV gespeichert: {output_paths['excel_csv']}")
+    preview_columns = [
+        "filename",
+        "ssim",
+        "ssim_percent",
+        "lpips",
+        "lpips_similarity_percent",
+        "lpips_foreground",
+        "lpips_foreground_similarity_percent",
+        "delta_e_ciede2000",
+        "delta_e_similarity_percent",
+        "mask_iou",
+        "mask_dice",
+    ]
+    if car_only_enabled:
+        preview_columns.insert(9, "lpips_car_only")
+        preview_columns.insert(10, "lpips_car_only_similarity_percent")
+    print(df[[column for column in preview_columns if column in df.columns]].head())
 
 
 def parse_args():
@@ -1415,13 +1617,14 @@ def parse_args():
     )
     parser.add_argument("--out", default="normalized", help="Output-Ordner für normalisierte Bilder")
     parser.add_argument("--output-csv", default="image_metrics_results.csv", help="CSV-Datei für Metrikergebnisse")
-    parser.add_argument("--lpips-net", default="alex", choices=["alex", "vgg", "squeeze"], help="Backbone für LPIPS")
+    parser.add_argument("--lpips-net", default="alex", choices=["alex", "vgg", "squeeze"], help="Backbone für LPIPS; alex ist der Standard")
     parser.add_argument("--lpips-heatmap-dir", default="lpips_heatmaps", help="Ausgabeordner für LPIPS-Heatmaps (setze 'none' zum Deaktivieren)")
     parser.add_argument("--use-gpu", action="store_true", help="Nutze CUDA, falls verfügbar")
     parser.add_argument("--seed", type=int, default=None, help="Setze optionalen Zufalls-Seed für reproduzierbare Läufe")
     parser.add_argument("--deterministic", action="store_true", help="Aktiviere deterministische Backends (langsamer, aber reproduzierbarer)")
-    parser.add_argument("--enable-car-only", action="store_true", help="Aktiviere Car-only Metriken (LPIPS/SSIM)")
+    parser.add_argument("--enable-car-only", action="store_true", help="Aktiviere Car-only Metriken (LPIPS/SSIM); ist standardmäßig aktiv")
     parser.add_argument("--car-only", action="store_true", help="Kurzform für --enable-car-only")
+    parser.add_argument("--disable-car-only", "--no-car-only", action="store_true", help="Deaktiviere Car-only Metriken und blende Car-only Ergebniswerte aus")
     parser.add_argument(
         "--car-mode",
         default="neutralize_crop",
@@ -1486,7 +1689,11 @@ def parse_args():
         ]
     )
 
-    args.enable_car_only = args.enable_car_only or args.car_only or use_car_specific_option
+    args.enable_car_only = not args.disable_car_only
+    if args.car_only or args.enable_car_only or use_car_specific_option:
+        args.enable_car_only = True
+    if args.disable_car_only:
+        args.enable_car_only = False
     return args
 
 
@@ -1498,8 +1705,8 @@ def main():
     print("[INFO] Starte Bildmetrik-Berechnung")
     print(f"[INFO] Mode            : {args.mode}")
     print(f"[INFO] Normalized out  : {args.out}")
-    print(f"[INFO] Output CSV      : {args.output_csv}")
-    print(f"[INFO] LPIPS Net       : {args.lpips_net}")
+    print(f"[INFO] Output Basis    : {args.output_csv}")
+    print(f"[INFO] LPIPS Net       : {get_lpips_net_label(args.lpips_net)}")
     print("[INFO] LPIPS Setup     : offizielles vortrainiertes Inferenzmodell (lin, kein Training im Tool)")
     print(f"[INFO] LPIPS Heatmaps  : {args.lpips_heatmap_dir}")
     print(f"[INFO] Seed            : {args.seed}")
@@ -1563,8 +1770,11 @@ def main():
             roi_square=args.roi_square,
             max_metric_long_edge=args.max_metric_long_edge,
         )
-        build_result_dataframe([result]).to_csv(args.output_csv, index=False, float_format="%.6f", na_rep="")
-        print(f"[INFO] Einzelvergleich gespeichert: {args.output_csv}")
+        df = build_result_dataframe([result])
+        output_paths = write_result_files(df, args.output_csv, include_car_only=args.enable_car_only, lpips_net=args.lpips_net)
+        print(f"[INFO] Einzelvergleich Excel-Ergebnisse gespeichert: {output_paths['xlsx']}")
+        print(f"[INFO] Einzelvergleich Excel-Kurzfassung gespeichert: {output_paths['summary_xlsx']}")
+        print(f"[INFO] Einzelvergleich Excel-kompatible CSV gespeichert: {output_paths['excel_csv']}")
         return
 
     evaluate_folders(
@@ -1595,6 +1805,8 @@ def main():
         roi_min_size_px=args.roi_min_size_px,
         roi_square=args.roi_square,
         max_metric_long_edge=args.max_metric_long_edge,
+        car_only_enabled=args.enable_car_only,
+        lpips_net=args.lpips_net,
     )
 
 

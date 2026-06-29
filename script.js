@@ -161,7 +161,7 @@ function setLoadingState(isLoading) {
 
 function startCalculation(message) {
   isComparisonRunning = true;
-  setStatus('running', 'Vergleiche');
+  setStatus('running', 'Scanne');
   setHeaderLoadingState(true);
   setBrandLoadingSpin(true);
   setLoadingState(true);
@@ -1358,7 +1358,7 @@ async function parseCompareResponse(response) {
 }
 
 function getComparisonError(response, data) {
-  const defaultMessage = 'Vergleich fehlgeschlagen';
+  const defaultMessage = 'Quality-Scan fehlgeschlagen';
   const serverMessage = data?.error || data?.message;
 
   if (serverMessage) {
@@ -1400,10 +1400,10 @@ function createCompletionMessage({ filename, comparisonCount, isBatch, batchPrev
     const previewHint = batchPreviewsLimited
       ? ' Lade weitere Paare über die Liste links.'
       : '';
-    return `Vergleich abgeschlossen. Werte ${comparisonCount} Dateipaare aus.${previewHint}${storageHint}`;
+    return `Quality-Scan abgeschlossen. Werte ${comparisonCount} Dateipaare aus.${previewHint}${storageHint}`;
   }
 
-  return `Vergleich abgeschlossen für ${normalizedFilename}.${storageHint}`;
+  return `Quality-Scan abgeschlossen für ${normalizedFilename}.${storageHint}`;
 }
 
 async function sendComparisonRequest(payload) {
@@ -1460,7 +1460,7 @@ async function sendComparisonRequest(payload) {
     }
   }
 
-  throw lastError || new Error('Vergleich fehlgeschlagen');
+  throw lastError || new Error('Quality-Scan fehlgeschlagen');
 }
 
 async function runComparison() {
@@ -1474,14 +1474,14 @@ async function runComparison() {
   if (!refFile || !genFile) {
     stopCalculation();
     setStatus('idle', 'Bilder fehlen');
-    previewText.textContent = 'Wähle zuerst Referenz- und Vergleichsbild aus.';
+    previewText.textContent = 'Wähle zuerst Referenz- und Kandidatenbild aus.';
     return;
   }
 
   if (!hasMatchingComparisonTypes(refFile, genFile)) {
     stopCalculation();
     setStatus('idle', 'Typ prüfen');
-    previewText.textContent = 'Vergleiche entweder zwei Bilder oder zwei ZIP-Ordner. Mischformen sind nicht erlaubt.';
+    previewText.textContent = 'Nutze entweder zwei Bilder oder zwei ZIP-Ordner. Mischformen sind nicht erlaubt.';
     return;
   }
 
@@ -1497,7 +1497,7 @@ async function runComparison() {
   payload.append('mask_source', maskSource.value);
 
   try {
-    logBrowser('Starte Vergleich', {
+    logBrowser('Starte Quality-Scan', {
       refFile: refFile.name,
       genFile: genFile.name,
       lpipsNet: lpipsNet.value,
@@ -1527,7 +1527,7 @@ async function runComparison() {
     });
 
     setStatus('done', 'Fertig');
-    logBrowser('Zeige Vergleichsergebnis', data);
+    logBrowser('Zeige Quality-Scan-Ergebnis', data);
   } catch (error) {
     setStatus('idle', 'Fehler');
     updateCarOnlyPreview(null);
@@ -1535,7 +1535,7 @@ async function runComparison() {
     comparisonSection.hidden = true;
     comparisonList.innerHTML = '';
     previewText.textContent = `Fehler: ${error.message}`;
-    console.error('[CompareGUI] Vergleich abgebrochen', error);
+    console.error('[CompareGUI] Quality-Scan abgebrochen', error);
   } finally {
     stopCalculation();
   }
@@ -1546,7 +1546,7 @@ function resetInterface() {
   genImage.value = '';
   lpipsNet.value = 'alex';
   enableHeatmap.checked = true;
-  carOnlyMode.checked = false;
+  carOnlyMode.checked = true;
   carMode.value = 'neutralize_crop';
   maskSource.value = 'union';
 
@@ -1561,7 +1561,7 @@ function resetInterface() {
     node.textContent = node.id.includes('Similarity') ? '-- %' : '--';
   });
 
-  previewText.textContent = 'Lade zwei Bilder hoch und starte den Vergleich.';
+  previewText.textContent = 'Lade zwei Bilder hoch und starte den Quality-Check.';
   setStatus('idle', 'Bereit');
   stopCalculation();
 }
