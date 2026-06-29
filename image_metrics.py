@@ -82,22 +82,28 @@ IMPORTANT_RESULT_COLUMNS = [
     "filename",
     "ssim_percent",
     "lpips_similarity_percent",
+    "delta_e_similarity_percent",
     "lpips_car_only_similarity_percent",
-    "mask_iou",
     "ssim_car_only",
+    "mask_iou",
+    "mask_dice",
     "mask_metric_scope",
     "content_mask_area_ratio",
+    "lpips_spatial_path",
 ]
 
 SUMMARY_COLUMN_ORDER = [
     "filename",
     "ssim_percent",
     "lpips_similarity_percent",
+    "delta_e_similarity_percent",
     "lpips_car_only_similarity_percent",
     "ssim_car_only",
-    "mask_metric_scope",
     "mask_iou",
+    "mask_dice",
+    "mask_metric_scope",
     "content_mask_area_ratio",
+    "lpips_spatial_path",
 ]
 
 DISTANCE_COLUMNS = {
@@ -241,7 +247,7 @@ def build_excel_output_paths(output_csv):
 
 def get_lpips_net_label(lpips_net):
     if lpips_net == "alex":
-        return "alex (Standard)"
+        return "alex (empfohlen)"
     return str(lpips_net)
 
 
@@ -309,24 +315,13 @@ def write_excel_workbook(path, df, sheet_name, include_car_only=True, lpips_net=
 
 def write_result_files(df, output_csv, include_car_only=True, lpips_net="alex"):
     output_path = Path(output_csv)
-    full_xlsx, summary_xlsx = build_excel_output_paths(output_path)
     summary_df = prepare_export_dataframe(df, include_car_only=include_car_only, summary=True)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    summary_df.to_csv(output_path, index=False, encoding="utf-8", float_format="%.6f", na_rep="")
-
-    try:
-        write_excel_workbook(full_xlsx, df, "Alle Ergebnisse", include_car_only=include_car_only, lpips_net=lpips_net, summary=False)
-        write_excel_workbook(summary_xlsx, df, "Kurzfassung", include_car_only=include_car_only, lpips_net=lpips_net, summary=True)
-    except ModuleNotFoundError as exc:
-        if exc.name != "openpyxl":
-            raise
-        print("[WARNUNG] openpyxl ist nicht installiert. Überspringe Excel-Export und schreibe nur die Summary-CSV weiter.")
+    summary_df.to_csv(output_path, index=False, sep=";", encoding="utf-8-sig", float_format="%.6f", na_rep="")
 
     return {
         "csv": str(output_path),
-        "xlsx": str(full_xlsx),
-        "summary_xlsx": str(summary_xlsx),
     }
 
 
@@ -1685,7 +1680,7 @@ def parse_args():
     )
     parser.add_argument("--out", default="normalized", help="Output-Ordner für normalisierte Bilder")
     parser.add_argument("--output-csv", default="image_metrics_results.csv", help="CSV-Datei für Metrikergebnisse")
-    parser.add_argument("--lpips-net", default="alex", choices=["alex", "vgg", "squeeze"], help="Backbone für LPIPS; alex ist der Standard")
+    parser.add_argument("--lpips-net", default="alex", choices=["alex", "vgg", "squeeze"], help="Backbone für LPIPS; alex ist empfohlen")
     parser.add_argument("--lpips-heatmap-dir", default="lpips_heatmaps", help="Ausgabeordner für LPIPS-Heatmaps (setze 'none' zum Deaktivieren)")
     parser.add_argument("--use-gpu", action="store_true", help="Nutze CUDA, falls verfügbar")
     parser.add_argument("--seed", type=int, default=None, help="Setze optionalen Zufalls-Seed für reproduzierbare Läufe")

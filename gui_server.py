@@ -148,7 +148,7 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             "ref_image": ref_image,
             "gen_image": gen_image,
             "lpips_net": form.getfirst("lpips_net", "alex"),
-            "enable_heatmap": form.getfirst("enable_heatmap", "true") == "true",
+            "enable_heatmap": True,
             "enable_car_only": form.getfirst("enable_car_only", "false") == "true",
             "car_mode": form.getfirst("car_mode", "neutralize_crop"),
             "mask_source": form.getfirst("mask_source", "union"),
@@ -218,7 +218,7 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             raise RuntimeError(process.stderr.strip() or process.stdout.strip() or "image_metrics.py fehlgeschlagen")
 
         with run_paths["csv_path"].open("r", encoding="utf-8") as csv_file:
-            rows = list(csv.DictReader(csv_file))
+            rows = list(csv.DictReader(csv_file, delimiter=";"))
 
         if not rows:
             raise RuntimeError("Keine Metriken im CSV gefunden")
