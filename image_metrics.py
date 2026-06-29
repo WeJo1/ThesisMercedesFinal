@@ -413,6 +413,61 @@ def normalize_pair(ref_img, gen_img, mode="letterbox", pad_color=LETTERBOX_PAD_C
     return ref_norm, gen_norm, content_mask
 
 
+def normalize_pair_for_metrics(ref_img, gen_img, mode="letterbox", pad_color=LETTERBOX_PAD_COLOR, max_metric_long_edge=1600):
+    if mode != "letterbox":
+        raise ValueError("mode muss 'letterbox' sein")
+
+    ref_h, ref_w = ref_img.shape[:2]
+    gen_h, gen_w = gen_img.shape[:2]
+    if ref_w <= 0 or ref_h <= 0 or gen_w <= 0 or gen_h <= 0:
+        raise ValueError("Bildgrößen müssen größer als 0 sein.")
+
+    if max_metric_long_edge is None:
+        # None deaktiviert den Performance-Schutz bewusst: Die Metriken laufen dann in voller
+        # Referenzauflösung. Das kann bei sehr großen Bildern weiterhin viel RAM benötigen.
+        metric_scale = 1.0
+        target_w = int(ref_w)
+        target_h = int(ref_h)
+    else:
+        limit = int(max_metric_long_edge)
+        if limit <= 0:
+            raise ValueError("max_metric_long_edge muss > 0 sein oder None.")
+
+        current_long_edge = max(ref_h, ref_w)
+        if current_long_edge > limit:
+            metric_scale = float(limit / current_long_edge)
+            target_w = max(1, int(round(ref_w * metric_scale)))
+            target_h = max(1, int(round(ref_h * metric_scale)))
+        else:
+            metric_scale = 1.0
+            target_w = int(ref_w)
+            target_h = int(ref_h)
+
+    if target_w == ref_w and target_h == ref_h:
+        ref_norm = ref_img
+    else:
+        ref_norm = np.asarray(
+            np_to_pil_uint8(ref_img).resize((target_w, target_h), resample=Image.Resampling.LANCZOS),
+            dtype=np.float32,
+        ) / 255.0
+
+    gen_scale = min(target_w / gen_w, target_h / gen_h)
+    scaled_w = max(1, int(round(gen_w * gen_scale)))
+    scaled_h = max(1, int(round(gen_h * gen_scale)))
+    offset_x = (target_w - scaled_w) // 2
+    offset_y = (target_h - scaled_h) // 2
+
+    resized_gen = np_to_pil_uint8(gen_img).resize((scaled_w, scaled_h), resample=Image.Resampling.LANCZOS)
+    canvas = Image.new("RGB", (target_w, target_h), color=pad_color)
+    canvas.paste(resized_gen, (offset_x, offset_y))
+
+    gen_norm = np.asarray(canvas, dtype=np.float32) / 255.0
+    content_mask = np.zeros((target_h, target_w), dtype=bool)
+    content_mask[offset_y : offset_y + scaled_h, offset_x : offset_x + scaled_w] = True
+
+    return ref_norm, gen_norm, content_mask, metric_scale
+
+
 def downscale_pair_for_metrics(ref_img, gen_img, content_mask=None, max_long_edge_px=1600):
     if max_long_edge_px is None:
         return ref_img, gen_img, content_mask, 1.0
@@ -1284,12 +1339,11 @@ def evaluate_pair(
     ref_h, ref_w = ref_img.shape[:2]
     gen_h, gen_w = gen_img.shape[:2]
 
-    ref_norm, gen_norm, content_mask = normalize_pair(ref_img, gen_img, mode=mode)
-    ref_norm, gen_norm, content_mask, metric_scale = downscale_pair_for_metrics(
-        ref_norm,
-        gen_norm,
-        content_mask=content_mask,
-        max_long_edge_px=max_metric_long_edge,
+    ref_norm, gen_norm, content_mask, metric_scale = normalize_pair_for_metrics(
+        ref_img,
+        gen_img,
+        mode=mode,
+        max_metric_long_edge=max_metric_long_edge,
     )
     validate_image_for_metrics(ref_norm, image_name="ref_norm")
     validate_image_for_metrics(gen_norm, image_name="gen_norm")
@@ -1603,6 +1657,12 @@ def evaluate_folders(
     print(df[[column for column in preview_columns if column in df.columns]].head())
 
 
+def parse_optional_metric_long_edge(value):
+    if isinstance(value, str) and value.strip().lower() == "none":
+        return None
+    return int(value)
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Vergleiche Referenz- und generierte Bilder mit automatischer Größen-Normalisierung.",
@@ -1644,9 +1704,9 @@ def parse_args():
     parser.add_argument("--roi-square", action="store_true", help="Erzwinge quadratische Car-ROI für stabilere Vergleiche")
     parser.add_argument(
         "--max-metric-long-edge",
-        type=int,
+        type=parse_optional_metric_long_edge,
         default=1600,
-        help="Skaliere normalisierte Bilder vor der Metrik-Berechnung auf diese maximale Kantenlänge (Performance-Schutz).",
+        help="Skaliere normalisierte Bilder vor der Metrik-Berechnung auf diese maximale Kantenlänge (Performance-Schutz); 'none' deaktiviert den Schutz.",
     )
     parser.add_argument("--eps", type=float, default=1e-8, help="Deprecated: ohne produktive Wirkung")
     parser.add_argument("--mask-score-threshold", type=float, default=0.5, help="Score-Schwelle für Vehicle-Segmentierung")

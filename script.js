@@ -1358,7 +1358,7 @@ async function parseCompareResponse(response) {
 }
 
 function getComparisonError(response, data) {
-  const defaultMessage = 'Quality-Scan fehlgeschlagen';
+  const defaultMessage = 'Analyse fehlgeschlagen';
   const serverMessage = data?.error || data?.message;
 
   if (serverMessage) {
@@ -1400,10 +1400,10 @@ function createCompletionMessage({ filename, comparisonCount, isBatch, batchPrev
     const previewHint = batchPreviewsLimited
       ? ' Lade weitere Paare über die Liste links.'
       : '';
-    return `Quality-Scan abgeschlossen. Werte ${comparisonCount} Dateipaare aus.${previewHint}${storageHint}`;
+    return `Analyse abgeschlossen. Werte ${comparisonCount} Dateipaare aus.${previewHint}${storageHint}`;
   }
 
-  return `Quality-Scan abgeschlossen für ${normalizedFilename}.${storageHint}`;
+  return `Analyse abgeschlossen für ${normalizedFilename}.${storageHint}`;
 }
 
 async function sendComparisonRequest(payload) {
@@ -1460,7 +1460,7 @@ async function sendComparisonRequest(payload) {
     }
   }
 
-  throw lastError || new Error('Quality-Scan fehlgeschlagen');
+  throw lastError || new Error('Analyse fehlgeschlagen');
 }
 
 async function runComparison() {
@@ -1474,7 +1474,7 @@ async function runComparison() {
   if (!refFile || !genFile) {
     stopCalculation();
     setStatus('idle', 'Bilder fehlen');
-    previewText.textContent = 'Wähle zuerst Referenz- und Kandidatenbild aus.';
+    previewText.textContent = 'Wähle zuerst Referenz- und Vergleichsbild aus.';
     return;
   }
 
@@ -1497,7 +1497,7 @@ async function runComparison() {
   payload.append('mask_source', maskSource.value);
 
   try {
-    logBrowser('Starte Quality-Scan', {
+    logBrowser('Starte Analyse', {
       refFile: refFile.name,
       genFile: genFile.name,
       lpipsNet: lpipsNet.value,
@@ -1527,7 +1527,7 @@ async function runComparison() {
     });
 
     setStatus('done', 'Fertig');
-    logBrowser('Zeige Quality-Scan-Ergebnis', data);
+    logBrowser('Zeige Analyse-Ergebnis', data);
   } catch (error) {
     setStatus('idle', 'Fehler');
     updateCarOnlyPreview(null);
@@ -1535,7 +1535,7 @@ async function runComparison() {
     comparisonSection.hidden = true;
     comparisonList.innerHTML = '';
     previewText.textContent = `Fehler: ${error.message}`;
-    console.error('[CompareGUI] Quality-Scan abgebrochen', error);
+    console.error('[CompareGUI] Analyse abgebrochen', error);
   } finally {
     stopCalculation();
   }
@@ -1561,7 +1561,7 @@ function resetInterface() {
     node.textContent = node.id.includes('Similarity') ? '-- %' : '--';
   });
 
-  previewText.textContent = 'Lade zwei Bilder hoch und starte den Quality-Check.';
+  previewText.textContent = 'Lade zwei Bilder hoch und starte die Analyse.';
   setStatus('idle', 'Bereit');
   stopCalculation();
 }
