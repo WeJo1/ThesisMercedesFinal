@@ -96,9 +96,13 @@ IMPORTANT_RESULT_COLUMNS = [
 
 SUMMARY_COLUMN_ORDER = [
     "filename",
+    "ssim",
     "ssim_percent",
+    "lpips",
     "lpips_similarity_percent",
+    "delta_e_ciede2000",
     "delta_e_similarity_percent",
+    "lpips_car_only",
     "lpips_car_only_similarity_percent",
     "ssim_car_only",
     "mask_iou",
@@ -367,30 +371,8 @@ def write_result_files(df, output_csv, include_car_only=True, lpips_net="alex"):
         na_rep="",
     )
 
-    full_xlsx, summary_xlsx = build_excel_output_paths(output_path)
-
-    write_excel_workbook(
-        full_xlsx,
-        df,
-        sheet_name="Alle_Ergebnisse",
-        include_car_only=include_car_only,
-        lpips_net=lpips_net,
-        summary=False,
-    )
-
-    write_excel_workbook(
-        summary_xlsx,
-        df,
-        sheet_name="Kurzfassung",
-        include_car_only=include_car_only,
-        lpips_net=lpips_net,
-        summary=True,
-    )
-
     return {
         "csv": str(output_path),
-        "xlsx": str(full_xlsx),
-        "summary_xlsx": str(summary_xlsx),
     }
 
 
@@ -1696,8 +1678,6 @@ def evaluate_folders(
 
     print("============================================================")
     print(f"[INFO] Summary-CSV gespeichert: {output_paths['csv']}")
-    print(f"[INFO] Excel-Ergebnisse gespeichert: {output_paths['xlsx']}")
-    print(f"[INFO] Excel-Kurzfassung gespeichert: {output_paths['summary_xlsx']}")
     preview_columns = [
         "filename",
         "ssim",
@@ -1894,8 +1874,6 @@ def main():
         df = build_result_dataframe([result])
         output_paths = write_result_files(df, args.output_csv, include_car_only=args.enable_car_only, lpips_net=args.lpips_net)
         print(f"[INFO] Einzelvergleich Summary-CSV gespeichert: {output_paths['csv']}")
-        print(f"[INFO] Einzelvergleich Excel-Ergebnisse gespeichert: {output_paths['xlsx']}")
-        print(f"[INFO] Einzelvergleich Excel-Kurzfassung gespeichert: {output_paths['summary_xlsx']}")
         return
 
     evaluate_folders(

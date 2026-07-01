@@ -65,7 +65,7 @@ class MetricsHandler(SimpleHTTPRequestHandler):
         run_root.mkdir(parents=True, exist_ok=True)
         return {
             "run_root": run_root,
-            "csv_path": run_root / "result.csv",
+            "csv_path": run_root / "result_summary.csv",
             "norm_dir": run_root / "normalized",
             "car_only_dir": run_root / "car_only",
             "spatial_dir": run_root / "lpips_spatial",

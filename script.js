@@ -184,9 +184,21 @@ function closeMetricInfoBoxes(exceptBox = null) {
   });
 }
 
+function parseMetricNumber(value) {
+  if (value === null || value === undefined || value === '') {
+    return Number.NaN;
+  }
+
+  if (typeof value === 'number') {
+    return value;
+  }
+
+  return Number(String(value).trim().replace(',', '.'));
+}
+
 function formatMetricPair(mainValue, percentValue) {
-  const numericMain = Number(mainValue);
-  const numericPercent = Number(percentValue);
+  const numericMain = parseMetricNumber(mainValue);
+  const numericPercent = parseMetricNumber(percentValue);
 
   if (Number.isNaN(numericMain) || Number.isNaN(numericPercent)) {
     return '--';
@@ -197,7 +209,7 @@ function formatMetricPair(mainValue, percentValue) {
 
 
 function formatNumeric(value, digits = 4, suffix = '') {
-  const numeric = Number(value);
+  const numeric = parseMetricNumber(value);
   if (Number.isNaN(numeric)) {
     return '--';
   }
@@ -210,7 +222,7 @@ function setMetric(target, value, suffix = '') {
     return;
   }
 
-  const numeric = Number(value);
+  const numeric = parseMetricNumber(value);
   if (!Number.isNaN(numeric)) {
     target.textContent = `${numeric.toFixed(4)}${suffix}`;
     return;
@@ -392,7 +404,7 @@ function updateCarOnlyPreview(data) {
 }
 
 function formatSpatialValue(value) {
-  const numeric = Number(value);
+  const numeric = parseMetricNumber(value);
   if (Number.isNaN(numeric)) {
     return '--';
   }
@@ -400,7 +412,7 @@ function formatSpatialValue(value) {
 }
 
 function formatPercent(value, digits = 2) {
-  const numeric = Number(value);
+  const numeric = parseMetricNumber(value);
   if (Number.isNaN(numeric)) {
     return '--';
   }
