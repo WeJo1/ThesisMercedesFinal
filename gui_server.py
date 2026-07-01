@@ -1,5 +1,6 @@
 import base64
 import csv
+import errno
 import io
 import json
 import os
@@ -22,6 +23,20 @@ MAX_ZIP_IMAGE_COUNT = 250
 MAX_ZIP_TOTAL_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
 MAX_ZIP_SINGLE_IMAGE_BYTES = 25 * 1024 * 1024
 RUNS_DIR = BASE_DIR / "runs"
+
+
+def is_no_space_error(exc):
+    if isinstance(exc, OSError) and exc.errno == errno.ENOSPC:
+        return True
+    message = str(exc).lower()
+    return "no space left on device" in message or "errno 28" in message
+
+
+def get_no_space_message():
+    return (
+        "Nicht genügend Speicherplatz vorhanden. "
+        "Bitte alte Analyseordner im Ordner runs löschen oder Speicherplatz freigeben."
+    )
 
 
 class MetricsHandler(SimpleHTTPRequestHandler):
@@ -122,8 +137,12 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             print("[API] Vergleich erfolgreich abgeschlossen")
             self.send_json(HTTPStatus.OK, result)
         except Exception as exc:  # noqa: BLE001
-            print(f"[API] Vergleich fehlgeschlagen: {exc}")
-            self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+            if is_no_space_error(exc):
+                message = get_no_space_message()
+            else:
+                message = str(exc)
+            print(f"[API] Vergleich fehlgeschlagen: {message}")
+            self.send_json(HTTPStatus.BAD_REQUEST, {"error": message})
 
     def parse_form_data(self):
         content_type = self.headers.get("Content-Type", "")
@@ -215,7 +234,10 @@ class MetricsHandler(SimpleHTTPRequestHandler):
 
         process = subprocess.run(command, cwd=BASE_DIR, capture_output=True, text=True)
         if process.returncode != 0:
-            raise RuntimeError(process.stderr.strip() or process.stdout.strip() or "image_metrics.py fehlgeschlagen")
+            process_output = process.stderr.strip() or process.stdout.strip()
+            if is_no_space_error(RuntimeError(process_output)):
+                raise RuntimeError(get_no_space_message())
+            raise RuntimeError(process_output or "image_metrics.py fehlgeschlagen")
 
         with run_paths["csv_path"].open("r", encoding="utf-8") as csv_file:
             rows = list(csv.DictReader(csv_file, delimiter=";"))

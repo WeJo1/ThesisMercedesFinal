@@ -315,13 +315,42 @@ def write_excel_workbook(path, df, sheet_name, include_car_only=True, lpips_net=
 
 def write_result_files(df, output_csv, include_car_only=True, lpips_net="alex"):
     output_path = Path(output_csv)
-    summary_df = prepare_export_dataframe(df, include_car_only=include_car_only, summary=True)
-
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    summary_df.to_csv(output_path, index=False, sep=";", encoding="utf-8-sig", float_format="%.6f", na_rep="")
+
+    summary_df = prepare_export_dataframe(df, include_car_only=include_car_only, summary=True)
+    summary_df.to_csv(
+        output_path,
+        index=False,
+        sep=";",
+        encoding="utf-8-sig",
+        float_format="%.6f",
+        na_rep="",
+    )
+
+    full_xlsx, summary_xlsx = build_excel_output_paths(output_path)
+
+    write_excel_workbook(
+        full_xlsx,
+        df,
+        sheet_name="Alle_Ergebnisse",
+        include_car_only=include_car_only,
+        lpips_net=lpips_net,
+        summary=False,
+    )
+
+    write_excel_workbook(
+        summary_xlsx,
+        df,
+        sheet_name="Kurzfassung",
+        include_car_only=include_car_only,
+        lpips_net=lpips_net,
+        summary=True,
+    )
 
     return {
         "csv": str(output_path),
+        "xlsx": str(full_xlsx),
+        "summary_xlsx": str(summary_xlsx),
     }
 
 
