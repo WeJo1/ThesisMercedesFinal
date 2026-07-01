@@ -1,6 +1,8 @@
 import argparse
+import errno
 import json
 import random
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -148,16 +150,16 @@ EXCEL_COLUMN_LABELS = {
     "content_mask_area_px": "Content-Maske Fläche px",
     "content_mask_area_ratio": "Content-Maske Anteil",
     "ssim": "SSIM Distanz/Rohwert",
-    "ssim_percent": "SSIM Ähnlichkeit_percent",
+    "ssim_percent": "SSIM Ähnlichkeit (%)",
     "lpips": "LPIPS Distanz",
-    "lpips_similarity_percent": "LPIPS Ähnlichkeit_percent",
+    "lpips_similarity_percent": "LPIPS Ähnlichkeit (%)",
     "lpips_map_mean": "LPIPS Spatial Mittelwert",
     "lpips_foreground": "LPIPS Vordergrund",
-    "lpips_foreground_similarity_percent": "LPIPS Vordergrund Ähnlichkeit_percent",
+    "lpips_foreground_similarity_percent": "LPIPS Vordergrund Ähnlichkeit (%)",
     "delta_e_ciede2000": "Delta E CIEDE2000",
-    "delta_e_similarity_percent": "Delta E Ähnlichkeit_percent",
+    "delta_e_similarity_percent": "Delta E Ähnlichkeit (%)",
     "lpips_car_only": "LPIPS Car-only Distanz",
-    "lpips_car_only_similarity_percent": "LPIPS Car-only Ähnlichkeit_percent",
+    "lpips_car_only_similarity_percent": "LPIPS Car-only Ähnlichkeit (%)",
     "ssim_car_only": "SSIM Car-only",
     "mask_metric_scope": "Maskenmetrik Bereich",
     "mask_iou": "Mask IoU",
@@ -233,6 +235,20 @@ def build_result_dataframe(results):
     return df
 
 
+def is_no_space_error(exc):
+    if isinstance(exc, OSError) and exc.errno == errno.ENOSPC:
+        return True
+    message = str(exc).lower()
+    return "no space left on device" in message or "errno 28" in message
+
+
+def get_no_space_message():
+    return (
+        "Nicht genügend Speicherplatz vorhanden. "
+        "Bitte alte Analyseordner im Ordner runs löschen oder Speicherplatz freigeben."
+    )
+
+
 def build_excel_output_paths(output_csv):
     output_path = Path(output_csv)
     stem = output_path.stem
@@ -281,18 +297,41 @@ def format_excel_sheet(writer, sheet_name, dataframe):
     worksheet.freeze_panes = "A2"
     worksheet.auto_filter.ref = worksheet.dimensions
 
-    from openpyxl.styles import Font, PatternFill
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
 
     header_fill = PatternFill(fill_type="solid", fgColor="D9EAF7")
     for cell in worksheet[1]:
         cell.font = Font(bold=True)
         cell.fill = header_fill
+        cell.alignment = Alignment(wrap_text=True, vertical="top")
+
+    worksheet.row_dimensions[1].height = 32
 
     for index, column_name in enumerate(dataframe.columns, start=1):
+        column_letter = get_column_letter(index)
         series = dataframe[column_name].fillna("")
         max_content_width = series.map(lambda value: len(str(value))).max() if not series.empty else 0
-        width = min(max(max_content_width, len(str(column_name))) + 2, 60)
-        worksheet.column_dimensions[worksheet.cell(row=1, column=index).column_letter].width = width
+        header_width = len(str(column_name))
+        width = max(max_content_width, header_width) + 2
+
+        if "Pfad" in str(column_name) or "path" in str(column_name).lower():
+            width = min(max(width, 35), 80)
+        else:
+            width = min(max(width, 12), 35)
+
+        worksheet.column_dimensions[column_letter].width = width
+
+        for cell in worksheet[column_letter]:
+            if cell.row == 1:
+                continue
+
+            if isinstance(cell.value, (int, float)):
+                column_label = str(column_name).lower()
+                if "percent" in column_label or "ähnlichkeit" in column_label or "(%)" in column_label:
+                    cell.number_format = "0.00"
+                else:
+                    cell.number_format = "0.0000"
 
 
 def write_excel_workbook(path, df, sheet_name, include_car_only=True, lpips_net="alex", summary=False):
@@ -323,6 +362,7 @@ def write_result_files(df, output_csv, include_car_only=True, lpips_net="alex"):
         index=False,
         sep=";",
         encoding="utf-8-sig",
+        decimal=",",
         float_format="%.6f",
         na_rep="",
     )
@@ -1892,4 +1932,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:  # noqa: BLE001
+        if is_no_space_error(exc):
+            print(get_no_space_message(), file=sys.stderr)
+            sys.exit(1)
+        raise
