@@ -388,31 +388,14 @@ def letterbox_to_canvas(img, target_w, target_h, pad_color=LETTERBOX_PAD_COLOR):
     return norm_img, content_mask, debug
 
 
-def normalize_pair(ref_img, gen_img, mode="letterbox", pad_color=LETTERBOX_PAD_COLOR):
-    if mode != "letterbox":
-        raise ValueError("mode muss 'letterbox' sein")
-
-    ref_h, ref_w = ref_img.shape[:2]
-    gen_h, gen_w = gen_img.shape[:2]
-
-    ref_norm = ref_img.copy()
-    gen_pil = np_to_pil_uint8(gen_img)
-
-    scale = min(ref_w / gen_w, ref_h / gen_h)
-    scaled_w = max(1, int(round(gen_w * scale)))
-    scaled_h = max(1, int(round(gen_h * scale)))
-
-    resized = gen_pil.resize((scaled_w, scaled_h), resample=Image.Resampling.LANCZOS)
-    canvas = Image.new("RGB", (ref_w, ref_h), color=pad_color)
-
-    offset_x = (ref_w - scaled_w) // 2
-    offset_y = (ref_h - scaled_h) // 2
-    canvas.paste(resized, (offset_x, offset_y))
-
-    gen_norm = np.asarray(canvas, dtype=np.float32) / 255.0
-
-    content_mask = np.zeros((ref_h, ref_w), dtype=bool)
-    content_mask[offset_y : offset_y + scaled_h, offset_x : offset_x + scaled_w] = True
+def normalize_pair(ref_img, gen_img, mode="letterbox", pad_color=LETTERBOX_PAD_COLOR, max_metric_long_edge=1600):
+    ref_norm, gen_norm, content_mask, _ = normalize_pair_for_metrics(
+        ref_img,
+        gen_img,
+        mode=mode,
+        pad_color=pad_color,
+        max_metric_long_edge=max_metric_long_edge,
+    )
     return ref_norm, gen_norm, content_mask
 
 
@@ -1333,6 +1316,7 @@ def evaluate_pair(
     roi_min_size_px=64,
     roi_square=True,
     max_metric_long_edge=1600,
+    car_only_enabled=False,
 ):
     ref_img = load_image(ref_path)
     gen_img = load_image(gen_path)
@@ -1398,13 +1382,14 @@ def evaluate_pair(
     )
     lpips_foreground_similarity_percent = convert_lpips_to_similarity_percent(lpips_foreground)
 
+    active_segmenter = segmenter if car_only_enabled else None
     car_metrics = compute_car_only_metrics(
         ref_norm,
         gen_norm,
         ref_path,
         gen_path,
         lpips_model,
-        segmenter,
+        active_segmenter,
         car_mode=car_mode,
         mask_source=mask_source,
         pad_px=pad_px,
@@ -1412,8 +1397,8 @@ def evaluate_pair(
         min_mask_area=min_mask_area,
         mask_downsample=mask_downsample,
         eps=eps,
-        debug_dir=debug_dir,
-        car_only_dir=car_only_dir,
+        debug_dir=debug_dir if car_only_enabled else None,
+        car_only_dir=car_only_dir if car_only_enabled else None,
         use_gpu=use_gpu,
         mask_grow_px=mask_grow_px,
         mask_min_object_area=mask_min_object_area,
@@ -1487,7 +1472,7 @@ def evaluate_pair(
         print(f"  LPIPS Spatial map  : {lpips_spatial_path}")
     print(f"  LPIPS foreground   : {lpips_foreground:.6f}")
     print(f"  LPIPS foreground % : {format_percent(lpips_foreground_similarity_percent)}")
-    if segmenter is not None:
+    if car_only_enabled and active_segmenter is not None:
         print(f"  Mask area (%)      : {car_metrics['debug']['mask_area_ratio'] * 100.0:.2f}%")
         print(f"  BBox (Metrik)      : {car_metrics['debug']['metric_bbox']}")
         print(f"  BBox (Preview Ref) : {car_metrics['debug']['ref_preview_bbox']}")
@@ -1497,8 +1482,10 @@ def evaluate_pair(
         if car_metrics.get("car_only_paths", {}).get("ref"):
             print(f"  Car-only Ref saved : {car_metrics['car_only_paths']['ref']}")
             print(f"  Car-only Gen saved : {car_metrics['car_only_paths']['gen']}")
+    elif car_only_enabled:
+        print("  Car-only           : deaktiviert (Segmentierung nicht verfügbar)")
     else:
-        print("  Car-only           : deaktiviert (nutze Full-Image-Logik)")
+        print("  Car-only           : deaktiviert")
     print(f"  Mask metric scope  : {geometric['mask_metric_scope']}")
     print(f"  Delta E (CIEDE2000): {delta_e_val:.6f}")
     print(f"  Delta E Similarity %: {percent_metrics['delta_e_similarity_percent']:.2f}%")
@@ -1628,6 +1615,7 @@ def evaluate_folders(
             roi_min_size_px=roi_min_size_px,
             roi_square=roi_square,
             max_metric_long_edge=max_metric_long_edge,
+            car_only_enabled=car_only_enabled,
         )
         results.append(result)
 
@@ -1832,6 +1820,7 @@ def main():
             roi_min_size_px=args.roi_min_size_px,
             roi_square=args.roi_square,
             max_metric_long_edge=args.max_metric_long_edge,
+            car_only_enabled=args.enable_car_only,
         )
         df = build_result_dataframe([result])
         output_paths = write_result_files(df, args.output_csv, include_car_only=args.enable_car_only, lpips_net=args.lpips_net)
