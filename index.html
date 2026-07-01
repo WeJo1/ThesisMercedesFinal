@@ -179,16 +179,6 @@
             </article>
             <article class="metric-card">
               <div class="stat-label-row">
-                <p class="stat-label">SSIM (Wert + %)</p>
-                <details class="metric-info">
-                  <summary aria-label="SSIM Erklärung anzeigen">ⓘ</summary>
-                  <p>Zeigt die strukturelle Ähnlichkeit im gültigen Bildinhalt. Letterbox-Ränder werden nicht mitbewertet.</p>
-                </details>
-              </div>
-              <p id="ssim" class="stat-value">--</p>
-            </article>
-            <article class="metric-card">
-              <div class="stat-label-row">
                 <p class="stat-label">ΔE CIEDE2000 (Wert + %)</p>
                 <details class="metric-info">
                   <summary aria-label="DeltaE Erklärung anzeigen">ⓘ</summary>
@@ -197,7 +187,7 @@
               </div>
               <p id="deltaE" class="stat-value">--</p>
             </article>
-            <article class="metric-card metric-card-priority">
+            <article id="lpipsCarCard" class="metric-card metric-card-priority" hidden>
               <div class="stat-label-row">
                 <p class="stat-label">LPIPS car-only (Wert + %)</p>
                 <details class="metric-info">

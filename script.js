@@ -37,9 +37,9 @@ const topbar = document.querySelector('.topbar');
 const contentGrid = document.querySelector('.content-grid');
 
 const lpipsValue = document.getElementById('lpips');
-const ssim = document.getElementById('ssim');
 const deltaE = document.getElementById('deltaE');
 const lpipsCar = document.getElementById('lpipsCar');
+const lpipsCarCard = document.getElementById('lpipsCarCard');
 const maskIou = document.getElementById('maskIou');
 const maskDice = document.getElementById('maskDice');
 
@@ -1257,8 +1257,8 @@ function renderMetrics(data) {
   const hasCarMaskMetrics = Boolean(data?.mask_metrics_available) && maskMetricScope === 'car_mask';
 
   lpipsValue.textContent = formatMetricPair(data.lpips, data.lpips_similarity_percent);
-  ssim.textContent = formatMetricPair(data.ssim, data.ssim_percent);
   deltaE.textContent = formatMetricPair(data.delta_e_ciede2000, data.delta_e_similarity_percent);
+  lpipsCarCard.hidden = !hasCarOnlyMetric;
   lpipsCar.textContent = hasCarOnlyMetric
     ? formatMetricPair(data.lpips_car_only, data.lpips_car_only_similarity_percent)
     : '--';
@@ -1309,7 +1309,6 @@ function renderComparisonList(comparisons) {
       }
       <ul>
         <li>LPIPS: ${formatMetricPair(item.lpips, item.lpips_similarity_percent)}</li>
-        <li>SSIM: ${formatMetricPair(item.ssim, item.ssim_percent)}</li>
         <li>ΔE CIEDE2000: ${formatMetricPair(item.delta_e_ciede2000, item.delta_e_similarity_percent)}</li>
       </ul>
     `;
@@ -1556,9 +1555,10 @@ function resetInterface() {
   comparisonSection.hidden = true;
   comparisonList.innerHTML = '';
 
-  [lpipsValue, ssim, deltaE, lpipsCar, maskIou, maskDice].forEach((node) => {
+  [lpipsValue, deltaE, lpipsCar, maskIou, maskDice].forEach((node) => {
     node.textContent = node.id.includes('Similarity') ? '-- %' : '--';
   });
+  lpipsCarCard.hidden = true;
 
   previewText.textContent = 'Lade zwei Bilder hoch und starte die Analyse.';
   setStatus('idle', 'Bereit');

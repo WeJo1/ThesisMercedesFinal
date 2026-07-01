@@ -72,9 +72,7 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             "uploads_dir": run_root / "uploads",
         }
 
-    def build_preview_payload(self, row, include_previews=True):
-        lpips_car_only = row.get("lpips_car_only")
-        has_car_only_value = lpips_car_only not in (None, "", "None", "nan")
+    def build_preview_payload(self, row, include_previews=True, car_only_enabled=False):
         payload = {
             "filename": row.get("filename"),
             "lpips": row.get("lpips"),
@@ -90,7 +88,7 @@ class MetricsHandler(SimpleHTTPRequestHandler):
             "mask_dice": row.get("mask_dice"),
             "mask_metric_scope": row.get("mask_metric_scope", "none"),
             "mask_metrics_available": row.get("mask_metric_scope") == "car_mask",
-            "car_only_enabled": has_car_only_value,
+            "car_only_enabled": bool(car_only_enabled),
             "ref_preview": None,
             "gen_preview": None,
             "car_only_ref_preview": None,
@@ -248,7 +246,11 @@ class MetricsHandler(SimpleHTTPRequestHandler):
         comparisons = []
         for index, row in enumerate(rows):
             should_include_previews = not compare_as_batch or index == 0
-            comparison_payload = self.build_preview_payload(row, include_previews=should_include_previews)
+            comparison_payload = self.build_preview_payload(
+                row,
+                include_previews=should_include_previews,
+                car_only_enabled=payload["enable_car_only"],
+            )
             comparison_payload["run_dir"] = self.to_project_path(run_paths["run_root"])
             comparisons.append(comparison_payload)
 
