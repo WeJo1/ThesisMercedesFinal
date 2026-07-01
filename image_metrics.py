@@ -148,16 +148,16 @@ EXCEL_COLUMN_LABELS = {
     "content_mask_area_px": "Content-Maske Fläche px",
     "content_mask_area_ratio": "Content-Maske Anteil",
     "ssim": "SSIM Distanz/Rohwert",
-    "ssim_percent": "SSIM Ähnlichkeit_percent",
+    "ssim_percent": "SSIM Ähnlichkeit (%)",
     "lpips": "LPIPS Distanz",
-    "lpips_similarity_percent": "LPIPS Ähnlichkeit_percent",
+    "lpips_similarity_percent": "LPIPS Ähnlichkeit (%)",
     "lpips_map_mean": "LPIPS Spatial Mittelwert",
     "lpips_foreground": "LPIPS Vordergrund",
-    "lpips_foreground_similarity_percent": "LPIPS Vordergrund Ähnlichkeit_percent",
+    "lpips_foreground_similarity_percent": "LPIPS Vordergrund Ähnlichkeit (%)",
     "delta_e_ciede2000": "Delta E CIEDE2000",
-    "delta_e_similarity_percent": "Delta E Ähnlichkeit_percent",
+    "delta_e_similarity_percent": "Delta E Ähnlichkeit (%)",
     "lpips_car_only": "LPIPS Car-only Distanz",
-    "lpips_car_only_similarity_percent": "LPIPS Car-only Ähnlichkeit_percent",
+    "lpips_car_only_similarity_percent": "LPIPS Car-only Ähnlichkeit (%)",
     "ssim_car_only": "SSIM Car-only",
     "mask_metric_scope": "Maskenmetrik Bereich",
     "mask_iou": "Mask IoU",
@@ -281,18 +281,68 @@ def format_excel_sheet(writer, sheet_name, dataframe):
     worksheet.freeze_panes = "A2"
     worksheet.auto_filter.ref = worksheet.dimensions
 
-    from openpyxl.styles import Font, PatternFill
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+    from openpyxl.worksheet.table import Table, TableStyleInfo
 
     header_fill = PatternFill(fill_type="solid", fgColor="D9EAF7")
     for cell in worksheet[1]:
         cell.font = Font(bold=True)
         cell.fill = header_fill
+        cell.alignment = Alignment(wrap_text=True, vertical="top")
+
+    worksheet.row_dimensions[1].height = 32
+
+    table = Table(displayName=f"{sheet_name}_Tabelle", ref=worksheet.dimensions)
+    table.tableStyleInfo = TableStyleInfo(
+        name="TableStyleMedium2",
+        showFirstColumn=False,
+        showLastColumn=False,
+        showRowStripes=True,
+        showColumnStripes=False,
+    )
+    worksheet.add_table(table)
 
     for index, column_name in enumerate(dataframe.columns, start=1):
+        column_letter = get_column_letter(index)
         series = dataframe[column_name].fillna("")
         max_content_width = series.map(lambda value: len(str(value))).max() if not series.empty else 0
-        width = min(max(max_content_width, len(str(column_name))) + 2, 60)
-        worksheet.column_dimensions[worksheet.cell(row=1, column=index).column_letter].width = width
+        header_width = len(str(column_name))
+        width = max(max_content_width, header_width) + 2
+        column_name_lower = str(column_name).lower()
+
+        if "Pfad" in str(column_name) or "path" in column_name_lower:
+            width = min(max(width, 35), 80)
+            number_format = "@"
+        else:
+            width = min(max(width, 12), 35)
+            if "%" in str(column_name) or "percent" in column_name_lower or "ähnlichkeit" in column_name_lower:
+                number_format = "0.00"
+            elif any(
+                marker in column_name_lower
+                for marker in (
+                    "distanz",
+                    "rohwert",
+                    "iou",
+                    "dice",
+                    "anteil",
+                    "verhältnis",
+                    "skalierungsfaktor",
+                    "mittelwert",
+                    "ssim car-only",
+                )
+            ):
+                number_format = "0.0000"
+            else:
+                number_format = None
+
+        worksheet.column_dimensions[column_letter].width = width
+
+        for cell in worksheet[column_letter]:
+            if cell.row == 1:
+                continue
+            if number_format and cell.value is not None:
+                cell.number_format = number_format
 
 
 def write_excel_workbook(path, df, sheet_name, include_car_only=True, lpips_net="alex", summary=False):
@@ -323,6 +373,7 @@ def write_result_files(df, output_csv, include_car_only=True, lpips_net="alex"):
         index=False,
         sep=";",
         encoding="utf-8-sig",
+        decimal=",",
         float_format="%.6f",
         na_rep="",
     )
