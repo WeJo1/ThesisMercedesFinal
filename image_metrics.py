@@ -109,6 +109,10 @@ SUMMARY_COLUMN_ORDER = [
     "mask_dice",
     "mask_metric_scope",
     "content_mask_area_ratio",
+    "ref_norm_path",
+    "gen_norm_path",
+    "car_only_ref_path",
+    "car_only_gen_path",
     "lpips_spatial_path",
 ]
 

@@ -237,7 +237,7 @@ class MetricsHandler(SimpleHTTPRequestHandler):
                 raise RuntimeError(get_no_space_message())
             raise RuntimeError(process_output or "image_metrics.py fehlgeschlagen")
 
-        with run_paths["csv_path"].open("r", encoding="utf-8") as csv_file:
+        with run_paths["csv_path"].open("r", encoding="utf-8-sig") as csv_file:
             rows = list(csv.DictReader(csv_file, delimiter=";"))
 
         if not rows:
