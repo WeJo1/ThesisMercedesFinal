@@ -3,8 +3,6 @@ const genImage = document.getElementById('genImage');
 const lpipsNet = document.getElementById('lpipsNet');
 const shouldGenerateSpatialMatrix = true;
 const carOnlyMode = document.getElementById('carOnlyMode');
-const carMode = document.getElementById('carMode');
-const maskSource = document.getElementById('maskSource');
 
 const runModel = document.getElementById('runModel');
 const resetForm = document.getElementById('resetForm');
@@ -18,17 +16,14 @@ const carRefPreview = document.getElementById('carRefPreview');
 const carGenPreview = document.getElementById('carGenPreview');
 const spatialSection = document.getElementById('spatialSection');
 const spatialMeta = document.getElementById('spatialMeta');
-const spatialMatrix = document.getElementById('spatialMatrix');
 const spatialSummary = document.getElementById('spatialSummary');
 const spatialHotspots = document.getElementById('spatialHotspots');
 const spatialAggregated = document.getElementById('spatialAggregated');
 const spatialLocalInspector = document.getElementById('spatialLocalInspector');
-const spatialMatrixNotice = document.getElementById('spatialMatrixNotice');
 const spatialHeatmapCanvas = document.getElementById('spatialHeatmapCanvas');
 const heatmapDetails = document.getElementById('heatmapDetails');
 const aggregatedDetails = document.getElementById('aggregatedDetails');
 const compactAnalysisDetails = document.getElementById('compactAnalysisDetails');
-const matrixDetails = document.getElementById('matrixDetails');
 const comparisonSection = document.getElementById('comparisonSection');
 const comparisonList = document.getElementById('comparisonList');
 const metricInfoBoxes = document.querySelectorAll('.metric-info');
@@ -45,7 +40,6 @@ const maskIou = document.getElementById('maskIou');
 const fallbackApiOrigins = ['http://127.0.0.1:4173', 'http://localhost:4173'];
 let isComparisonRunning = false;
 let lastSpatialPayload = null;
-const largeSpatialCellLimit = 12000;
 const spatialHotspotLimit = 10;
 const localInspectorRadius = 2;
 const heatmapScaleQuantileLow = 0.08;
@@ -58,7 +52,6 @@ const heatmapEdgeBoostStrength = 0.24;
 const heatmapEdgeBoostClamp = 0.32;
 
 const mercedesStarIconPath = 'icons/stern1.png';
-maskSource.value = 'union';
 
 function logBrowser(message, details = null) {
   if (details === null) {
@@ -82,14 +75,11 @@ function isSpatialDomReady() {
     && heatmapDetails
     && aggregatedDetails
     && compactAnalysisDetails
-    && matrixDetails
     && spatialMeta
     && spatialSummary
     && spatialHotspots
     && spatialAggregated
     && spatialLocalInspector
-    && spatialMatrixNotice
-    && spatialMatrix
     && spatialHeatmapCanvas,
   );
 }
@@ -442,7 +432,6 @@ function computeSpatialStats(flatValues) {
   const p90 = getPercentileValue(sortedValues, 0.9);
   const p95 = getPercentileValue(sortedValues, 0.95);
   const p99 = getPercentileValue(sortedValues, 0.99);
-  const median = getPercentileValue(sortedValues, 0.5);
   const aboveP95 = safeValues.filter((value) => value > p95).length;
   const aboveP99 = safeValues.filter((value) => value > p99).length;
 
@@ -451,7 +440,6 @@ function computeSpatialStats(flatValues) {
     min,
     max,
     mean,
-    median,
     p90,
     p95,
     p99,
@@ -660,7 +648,6 @@ function buildSpatialAnalysis(values, overlayMaskPayload = null, maskMode = null
     min,
     max,
     mean: stats.mean,
-    median: stats.median,
     p90: stats.p90,
     p95: stats.p95,
     p99: stats.p99,
@@ -916,45 +903,6 @@ function rerenderSpatialHeatmapFromLastPayload(reason = 'unknown') {
   return true;
 }
 
-function renderExactSpatialMatrix(analysis) {
-  const rowCount = analysis.values.length;
-  const colCount = analysis.values[0].length;
-  const highThreshold = 0.85;
-  const veryHighThreshold = 0.95;
-
-  const tableNode = document.createElement('table');
-  tableNode.className = 'spatial-table';
-  const bodyNode = document.createElement('tbody');
-
-  for (let rowIndex = 0; rowIndex < rowCount; rowIndex += 1) {
-    const rowNode = document.createElement('tr');
-    for (let colIndex = 0; colIndex < colCount; colIndex += 1) {
-      const cellNode = document.createElement('td');
-      const numericValue = Number(analysis.values[rowIndex][colIndex]);
-      const isMaskedIn = !analysis.overlayMask || Boolean(analysis.overlayMask[rowIndex]?.[colIndex]);
-      if (!isMaskedIn) {
-        cellNode.textContent = '--';
-        cellNode.classList.add('spatial-cell-masked-out');
-        rowNode.append(cellNode);
-        continue;
-      }
-      cellNode.textContent = formatSpatialValue(numericValue);
-      const normalized = normalizeHeatmapValue(numericValue, analysis.scaleLowerBound, analysis.scaleUpperBound) ** heatmapHighlightGamma;
-      if (normalized >= veryHighThreshold) {
-        cellNode.classList.add('spatial-cell-very-high');
-      } else if (normalized >= highThreshold) {
-        cellNode.classList.add('spatial-cell-high');
-      }
-      rowNode.append(cellNode);
-    }
-    bodyNode.append(rowNode);
-  }
-
-  tableNode.append(bodyNode);
-  spatialMatrix.innerHTML = '';
-  spatialMatrix.append(tableNode);
-}
-
 function renderSpatialSummary(analysis) {
   if (!spatialSummary || !analysis) {
     return;
@@ -963,7 +911,6 @@ function renderSpatialSummary(analysis) {
     ['Matrix', `${analysis.rows} × ${analysis.cols}`],
     ['Min', formatSpatialValue(analysis.min)],
     ['Max', formatSpatialValue(analysis.max)],
-    ['Median', formatSpatialValue(analysis.median)],
   ];
 
   spatialSummary.innerHTML = summaryEntries
@@ -990,7 +937,7 @@ function renderSpatialHotspots(analysis) {
   spatialHotspots.innerHTML = `<h4>Hotspots (Top ${spatialHotspotLimit})</h4>
     <div class="spatial-hotspot-table-wrap">
       <table class="spatial-hotspot-table">
-        <thead><tr><th>Rang</th><th>Row</th><th>Col</th><th>Wert</th><th>Klasse</th></tr></thead>
+        <thead><tr><th>Rang</th><th>Reihe</th><th>Spalte</th><th>Wert</th><th>Klasse</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>`;
@@ -1050,7 +997,7 @@ function renderLocalSpatialInspector(analysis, centerRow, centerCol) {
   }
 
   spatialLocalInspector.innerHTML = `<h4>Lokale Inspektion</h4>
-    <p class="spatial-meta">Zelle [row=${centerRow}, col=${centerCol}] = ${formatSpatialValue(analysis.values[centerRow][centerCol])}</p>
+    <p class="spatial-meta">Zelle [Reihe=${centerRow}, Spalte=${centerCol}] = ${formatSpatialValue(analysis.values[centerRow][centerCol])}</p>
     <table class="spatial-local-table"><tbody>${localRows.join('')}</tbody></table>`;
   spatialLocalInspector.hidden = false;
 }
@@ -1077,13 +1024,6 @@ function resetSpatialOutput() {
   spatialAggregated.innerHTML = '';
   spatialLocalInspector.innerHTML = '';
   spatialLocalInspector.hidden = true;
-  spatialMatrixNotice.textContent = 'Diese Ansicht rendert die gesamte Matrix erst bei Bedarf.';
-  spatialMatrix.innerHTML = '';
-  spatialMatrix.dataset.fullRendered = 'false';
-  spatialMatrix.dataset.spatialKey = '';
-  if (matrixDetails) {
-    matrixDetails.open = false;
-  }
   if (aggregatedDetails) {
     aggregatedDetails.open = false;
   }
@@ -1110,33 +1050,7 @@ function getSpatialCellFromCanvasEvent(analysis, event) {
   return { row, col };
 }
 
-function prepareExactMatrixPanel(analysis) {
-  if (!spatialMatrixNotice) {
-    return;
-  }
-  const isLargeMatrix = analysis.totalCells > largeSpatialCellLimit;
-  spatialMatrix.innerHTML = '';
-  spatialMatrix.dataset.fullRendered = 'false';
-  spatialMatrix.dataset.spatialKey = `${analysis.rows}x${analysis.cols}:${analysis.min}:${analysis.max}`;
-  spatialMatrixNotice.innerHTML = isLargeMatrix
-    ? `Diese Vollmatrix ist sehr groß (${analysis.totalCells} Zellen) und kann die Darstellung verlangsamen.`
-    : 'Diese Ansicht rendert die gesamte Matrix erst bei Bedarf.';
-}
-
 function attachSpatialDetailListeners() {
-  if (matrixDetails) {
-    matrixDetails.addEventListener('toggle', () => {
-      if (!matrixDetails.open || !lastSpatialPayload) {
-        return;
-      }
-      if (spatialMatrix.dataset.fullRendered === 'true') {
-        return;
-      }
-      renderExactSpatialMatrix(lastSpatialPayload);
-      spatialMatrix.dataset.fullRendered = 'true';
-    });
-  }
-
   if (spatialHeatmapCanvas) {
     spatialHeatmapCanvas.addEventListener('mousemove', (event) => {
       if (!lastSpatialPayload) {
@@ -1241,18 +1155,12 @@ function updateSpatialOutput(data) {
   renderAggregatedSpatialGrid(analysis);
   spatialLocalInspector.innerHTML = '';
   spatialLocalInspector.hidden = true;
-  prepareExactMatrixPanel(analysis);
-
   if (heatmapDetails) {
     heatmapDetails.open = true;
   }
   if (aggregatedDetails) {
     aggregatedDetails.open = false;
   }
-  if (matrixDetails) {
-    matrixDetails.open = false;
-  }
-
   requestAnimationFrame(() => {
     if (!lastSpatialPayload) {
       return;
@@ -1523,8 +1431,6 @@ async function runComparison() {
   payload.append('lpips_net', lpipsNet.value);
   payload.append('enable_heatmap', String(shouldGenerateSpatialMatrix));
   payload.append('enable_car_only', String(carOnlyMode.checked));
-  payload.append('car_mode', carMode.value);
-  payload.append('mask_source', maskSource.value);
 
   try {
     logBrowser('Starte Analyse', {
@@ -1533,8 +1439,6 @@ async function runComparison() {
       lpipsNet: lpipsNet.value,
       enableSpatialMatrix: shouldGenerateSpatialMatrix,
       enableCarOnly: carOnlyMode.checked,
-      carMode: carMode.value,
-      maskSource: maskSource.value,
     });
     const data = await sendComparisonRequest(payload);
     const comparisons = Array.isArray(data.comparisons) && data.comparisons.length > 0 ? data.comparisons : [data];
@@ -1576,9 +1480,6 @@ function resetInterface() {
   genImage.value = '';
   lpipsNet.value = 'alex';
   carOnlyMode.checked = true;
-  carMode.value = 'neutralize_crop';
-  maskSource.value = 'union';
-
   refPreview.removeAttribute('src');
   genPreview.removeAttribute('src');
   updateCarOnlyPreview(null);
