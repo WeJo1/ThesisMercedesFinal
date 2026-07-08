@@ -41,7 +41,6 @@ const deltaE = document.getElementById('deltaE');
 const lpipsCar = document.getElementById('lpipsCar');
 const lpipsCarCard = document.getElementById('lpipsCarCard');
 const maskIou = document.getElementById('maskIou');
-const maskDice = document.getElementById('maskDice');
 
 const fallbackApiOrigins = ['http://127.0.0.1:4173', 'http://localhost:4173'];
 let isComparisonRunning = false;
@@ -1276,16 +1275,12 @@ function renderMetrics(data) {
     : '--';
   if (hasCarMaskMetrics) {
     setMetric(maskIou, data.mask_iou);
-    setMetric(maskDice, data.mask_dice);
     maskIou.removeAttribute('title');
-    maskDice.removeAttribute('title');
     return;
   }
 
   maskIou.textContent = '--';
-  maskDice.textContent = '--';
   maskIou.title = 'Nur verfügbar, wenn Car-only/Fahrzeugsegmentierung erfolgreich war.';
-  maskDice.title = 'Nur verfügbar, wenn Car-only/Fahrzeugsegmentierung erfolgreich war.';
 }
 
 function renderComparisonList(comparisons) {
@@ -1567,7 +1562,7 @@ function resetInterface() {
   comparisonSection.hidden = true;
   comparisonList.innerHTML = '';
 
-  [lpipsValue, deltaE, lpipsCar, maskIou, maskDice].forEach((node) => {
+  [lpipsValue, deltaE, lpipsCar, maskIou].forEach((node) => {
     node.textContent = node.id.includes('Similarity') ? '-- %' : '--';
   });
   lpipsCarCard.hidden = true;
