@@ -48,26 +48,6 @@
             <label for="carOnlyMode">Fahrzeug-Modus aktivieren</label>
           </div>
 
-          <details>
-            <summary>Erweiterte Fahrzeug-Einstellungen</summary>
-            <div class="field-row">
-              <label for="carMode">Fahrzeug-Modus</label>
-              <select id="carMode">
-                <option value="neutralize_crop">neutralize_crop</option>
-                <option value="roi_crop">roi_crop</option>
-              </select>
-            </div>
-            <div class="field-row">
-              <label for="maskSource">Maskenquelle</label>
-              <select id="maskSource">
-                <option value="ref">ref</option>
-                <option value="gen">gen</option>
-                <option value="union" selected>union</option>
-              </select>
-            </div>
-            <p class="field-hint">Standard: <code>union</code> für weniger Richtungsabhängigkeit im Fahrzeugmodus.</p>
-          </details>
-
           <div class="actions">
             <button class="secondary-btn" id="resetForm" type="button">Zurücksetzen</button>
             <button class="primary-btn" id="runModel" type="button">Analyse starten</button>
@@ -180,7 +160,7 @@
                 <summary>Aggregierte Matrix</summary>
                 <article class="spatial-card">
                   <h3>Aggregierte Matrix</h3>
-                  <p class="spatial-panel-note">Verdichtete Übersicht in Blöcken (keine exakte Vollmatrix).</p>
+                  <p class="spatial-panel-note">Verdichtete Übersicht in Blöcken.</p>
                   <div id="spatialAggregated" class="spatial-aggregated"></div>
                 </article>
               </details>
@@ -197,14 +177,6 @@
                     <div id="spatialHotspots" class="spatial-hotspots"></div>
                   </article>
                 </div>
-              </details>
-              <details id="matrixDetails" class="spatial-panel spatial-panel-matrix">
-                <summary>Exakte Vollmatrix (potenziell langsam)</summary>
-                <article class="spatial-card">
-                  <h3>Exakte Vollmatrix</h3>
-                  <p id="spatialMatrixNotice" class="spatial-matrix-notice">Diese Ansicht rendert die gesamte Matrix erst bei Bedarf.</p>
-                  <div id="spatialMatrix" class="spatial-matrix"></div>
-                </article>
               </details>
             </div>
           </section>
