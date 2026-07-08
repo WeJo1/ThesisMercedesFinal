@@ -119,6 +119,49 @@
             </div>
           </section>
 
+          <div class="stats-grid">
+            <article class="metric-card metric-card-priority">
+              <div class="stat-label-row">
+                <p class="stat-label">LPIPS (Wert + %)</p>
+                <details class="metric-info">
+                  <summary aria-label="LPIPS Erklärung anzeigen">ⓘ</summary>
+                  <p>Zeigt die perzeptuelle Abweichung via offiziellem LPIPS-Forward auf dem vollständigen normalisierten Bildpaar.</p>
+                </details>
+              </div>
+              <p id="lpips" class="stat-value">--</p>
+            </article>
+            <article class="metric-card">
+              <div class="stat-label-row">
+                <p class="stat-label">ΔE CIEDE2000 (Wert + %)</p>
+                <details class="metric-info">
+                  <summary aria-label="DeltaE Erklärung anzeigen">ⓘ</summary>
+                  <p>Zeigt die sichtbare Farbabweichung im gültigen Bildinhalt. Gepaddete Randbereiche werden ignoriert.</p>
+                </details>
+              </div>
+              <p id="deltaE" class="stat-value">--</p>
+            </article>
+            <article id="lpipsCarCard" class="metric-card metric-card-priority" hidden>
+              <div class="stat-label-row">
+                <p class="stat-label">LPIPS car-only (Wert + %)</p>
+                <details class="metric-info">
+                  <summary aria-label="LPIPS car-only Erklärung anzeigen">ⓘ</summary>
+                  <p>Bewertet die Fahrzeug-ROI per offiziellem LPIPS-Forward auf zugeschnittenem Bildbereich. Ist der Modus aus, bleibt der Wert leer.</p>
+                </details>
+              </div>
+              <p id="lpipsCar" class="stat-value">--</p>
+            </article>
+            <article class="metric-card">
+              <div class="stat-label-row">
+                <p class="stat-label">Mask IoU</p>
+                <details class="metric-info">
+                  <summary aria-label="Mask IoU Erklärung anzeigen">ⓘ</summary>
+                  <p>Zeigt die Überdeckung der segmentierten Fahrzeugflächen zwischen Referenz- und Vergleichsbild. Nur verfügbar, wenn Car-only/Fahrzeugsegmentierung erfolgreich war.</p>
+                </details>
+              </div>
+              <p id="maskIou" class="stat-value">--</p>
+            </article>
+          </div>
+
           <section id="spatialSection" class="spatial-section" hidden>
             <p class="preview-title">LPIPS Spatial-Matrix</p>
             <div class="spatial-stack">
@@ -165,59 +208,6 @@
               </details>
             </div>
           </section>
-
-          <div class="stats-grid">
-            <article class="metric-card metric-card-priority">
-              <div class="stat-label-row">
-                <p class="stat-label">LPIPS (Wert + %)</p>
-                <details class="metric-info">
-                  <summary aria-label="LPIPS Erklärung anzeigen">ⓘ</summary>
-                  <p>Zeigt die perzeptuelle Abweichung via offiziellem LPIPS-Forward auf dem vollständigen normalisierten Bildpaar.</p>
-                </details>
-              </div>
-              <p id="lpips" class="stat-value">--</p>
-            </article>
-            <article class="metric-card">
-              <div class="stat-label-row">
-                <p class="stat-label">ΔE CIEDE2000 (Wert + %)</p>
-                <details class="metric-info">
-                  <summary aria-label="DeltaE Erklärung anzeigen">ⓘ</summary>
-                  <p>Zeigt die sichtbare Farbabweichung im gültigen Bildinhalt. Gepaddete Randbereiche werden ignoriert.</p>
-                </details>
-              </div>
-              <p id="deltaE" class="stat-value">--</p>
-            </article>
-            <article id="lpipsCarCard" class="metric-card metric-card-priority" hidden>
-              <div class="stat-label-row">
-                <p class="stat-label">LPIPS car-only (Wert + %)</p>
-                <details class="metric-info">
-                  <summary aria-label="LPIPS car-only Erklärung anzeigen">ⓘ</summary>
-                  <p>Bewertet die Fahrzeug-ROI per offiziellem LPIPS-Forward auf zugeschnittenem Bildbereich. Ist der Modus aus, bleibt der Wert leer.</p>
-                </details>
-              </div>
-              <p id="lpipsCar" class="stat-value">--</p>
-            </article>
-            <article class="metric-card">
-              <div class="stat-label-row">
-                <p class="stat-label">Mask IoU</p>
-                <details class="metric-info">
-                  <summary aria-label="Mask IoU Erklärung anzeigen">ⓘ</summary>
-                  <p>Zeigt die Überdeckung der segmentierten Fahrzeugflächen zwischen Referenz- und Vergleichsbild. Nur verfügbar, wenn Car-only/Fahrzeugsegmentierung erfolgreich war.</p>
-                </details>
-              </div>
-              <p id="maskIou" class="stat-value">--</p>
-            </article>
-            <article class="metric-card">
-              <div class="stat-label-row">
-                <p class="stat-label">Mask Dice</p>
-                <details class="metric-info">
-                  <summary aria-label="Mask Dice Erklärung anzeigen">ⓘ</summary>
-                  <p>Zeigt die Flächenübereinstimmung der segmentierten Fahrzeugmasken mit stärkerem Gewicht auf gemeinsame Bereiche. Nur verfügbar, wenn Car-only/Fahrzeugsegmentierung erfolgreich war.</p>
-                </details>
-              </div>
-              <p id="maskDice" class="stat-value">--</p>
-            </article>
-          </div>
         </section>
       </main>
     </div>
