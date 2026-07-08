@@ -65,11 +65,11 @@ class MetricsHandler(SimpleHTTPRequestHandler):
         run_root.mkdir(parents=True, exist_ok=True)
         return {
             "run_root": run_root,
-            "csv_path": run_root / "result_summary.csv",
-            "norm_dir": run_root / "normalized",
-            "car_only_dir": run_root / "car_only",
-            "spatial_dir": run_root / "lpips_spatial",
-            "uploads_dir": run_root / "uploads",
+            "csv_path": run_root / "Ergebnisse.csv",
+            "norm_dir": run_root / "Normalisiert",
+            "car_only_dir": run_root / "Fahrzeugmodus",
+            "spatial_dir": run_root / "Abweichungsmatrix",
+            "uploads_dir": run_root / "Uploads",
         }
 
     def build_preview_payload(self, row, include_previews=True, car_only_enabled=False):

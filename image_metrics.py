@@ -96,24 +96,13 @@ IMPORTANT_RESULT_COLUMNS = [
 
 SUMMARY_COLUMN_ORDER = [
     "filename",
-    "ssim",
-    "ssim_percent",
     "lpips",
     "lpips_similarity_percent",
     "delta_e_ciede2000",
     "delta_e_similarity_percent",
     "lpips_car_only",
     "lpips_car_only_similarity_percent",
-    "ssim_car_only",
     "mask_iou",
-    "mask_dice",
-    "mask_metric_scope",
-    "content_mask_area_ratio",
-    "ref_norm_path",
-    "gen_norm_path",
-    "car_only_ref_path",
-    "car_only_gen_path",
-    "lpips_spatial_path",
 ]
 
 DISTANCE_COLUMNS = {
@@ -166,9 +155,9 @@ EXCEL_COLUMN_LABELS = {
     "lpips_foreground_similarity_percent": "LPIPS Vordergrund Ähnlichkeit (%)",
     "delta_e_ciede2000": "Delta E CIEDE2000",
     "delta_e_similarity_percent": "Delta E Ähnlichkeit (%)",
-    "lpips_car_only": "LPIPS Car-only Distanz",
-    "lpips_car_only_similarity_percent": "LPIPS Car-only Ähnlichkeit (%)",
-    "ssim_car_only": "SSIM Car-only",
+    "lpips_car_only": "LPIPS Fahrzeugmodus Distanz",
+    "lpips_car_only_similarity_percent": "LPIPS Fahrzeugmodus Ähnlichkeit (%)",
+    "ssim_car_only": "SSIM Fahrzeugmodus",
     "mask_metric_scope": "Maskenmetrik Bereich",
     "mask_iou": "Mask IoU",
     "mask_dice": "Mask Dice",
@@ -177,14 +166,14 @@ EXCEL_COLUMN_LABELS = {
     "centroid_distance_norm": "Schwerpunktdistanz normiert",
     "hausdorff_px": "Hausdorff Distanz px",
     "hausdorff_norm": "Hausdorff Distanz normiert",
-    "car_mask_area_ratio": "Car-Maske Anteil",
-    "car_bbox": "Car Bounding Box",
-    "car_fallback_reason": "Car Fallback Grund",
+    "car_mask_area_ratio": "Fahrzeugmaske Anteil",
+    "car_bbox": "Fahrzeug Bounding Box",
+    "car_fallback_reason": "Fahrzeug Fallback Grund",
     "ref_norm_path": "Pfad Referenz normalisiert",
     "gen_norm_path": "Pfad Generated normalisiert",
-    "car_only_ref_path": "Pfad Car-only Referenz",
-    "car_only_gen_path": "Pfad Car-only Generated",
-    "lpips_spatial_path": "Pfad LPIPS Spatial",
+    "car_only_ref_path": "Pfad Fahrzeugmodus Referenz",
+    "car_only_gen_path": "Pfad Fahrzeugmodus Generated",
+    "lpips_spatial_path": "Pfad Abweichungsmatrix",
 }
 
 CAR_ONLY_EXPORT_COLUMNS = {
@@ -353,7 +342,7 @@ def write_excel_workbook(path, df, sheet_name, include_car_only=True, lpips_net=
         metadata = pd.DataFrame(
             [
                 {"Eigenschaft": "LPIPS CNN", "Wert": get_lpips_net_label(lpips_net)},
-                {"Eigenschaft": "Car-only Modus", "Wert": "aktiv" if include_car_only else "deaktiviert"},
+                {"Eigenschaft": "Fahrzeugmodus", "Wert": "aktiv" if include_car_only else "deaktiviert"},
             ]
         )
         metadata.to_excel(writer, sheet_name="Info", index=False)
@@ -375,9 +364,17 @@ def write_result_files(df, output_csv, include_car_only=True, lpips_net="alex"):
         na_rep="",
     )
 
-    return {
-        "csv": str(output_path),
-    }
+    full_xlsx, _summary_xlsx = build_excel_output_paths(output_path)
+    output_paths = {"csv": str(output_path)}
+    try:
+        write_excel_workbook(full_xlsx, df, "Ergebnisse", include_car_only=include_car_only, lpips_net=lpips_net, summary=True)
+        output_paths["xlsx"] = str(full_xlsx)
+    except ModuleNotFoundError as exc:
+        if exc.name != "openpyxl":
+            raise
+        print("[WARN] Excel-Ausgabe übersprungen: Installiere openpyxl für formatierte Ergebnistabellen.")
+
+    return output_paths
 
 
 def load_image(path):
@@ -1051,7 +1048,7 @@ def compute_car_only_metrics(
             "metric_bbox": None,
             "ref_preview_bbox": None,
             "gen_preview_bbox": None,
-            "fallback_reason": "Car-only deaktiviert",
+            "fallback_reason": "Fahrzeugmodus deaktiviert",
         }
         return {
             "lpips_car_only": None,
@@ -1349,7 +1346,7 @@ def evaluate_pair(
     gen_path,
     lpips_model,
     mode="letterbox",
-    out_dir="normalized",
+    out_dir="Normalisiert",
     use_gpu=False,
     segmenter=None,
     car_mode="neutralize_crop",
@@ -1532,15 +1529,15 @@ def evaluate_pair(
         print(f"  BBox (Metrik)      : {car_metrics['debug']['metric_bbox']}")
         print(f"  BBox (Preview Ref) : {car_metrics['debug']['ref_preview_bbox']}")
         print(f"  BBox (Preview Gen) : {car_metrics['debug']['gen_preview_bbox']}")
-        print(f"  LPIPS car-only     : {car_metrics['lpips_car_only']}")
-        print(f"  LPIPS car-only (%) : {format_percent(lpips_car_only_similarity_percent)}")
+        print(f"  LPIPS Fahrzeugmodus     : {car_metrics['lpips_car_only']}")
+        print(f"  LPIPS Fahrzeugmodus (%) : {format_percent(lpips_car_only_similarity_percent)}")
         if car_metrics.get("car_only_paths", {}).get("ref"):
-            print(f"  Car-only Ref saved : {car_metrics['car_only_paths']['ref']}")
-            print(f"  Car-only Gen saved : {car_metrics['car_only_paths']['gen']}")
+            print(f"  Fahrzeugmodus Ref saved : {car_metrics['car_only_paths']['ref']}")
+            print(f"  Fahrzeugmodus Gen saved : {car_metrics['car_only_paths']['gen']}")
     elif car_only_enabled:
-        print("  Car-only           : deaktiviert (Segmentierung nicht verfügbar)")
+        print("  Fahrzeugmodus           : deaktiviert (Segmentierung nicht verfügbar)")
     else:
-        print("  Car-only           : deaktiviert")
+        print("  Fahrzeugmodus           : deaktiviert")
     print(f"  Mask metric scope  : {geometric['mask_metric_scope']}")
     print(f"  Delta E (CIEDE2000): {delta_e_val:.6f}")
     print(f"  Delta E Similarity %: {percent_metrics['delta_e_similarity_percent']:.2f}%")
@@ -1594,7 +1591,7 @@ def evaluate_folders(
     output_csv,
     lpips_model,
     mode="letterbox",
-    out_dir="normalized",
+    out_dir="Normalisiert",
     use_gpu=False,
     segmenter=None,
     car_mode="neutralize_crop",
@@ -1719,21 +1716,21 @@ def parse_args():
         default="letterbox",
         help="Normalisierungsmodus",
     )
-    parser.add_argument("--out", default="normalized", help="Output-Ordner für normalisierte Bilder")
-    parser.add_argument("--output-csv", default="image_metrics_results.csv", help="CSV-Datei für Metrikergebnisse")
+    parser.add_argument("--out", default="Normalisiert", help="Output-Ordner für normalisierte Bilder")
+    parser.add_argument("--output-csv", default="Ergebnisse.csv", help="CSV-Datei für Metrikergebnisse")
     parser.add_argument("--lpips-net", default="alex", choices=["alex", "vgg", "squeeze"], help="Backbone für LPIPS; alex ist empfohlen")
-    parser.add_argument("--lpips-heatmap-dir", default="lpips_heatmaps", help="Ausgabeordner für LPIPS-Heatmaps (setze 'none' zum Deaktivieren)")
+    parser.add_argument("--lpips-heatmap-dir", default="Abweichungsmatrix", help="Ausgabeordner für LPIPS-Heatmaps (setze 'none' zum Deaktivieren)")
     parser.add_argument("--use-gpu", action="store_true", help="Nutze CUDA, falls verfügbar")
     parser.add_argument("--seed", type=int, default=None, help="Setze optionalen Zufalls-Seed für reproduzierbare Läufe")
     parser.add_argument("--deterministic", action="store_true", help="Aktiviere deterministische Backends (langsamer, aber reproduzierbarer)")
-    parser.add_argument("--enable-car-only", action="store_true", help="Aktiviere Car-only Metriken (LPIPS/SSIM); ist standardmäßig aktiv")
+    parser.add_argument("--enable-car-only", action="store_true", help="Aktiviere Fahrzeugmodus Metriken (LPIPS/SSIM); ist standardmäßig aktiv")
     parser.add_argument("--car-only", action="store_true", help="Kurzform für --enable-car-only")
-    parser.add_argument("--disable-car-only", "--no-car-only", action="store_true", help="Deaktiviere Car-only Metriken und blende Car-only Ergebniswerte aus")
+    parser.add_argument("--disable-car-only", "--no-car-only", action="store_true", help="Deaktiviere Fahrzeugmodus Metriken und blende Fahrzeugmodus Ergebniswerte aus")
     parser.add_argument(
         "--car-mode",
         default="neutralize_crop",
         choices=["neutralize_crop", "roi_crop", "weighted_lpips"],
-        help="Auto-fokussierte Car-only-Berechnung (weighted_lpips ist deprecated und wird auf neutralize_crop umgebogen)",
+        help="Auto-fokussierte Fahrzeugmodus-Berechnung (weighted_lpips ist deprecated und wird auf neutralize_crop umgebogen)",
     )
     parser.add_argument("--mask-source", default="union", choices=["ref", "gen", "union"], help="Quelle für die Auto-Maske")
     parser.add_argument("--pad-px", type=int, default=20, help="Padding für Car-Crop-BBox")
@@ -1756,7 +1753,7 @@ def parse_args():
     parser.add_argument("--mask-score-threshold", type=float, default=0.5, help="Score-Schwelle für Vehicle-Segmentierung")
     parser.add_argument("--mask-threshold", type=float, default=0.5, help="Pixel-Schwelle der Segmentierungsmaske [0..1]")
     parser.add_argument("--debug-dir", default=None, help="Optionales Debug-Verzeichnis für Masken/Crops")
-    parser.add_argument("--car-only-dir", default="car_only", help="Verzeichnis für gespeicherte Car-only-Crops")
+    parser.add_argument("--car-only-dir", default="Fahrzeugmodus", help="Verzeichnis für gespeicherte Fahrzeugmodus-Crops")
     parser.add_argument(
         "--skip-hausdorff",
         action="store_true",
@@ -1818,7 +1815,7 @@ def main():
     print(f"[INFO] ROI min-size px : {args.roi_min_size_px}")
     print(f"[INFO] ROI square      : {args.roi_square}")
     print(f"[INFO] Max metric edge : {args.max_metric_long_edge}")
-    print(f"[INFO] Car-only aktiv  : {args.enable_car_only}")
+    print(f"[INFO] Fahrzeugmodus aktiv  : {args.enable_car_only}")
     print("============================================================")
     run_lpips_pipeline_sanity_checks()
     print("[INFO] Sanity-Check     : LPIPS-Pipeline geprüft")
@@ -1829,7 +1826,7 @@ def main():
     needs_car_segmenter = args.enable_car_only or (args.lpips_heatmap_dir is not None)
     if needs_car_segmenter:
         if args.enable_car_only:
-            print("[INFO] Car-only wird aktiviert. Einfacher Aufruf: python image_metrics.py --car-only")
+            print("[INFO] Fahrzeugmodus wird aktiviert. Einfacher Aufruf: python image_metrics.py --car-only")
         try:
             segmenter = build_vehicle_segmenter(
                 use_gpu=args.use_gpu,
@@ -1839,7 +1836,7 @@ def main():
         except Exception as exc:  # noqa: BLE001
             print(f"[WARN] Fahrzeugsegmentierung nicht verfügbar: {exc}")
             if args.enable_car_only:
-                print("[WARN] Car-only wurde deaktiviert, Heatmaps laufen global ohne Fahrzeugkontur weiter.")
+                print("[WARN] Fahrzeugmodus wurde deaktiviert, Heatmaps laufen global ohne Fahrzeugkontur weiter.")
                 args.enable_car_only = False
 
     if args.ref or args.gen:

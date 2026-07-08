@@ -142,9 +142,9 @@
             </article>
             <article id="lpipsCarCard" class="metric-card metric-card-priority" hidden>
               <div class="stat-label-row">
-                <p class="stat-label">LPIPS car-only (Wert + %)</p>
+                <p class="stat-label">LPIPS Fahrzeugmodus (Wert + %)</p>
                 <details class="metric-info">
-                  <summary aria-label="LPIPS car-only Erklärung anzeigen">ⓘ</summary>
+                  <summary aria-label="LPIPS Fahrzeugmodus Erklärung anzeigen">ⓘ</summary>
                   <p>Bewertet die Fahrzeug-ROI per offiziellem LPIPS-Forward auf zugeschnittenem Bildbereich. Ist der Modus aus, bleibt der Wert leer.</p>
                 </details>
               </div>
@@ -155,7 +155,7 @@
                 <p class="stat-label">Mask IoU</p>
                 <details class="metric-info">
                   <summary aria-label="Mask IoU Erklärung anzeigen">ⓘ</summary>
-                  <p>Zeigt die Überdeckung der segmentierten Fahrzeugflächen zwischen Referenz- und Vergleichsbild. Nur verfügbar, wenn Car-only/Fahrzeugsegmentierung erfolgreich war.</p>
+                  <p>Zeigt die Überdeckung der segmentierten Fahrzeugflächen zwischen Referenz- und Vergleichsbild. Nur verfügbar, wenn Fahrzeugsegmentierung erfolgreich war.</p>
                 </details>
               </div>
               <p id="maskIou" class="stat-value">--</p>
@@ -163,7 +163,7 @@
           </div>
 
           <section id="spatialSection" class="spatial-section" hidden>
-            <p class="preview-title">LPIPS Spatial-Matrix</p>
+            <p class="preview-title">Abweichungsmatrix</p>
             <div class="spatial-stack">
               <details id="heatmapDetails" class="spatial-panel spatial-panel-heatmap">
                 <summary>Heatmap anzeigen</summary>

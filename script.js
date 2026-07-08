@@ -1227,7 +1227,7 @@ function updateSpatialOutput(data) {
   spatialSection.hidden = false;
   let focusLabel = 'Global';
   if (analysis.maskMode === 'car_focus') {
-    focusLabel = 'Car-Fokus aktiv';
+    focusLabel = 'Fahrzeug-Fokus aktiv';
   } else if (analysis.overlayMask) {
     focusLabel = 'Overlay-Fokus aktiv';
   } else if (analysis.outlineMask && analysis.outlineMode === 'car_outline') {
@@ -1280,7 +1280,7 @@ function renderMetrics(data) {
   }
 
   maskIou.textContent = '--';
-  maskIou.title = 'Nur verfügbar, wenn Car-only/Fahrzeugsegmentierung erfolgreich war.';
+  maskIou.title = 'Nur verfügbar, wenn Fahrzeugsegmentierung erfolgreich war.';
 }
 
 function renderComparisonList(comparisons) {
@@ -1314,10 +1314,34 @@ function renderComparisonList(comparisons) {
       </div>`
           : '<p class="comparison-note">Für dieses Paar ist keine Vorschau verfügbar.</p>'
       }
-      <ul>
-        <li>LPIPS: ${formatMetricPair(item.lpips, item.lpips_similarity_percent)}</li>
-        <li>ΔE CIEDE2000: ${formatMetricPair(item.delta_e_ciede2000, item.delta_e_similarity_percent)}</li>
-      </ul>
+      <table class="comparison-metric-table">
+        <tbody>
+          <tr>
+            <th scope="row">LPIPS</th>
+            <td>${formatMetricPair(item.lpips, item.lpips_similarity_percent)}</td>
+          </tr>
+          <tr>
+            <th scope="row">ΔE CIEDE2000</th>
+            <td>${formatMetricPair(item.delta_e_ciede2000, item.delta_e_similarity_percent)}</td>
+          </tr>
+          ${
+            item.car_only_enabled
+              ? `<tr>
+            <th scope="row">LPIPS Fahrzeugmodus</th>
+            <td>${formatMetricPair(item.lpips_car_only, item.lpips_car_only_similarity_percent)}</td>
+          </tr>`
+              : ''
+          }
+          ${
+            item.mask_metrics_available
+              ? `<tr>
+            <th scope="row">Mask IoU</th>
+            <td>${formatNumeric(item.mask_iou, 4)}</td>
+          </tr>`
+              : ''
+          }
+        </tbody>
+      </table>
     `;
     detailsNode.append(contentNode);
 

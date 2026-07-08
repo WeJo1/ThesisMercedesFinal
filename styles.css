@@ -985,3 +985,37 @@ button {
     grid-template-columns: 1fr;
   }
 }
+
+
+.comparison-metric-table {
+  width: 100%;
+  margin-top: 0.65rem;
+  border-collapse: collapse;
+  overflow: hidden;
+  border: 1px solid rgba(170, 193, 220, 0.3);
+  border-radius: 0.55rem;
+  background: rgba(8, 15, 24, 0.72);
+}
+
+.comparison-metric-table th,
+.comparison-metric-table td {
+  padding: 0.55rem 0.65rem;
+  border-bottom: 1px solid rgba(170, 193, 220, 0.22);
+  text-align: left;
+}
+
+.comparison-metric-table tr:last-child th,
+.comparison-metric-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.comparison-metric-table th {
+  width: 48%;
+  color: #dbeaff;
+  font-weight: 700;
+}
+
+.comparison-metric-table td {
+  color: var(--metric-value);
+  font-variant-numeric: tabular-nums;
+}
