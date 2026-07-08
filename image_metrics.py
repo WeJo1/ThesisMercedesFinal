@@ -91,6 +91,10 @@ IMPORTANT_RESULT_COLUMNS = [
     "mask_dice",
     "mask_metric_scope",
     "content_mask_area_ratio",
+    "ref_norm_path",
+    "gen_norm_path",
+    "car_only_ref_path",
+    "car_only_gen_path",
     "lpips_spatial_path",
 ]
 
@@ -103,6 +107,11 @@ SUMMARY_COLUMN_ORDER = [
     "lpips_car_only",
     "lpips_car_only_similarity_percent",
     "mask_iou",
+    "ref_norm_path",
+    "gen_norm_path",
+    "car_only_ref_path",
+    "car_only_gen_path",
+    "lpips_spatial_path",
 ]
 
 DISTANCE_COLUMNS = {
