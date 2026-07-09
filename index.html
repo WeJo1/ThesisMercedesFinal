@@ -105,7 +105,7 @@
                 <p class="stat-label">LPIPS (Wert + %)</p>
                 <details class="metric-info">
                   <summary aria-label="LPIPS Erklärung anzeigen">ⓘ</summary>
-                  <p>Zeigt die perzeptuelle Abweichung via offiziellem LPIPS-Forward auf dem vollständigen normalisierten Bildpaar.</p>
+                  <p>Vergleicht, ob die Bilder für das Auge ähnlich wirken. Kleiner Wert und hoher Prozentwert bedeuten: Die Bilder sehen sich ähnlicher.</p>
                 </details>
               </div>
               <p id="lpips" class="stat-value">--</p>
@@ -115,7 +115,7 @@
                 <p class="stat-label">ΔE CIEDE2000 (Wert + %)</p>
                 <details class="metric-info">
                   <summary aria-label="DeltaE Erklärung anzeigen">ⓘ</summary>
-                  <p>Zeigt die sichtbare Farbabweichung im gültigen Bildinhalt. Gepaddete Randbereiche werden ignoriert.</p>
+                  <p>Zeigt, wie stark sich die Farben unterscheiden. Kleiner Wert und hoher Prozentwert bedeuten: Die Farben passen besser zusammen.</p>
                 </details>
               </div>
               <p id="deltaE" class="stat-value">--</p>
@@ -125,7 +125,7 @@
                 <p class="stat-label">LPIPS Fahrzeugmodus (Wert + %)</p>
                 <details class="metric-info">
                   <summary aria-label="LPIPS Fahrzeugmodus Erklärung anzeigen">ⓘ</summary>
-                  <p>Bewertet die Fahrzeug-ROI per offiziellem LPIPS-Forward auf zugeschnittenem Bildbereich. Ist der Modus aus, bleibt der Wert leer.</p>
+                  <p>Vergleicht nur den Fahrzeugbereich. Kleiner Wert und hoher Prozentwert bedeuten: Das Fahrzeug sieht im Vergleichsbild ähnlicher aus.</p>
                 </details>
               </div>
               <p id="lpipsCar" class="stat-value">--</p>
@@ -135,7 +135,7 @@
                 <p class="stat-label">Mask IoU</p>
                 <details class="metric-info">
                   <summary aria-label="Mask IoU Erklärung anzeigen">ⓘ</summary>
-                  <p>Zeigt die Überdeckung der segmentierten Fahrzeugflächen zwischen Referenz- und Vergleichsbild. Nur verfügbar, wenn Fahrzeugsegmentierung erfolgreich war.</p>
+                  <p>Zeigt, wie gut sich die erkannten Fahrzeugflächen decken. 1,0 ist eine sehr gute Überlappung, 0,0 bedeutet keine Überlappung.</p>
                 </details>
               </div>
               <p id="maskIou" class="stat-value">--</p>
