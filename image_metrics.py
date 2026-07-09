@@ -107,6 +107,7 @@ SUMMARY_COLUMN_ORDER = [
     "lpips_car_only",
     "lpips_car_only_similarity_percent",
     "mask_iou",
+    "mask_metric_scope",
     "ref_norm_path",
     "gen_norm_path",
     "car_only_ref_path",
