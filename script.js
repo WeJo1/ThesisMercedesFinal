@@ -926,9 +926,6 @@ function renderSpatialSummary(analysis) {
     ['Matrix', `${analysis.rows} × ${analysis.cols}`],
     ['Min', formatSpatialValue(analysis.min)],
     ['Max', formatSpatialValue(analysis.max)],
-    ['Mean', formatSpatialValue(analysis.mean)],
-    ['Median', formatSpatialValue(analysis.median)],
-    ['P95', formatSpatialValue(analysis.p95)],
   ];
 
   spatialSummary.innerHTML = summaryEntries
