@@ -429,6 +429,7 @@ function computeSpatialStats(flatValues) {
   const min = sortedValues[0];
   const max = sortedValues[count - 1];
   const mean = sum / count;
+  const median = getPercentileValue(sortedValues, 0.5);
   const p90 = getPercentileValue(sortedValues, 0.9);
   const p95 = getPercentileValue(sortedValues, 0.95);
   const p99 = getPercentileValue(sortedValues, 0.99);
@@ -440,6 +441,7 @@ function computeSpatialStats(flatValues) {
     min,
     max,
     mean,
+    median,
     p90,
     p95,
     p99,
@@ -585,9 +587,17 @@ function buildSpatialAnalysis(values, overlayMaskPayload = null, maskMode = null
   const overlayMask = sanitizeOverlayMask(overlayMaskPayload, rows, cols);
   const outlineMask = sanitizeOverlayMask(outlineMaskPayload, rows, cols);
   const maskedValues = flattenValuesByMask(normalizedValues, overlayMask);
-  const valuesForScaling = maskedValues.length > 0 ? maskedValues : flatValues;
 
-  const stats = computeSpatialStats(flatValues);
+  // Werte nur dann auf die Fahrzeugmaske einschränken, wenn der Backend-Modus
+  // eindeutig eine Fahrzeugmaske liefert und diese mindestens eine gültige Zelle enthält.
+  const hasValidCarMask = maskMode === 'car_focus' && Boolean(overlayMask) && maskedValues.length > 0;
+  const activeOverlayMask = hasValidCarMask ? overlayMask : null;
+  // Gemeinsamer Auswertungsbereich für alle Statistiken, die Meta-Zeile und Hotspots.
+  // Ist die Fahrzeugmaske leer/ungültig oder der Fahrzeugmodus aus, greife robust auf alle Zellen zurück.
+  const statsValues = hasValidCarMask ? maskedValues : flatValues;
+  const valuesForScaling = statsValues;
+
+  const stats = computeSpatialStats(statsValues);
   const scalingStats = computeSpatialStats(valuesForScaling);
   if (!stats) {
     return null;
@@ -631,23 +641,26 @@ function buildSpatialAnalysis(values, overlayMaskPayload = null, maskMode = null
     scaleLowerBound = center - minimumSpread / 2;
     scaleUpperBound = center + minimumSpread / 2;
   }
-  const hotspotEntries = computeHotspots(normalizedValues, spatialHotspotLimit, max, overlayMask);
-  const aggregatedGrid = buildAggregatedSpatialGrid(normalizedValues, 12, 12, 'mean', overlayMask);
-  const overlayMaskCoverage = overlayMask
+  // Hotspot-Auswahl und Klassifizierung nutzen denselben Bereich und dasselbe Maximum wie die Statistik.
+  const hotspotEntries = computeHotspots(normalizedValues, spatialHotspotLimit, max, activeOverlayMask);
+  // Die kompakte Matrix bleibt im Fahrzeugmodus auf die gültigen Fahrzeugzellen beschränkt.
+  const aggregatedGrid = buildAggregatedSpatialGrid(normalizedValues, 12, 12, 'mean', activeOverlayMask);
+  const overlayMaskCoverage = activeOverlayMask
     ? (maskedValues.length / Math.max(rows * cols, 1)) * 100
     : null;
 
   return {
     values: normalizedValues,
-    overlayMask,
+    overlayMask: activeOverlayMask,
     outlineMask,
-    maskMode: overlayMask ? (maskMode || 'overlay') : null,
+    maskMode: activeOverlayMask ? 'car_focus' : null,
     outlineMode: outlineMask && outlineMode === 'car_outline' ? 'car_outline' : null,
     rows,
     cols,
     min,
     max,
     mean: stats.mean,
+    median: stats.median,
     p90: stats.p90,
     p95: stats.p95,
     p99: stats.p99,
@@ -664,6 +677,8 @@ function buildSpatialAnalysis(values, overlayMaskPayload = null, maskMode = null
     scaleUpperBound,
     range: stats.range,
     flatValues,
+    maskedValues,
+    statsValues,
     hotspotEntries,
     aggregatedGrid,
     scaleValueCount: valuesForScaling.length,
@@ -911,6 +926,9 @@ function renderSpatialSummary(analysis) {
     ['Matrix', `${analysis.rows} × ${analysis.cols}`],
     ['Min', formatSpatialValue(analysis.min)],
     ['Max', formatSpatialValue(analysis.max)],
+    ['Mean', formatSpatialValue(analysis.mean)],
+    ['Median', formatSpatialValue(analysis.median)],
+    ['P95', formatSpatialValue(analysis.p95)],
   ];
 
   spatialSummary.innerHTML = summaryEntries
